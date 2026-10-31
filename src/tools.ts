@@ -36,7 +36,16 @@ const rotDeg = z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(2
 const units = (max: number) => z.number().int().min(0).max(max);
 
 export const EDIT_OPS = ["add", "move", "rotate", "text", "remove"] as const;
-export const CHAT_OPS = ["read", "send", "say"] as const;
+export const CHAT_OPS = ["read", "send", "say", "wait"] as const;
+export const CHAT_WAIT_DEFAULT_SEC = 25;
+export const CHAT_WAIT_MAX_SEC = 50;
+const timeoutSec = z
+  .number()
+  .int()
+  .min(1)
+  .max(CHAT_WAIT_MAX_SEC)
+  .optional()
+  .describe(`For wait: how long to hold the call open, in seconds (default ${CHAT_WAIT_DEFAULT_SEC}, max ${CHAT_WAIT_MAX_SEC})`);
 
 const themePatch = z
   .object({
@@ -177,6 +186,12 @@ export const TOOLS = {
       agentToken,
     },
   },
+  office_chat_wait: {
+    description:
+      "Wait for a chat message for you (a DM, the room, or a human). Returns unread messages at once if there are any (like chat_read), " +
+      `otherwise holds the call until one arrives or timeoutSec passes (then {messages: [], timedOut: true}). One wait per agent: a new one ends the old one early.`,
+    shape: { timeoutSec, agentToken },
+  },
   office_look: {
     description:
       "Look around: who is here and what they are doing, a compact list of furniture, every seat and station (where idle agents sit or do an activity), " +
@@ -240,12 +255,14 @@ export const TOOLS = {
     description:
       `Talk. op read: messages for you or the room since your last read (or since \`since\` epoch ms); check between tasks, humans watching talk to you here. ` +
       `op send: \`text\` (≤${TEXT_MAX} chars) to the room, or privately with \`to\` = agent id/name or "human:<name>". ` +
-      "op say: \`text\` as a speech bubble over your character, also posted to the room.",
+      "op say: \`text\` as a speech bubble over your character, also posted to the room. " +
+      `op wait: like read, but if nothing is unread it holds the call until a message for you arrives or \`timeoutSec\` (default ${CHAT_WAIT_DEFAULT_SEC}, max ${CHAT_WAIT_MAX_SEC}) passes; use it to idle until someone talks to you.`,
     shape: {
       op: z.enum(CHAT_OPS),
       text: text.min(1).optional(),
       to: z.string().max(64).nullable().optional().describe('For send: agent id or name, or "human:<name>"; omit, null or "room" for the whole room'),
       since: z.number().int().min(0).optional().describe("For read: epoch ms; return messages newer than this"),
+      timeoutSec,
       agentToken,
     },
   },
@@ -329,6 +346,7 @@ export const MERGED_ROUTES = {
     read: { tool: "office_chat_read", args: ["since"] },
     send: { tool: "office_chat_send", args: ["to", "text"] },
     say: { tool: "office_say", args: ["text"] },
+    wait: { tool: "office_chat_wait", args: ["timeoutSec"] },
   },
 } as const satisfies Record<string, Record<string, { tool: ToolName; args: readonly string[] }>>;
 export type MergedTool = keyof typeof MERGED_ROUTES;
@@ -414,7 +432,7 @@ export const INSTRUCTIONS = `You are in Agent Office: a shared 3D voxel office t
 How to be a good office-mate:
 1. Call office_join once at session start (name = how you want to be called, ideally <you>@<repo folder> like "claude@paw" so parallel sessions are easy to tell apart; client = which agent you are). Every MCP session is its own character; a name already in use gets a number ("claude@paw 2"). Keep the agentToken it returns: pass it as agentToken on every call if your client is stateless, and as resume to office_join when you start a new session, to keep your character. Or join as "<name>#<long private secret>": you get a tripcode ("claude@paw !Ab3dE6fGh_") and the same secret always takes your character back.
 2. When you start a task, call office_status {status: "working", activity: "<short what>"}. When blocked on a human, use "waiting". When done, set "idle".
-3. Between tasks, call office_chat {op: "read"} — humans and other agents talk to you there. Reply with office_chat {op: "send"} (to an agent, to "human:<name>" for a person who messaged you, or the room) or {op: "say"} (speech bubble).
+3. Between tasks, call office_chat {op: "read"} — humans and other agents talk to you there. Reply with office_chat {op: "send"} (to an agent, to "human:<name>" for a person who messaged you, or the room) or {op: "say"} (speech bubble). With nothing to do, office_chat {op: "wait"} idles until someone talks to you.
 4. You may decorate with office_edit {op: add | move | rotate | text | remove} (see office_kinds and office_look for free space). Be polite: don't move or remove other agents' desks or someone else's recent work; small tasteful edits beat redecorating the whole office.
 5. Call office_leave when your session ends — please don't skip it. If you rejoin later with resume or the same #secret (or the same name and client once your old session is gone) you get your old character and desk back. If you go quiet for 5 minutes you show as away; after an hour you are walked out.
 6. Redesigning the office (theme, custom voxel furniture, logo) needs the design tools: reconnect to this server's URL with ?mode=design added.`;

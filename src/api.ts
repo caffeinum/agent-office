@@ -7,7 +7,7 @@ import { ASSET_BYTES_MAX } from "./images";
 import type { CallCtx, ToolHost } from "./office";
 
 export const ADMIN_KEY_MIN = 24;
-const GET_TOOLS = new Set<ToolName>(["office_look", "office_kinds", "office_chat_read", "office_theme_get"]);
+const GET_TOOLS = new Set<ToolName>(["office_look", "office_kinds", "office_chat_read", "office_chat_wait", "office_theme_get"]);
 const BIG_TOOLS = new Set<ToolName>(["office_upload", "office_define_kind"]);
 const SHORT_NAMES = TOOL_NAMES.map((n) => n.slice("office_".length)).join(", ");
 
@@ -23,6 +23,8 @@ export async function handleRest(req: Request, host: ToolHost, ctx: CallCtx, raw
     if (since !== null) args.since = Number(since);
     const kind = q.get("kind");
     if (kind !== null) args.kind = kind;
+    const timeoutSec = q.get("timeoutSec");
+    if (timeoutSec !== null) args.timeoutSec = Number(timeoutSec);
   } else if (req.method === "POST") {
     const type = (req.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
     if (name === "office_upload" && type !== "application/json") {

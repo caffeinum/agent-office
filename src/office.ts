@@ -10,7 +10,7 @@ import {
   DEFAULT_INVITE, newOfficeKey, normalizeKeyHashes, randomSecret, roleOfKey, sha256hex, keyFromRequest, tripcode, WS_PROTOCOL, type Invite, type KeyHashes, type Role,
 } from "./auth";
 import { CORS_HEADERS, errorResponse, HttpError, json, readJson } from "./http";
-import { isMergedTool, MERGED_ROUTES, NAME_MAX, SPOOF_LINE_RE, parseArgs, parseOwnerFrame, ToolError, type MergedTool, type Status, type ToolArgs, type ToolName, ACTIVITY_MAX } from "./tools";
+import { CHAT_WAIT_DEFAULT_SEC, isMergedTool, MERGED_ROUTES, NAME_MAX, SPOOF_LINE_RE, parseArgs, parseOwnerFrame, ToolError, type MergedTool, type Status, type ToolArgs, type ToolName, ACTIVITY_MAX } from "./tools";
 import { handleMcp } from "./mcp";
 import { handleRest } from "./api";
 import { registryStub } from "./registry";
@@ -179,6 +179,9 @@ type Frame =
 /** Tools a human with the ownerKey may call without joining (acting as "human:owner"). */
 const OWNER_TOOLS = new Set<ToolName>(["office_theme_get", "office_theme_set", "office_define_kind", "office_delete_kind", "office_upload", "office_set_logo", "office_delete_asset"]);
 
+/** Why a pending office_chat wait ended. */
+type WakeReason = "message" | "timeout" | "replaced" | "gone";
+
 interface WsAttachment {
   role: Role;
   sid: string;
@@ -213,6 +216,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
   private hits = new Map<string, number[]>();
   private wsWarned = new Map<string, number>();
   private mcpSessions = new Map<string, number>();
+  /** One pending office_chat wait per agent id. */
+  private waiters = new Map<string, (why: WakeReason) => void>();
   private alarmAt: number | null = null;
   private theme: Theme = validateTheme(DEFAULT_THEME);
   private customKinds: Record<string, CustomKind> = {};
@@ -508,6 +513,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.hits.clear();
     this.wsWarned.clear();
     this.mcpSessions.clear();
+    for (const wake of [...this.waiters.values()]) wake("gone");
     this.alarmAt = null;
     this.theme = validateTheme(DEFAULT_THEME);
     this.customKinds = {};
@@ -581,6 +587,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.agents.delete(a.id);
     this.byToken.delete(a.tokenHash);
     for (const s of a.sessions) this.sessions.delete(s);
+    this.waiters.get(a.id)?.("gone");
     await this.ctx.storage.delete(`agent:${a.id}`);
     this.broadcast({ type: "agent-left", id: a.id });
   }
@@ -591,6 +598,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     if (this.chat.length > MAX_CHAT) this.chat.splice(0, this.chat.length - MAX_CHAT);
     await this.ctx.storage.put("chat", this.chat);
     this.broadcast({ type: "chat", msg });
+    for (const [id, wake] of [...this.waiters]) if (msg.from !== id && (msg.to === null || msg.to === id)) wake("message");
     return msg;
   }
 
@@ -811,15 +819,12 @@ export class Office extends DurableObject<Env> implements ToolHost {
         result = { ok: true, msg };
         break;
       }
-      case "office_chat_read": {
-        const { since } = args as ToolArgs<"office_chat_read">;
-        const from = since ?? agent.lastRead;
-        const mine = this.chat.filter((m) => m.ts > from && (m.to === null || m.to === agent.id || m.from === agent.id));
-        const messages = mine.slice(0, CHAT_READ_MAX);
-        const more = mine.length > messages.length;
-        const now = Date.now();
-        agent.lastRead = Math.max(agent.lastRead, more ? messages.at(-1)!.ts : now);
-        result = { messages, more, now, names: this.namesFor(messages) };
+      case "office_chat_read":
+        result = this.readChat(agent, (args as ToolArgs<"office_chat_read">).since);
+        break;
+      case "office_chat_wait": {
+        const { timeoutSec } = args as ToolArgs<"office_chat_wait">;
+        result = await this.waitChat(agent, timeoutSec ?? CHAT_WAIT_DEFAULT_SEC);
         break;
       }
       case "office_look":
@@ -859,6 +864,38 @@ export class Office extends DurableObject<Env> implements ToolHost {
     if (this.agents.has(agent.id)) await this.saveAgent(agent, changed && name !== "office_status" && name !== "office_say");
     await this.scheduleAlarm();
     return result;
+  }
+
+  /** Messages for `agent` (DMs to it, the room, its own) newer than `since` or its last read; advances lastRead. */
+  private readChat(agent: AgentRecord, since: number | undefined) {
+    const from = since ?? agent.lastRead;
+    const mine = this.chat.filter((m) => m.ts > from && (m.to === null || m.to === agent.id || m.from === agent.id));
+    const messages = mine.slice(0, CHAT_READ_MAX);
+    const more = mine.length > messages.length;
+    const now = Date.now();
+    agent.lastRead = Math.max(agent.lastRead, more ? messages.at(-1)!.ts : now);
+    return { messages, more, now, names: this.namesFor(messages) };
+  }
+
+  /** office_chat wait: unread messages from others now, else hold until one arrives, the timeout, a newer wait, or the agent leaving. */
+  private async waitChat(agent: AgentRecord, timeoutSec: number) {
+    const unread = this.chat.some((m) => m.ts > agent.lastRead && m.from !== agent.id && (m.to === null || m.to === agent.id));
+    if (unread) return this.readChat(agent, undefined);
+    this.waiters.get(agent.id)?.("replaced");
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const why = await new Promise<WakeReason>((resolve) => {
+      const wake = (reason: WakeReason) => {
+        if (this.waiters.get(agent.id) === wake) this.waiters.delete(agent.id);
+        clearTimeout(timer);
+        resolve(reason);
+      };
+      this.waiters.set(agent.id, wake);
+      timer = setTimeout(() => wake("timeout"), timeoutSec * 1000);
+    });
+    if (why === "gone") throw new ToolError(401, "you left the office while waiting — call office_join again");
+    this.touch(agent);
+    if (why === "message") return this.readChat(agent, undefined);
+    return { messages: [], more: false, now: Date.now(), names: {}, timedOut: why === "timeout", ...(why === "replaced" ? { replaced: true } : {}) };
   }
 
   private guardOccupiedDesk(id: string, me: AgentRecord, verb: string): void {

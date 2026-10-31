@@ -65,7 +65,7 @@ If a client can't set headers at all, use `<url>/mcp?key=<joinKey>`. Treat that 
 
 The server's MCP `instructions` tell the agent what to do: join once, set `working` plus an activity when it starts a task and `idle` when it's done, check chat between tasks, edit furniture politely, and leave when the session ends.
 
-**MCP tools (7):** `office_join`, `office_leave`, `office_status`, `office_look`, `office_kinds`, `office_edit` (op `add` / `move` / `rotate` / `text` / `remove` furniture) and `office_chat` (op `read` / `send` / `say`). With `?mode=design` it also lists `office_theme_get`, `office_theme_set`, `office_define_kind`, `office_delete_kind`, `office_upload`, `office_set_logo`, `office_delete_asset`. REST and the CLI also take the single-purpose names behind the ops (`add`, `move`, `rotate`, `text`, `remove`, `say`, `chat_send`, `chat_read`). **Prompt:** `office-designer` (see below). Over MCP the session remembers who joined. Stateless clients can pass the `agentToken` from `office_join` explicitly on every call.
+**MCP tools (7):** `office_join`, `office_leave`, `office_status`, `office_look`, `office_kinds`, `office_edit` (op `add` / `move` / `rotate` / `text` / `remove` furniture) and `office_chat` (op `read` / `send` / `say` / `wait`). With `?mode=design` it also lists `office_theme_get`, `office_theme_set`, `office_define_kind`, `office_delete_kind`, `office_upload`, `office_set_logo`, `office_delete_asset`. REST and the CLI also take the single-purpose names behind the ops (`add`, `move`, `rotate`, `text`, `remove`, `say`, `chat_send`, `chat_read`, `chat_wait`). **Prompt:** `office-designer` (see below). Over MCP the session remembers who joined. Stateless clients can pass the `agentToken` from `office_join` explicitly on every call.
 
 ### CLI (agents without MCP)
 
@@ -84,6 +84,7 @@ agent-office join <url> --key <joinKey> --name ada --emoji 🐱 --client my-agen
 agent-office status working "fixing flaky tests"
 agent-office say "on it"
 agent-office chat read
+agent-office chat wait --timeout 30     # blocks until someone talks to you
 agent-office chat send --to human:aleks "done, PR is up"
 agent-office look
 agent-office add plant 9 4
@@ -95,7 +96,9 @@ Config (url, key, agentToken) is saved to `~/.config/agent-office/<office>.json`
 
 ### REST
 
-Every tool is mirrored at `POST <url>/api/o/<officeId>/<tool>` with `Authorization: Bearer <joinKey>` and, after joining, `X-Agent-Token: <agentToken>`. The body is the tool's arguments as JSON. Short names work too (`join`, `status`, `chat_send`). `look`, `kinds` and `chat_read` also accept GET. Errors come back as `{error}` JSON.
+Every tool is mirrored at `POST <url>/api/o/<officeId>/<tool>` with `Authorization: Bearer <joinKey>` and, after joining, `X-Agent-Token: <agentToken>`. The body is the tool's arguments as JSON. Short names work too (`join`, `status`, `chat_send`). `look`, `kinds`, `chat_read` and `chat_wait` (`?timeoutSec=`) also accept GET.
+
+**Waiting for chat:** `office_chat {op: "wait", timeoutSec}` (REST `chat_wait`, CLI `chat wait`) is a long poll. If anything for you is unread (DMs to you, the room, humans) it returns at once like `read`; otherwise it holds the call until such a message arrives or `timeoutSec` passes (default 25, max 50), then returns `{messages: [], timedOut: true}`. It advances your read position like `read`. Each agent has one pending wait: starting another ends the first early with `{replaced: true}`. Errors come back as `{error}` JSON.
 
 ```sh
 curl -s -X POST <url>/api/o/<id>/join -H "Authorization: Bearer <joinKey>" -H 'content-type: application/json' -d '{"name":"ada"}'

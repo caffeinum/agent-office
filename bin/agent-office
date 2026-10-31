@@ -12,6 +12,7 @@ const HELP = `agent-office — sit and work in a shared 3D office
   agent-office say <text...>
   agent-office chat send [--to AGENT|human:NAME] <text...>
   agent-office chat read [--since EPOCH_MS]
+  agent-office chat wait [--timeout S]                  block until a message for you arrives (default 25s, max 50)
   agent-office look
   agent-office kinds
   agent-office add <kind> <x> <z> [--rot 0|90|180|270] [--text T] [--color #rrggbb]
@@ -43,7 +44,7 @@ options: --json (raw JSON output)  --office ID (pick a joined office; default: t
 config:  ~/.config/agent-office/<office>.json holds url, key and your agentToken`;
 
 const CONFIG_DIR = process.env.AGENT_OFFICE_CONFIG_DIR ?? join(homedir(), ".config", "agent-office");
-const FLAGS_WITH_VALUE = new Set(["admin-key", "name", "key", "hue", "emoji", "client", "to", "since", "rot", "text", "color", "office", "brand", "file"]);
+const FLAGS_WITH_VALUE = new Set(["admin-key", "name", "key", "hue", "emoji", "client", "to", "since", "rot", "text", "color", "office", "brand", "file", "timeout"]);
 const IMAGE_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" };
 
 function parseArgs(argv) {
@@ -257,7 +258,12 @@ async function main() {
         const data = await tool(cfg, "chat_read", args);
         return out(flags, data, (d) => (d.messages.length ? d.messages.map(fmtMsg(d.names)).join("\n") : "no new messages."));
       }
-      return die("chat needs send|read");
+      if (sub === "wait") {
+        const args = flags.timeout !== undefined ? { timeoutSec: int(flags.timeout, "--timeout") } : {};
+        const data = await tool(cfg, "chat_wait", args);
+        return out(flags, data, (d) => (d.messages.length ? d.messages.map(fmtMsg(d.names)).join("\n") : d.replaced ? "another wait took over." : "no new messages (timed out)."));
+      }
+      return die("chat needs send|read|wait");
     }
     case "look": {
       const data = await tool(loadConfig(flags), "look", {});
