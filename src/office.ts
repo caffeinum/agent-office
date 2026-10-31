@@ -6,7 +6,7 @@ import {
   UNITS, validateKindDef, validateTheme, type CustomKind, type Theme, type ThemePatch,
 } from "./shared/design";
 import { ASSET_BYTES_MAX, ASSET_DIM_MAX, ASSETS_MAX, ASSETS_TOTAL_MAX, decodeBase64, sniffImage } from "./images";
-import { newOfficeKey, randomSecret, roleOfKey, sha256hex, keyFromRequest, WS_PROTOCOL, type KeyHashes, type Role } from "./auth";
+import { newOfficeKey, randomSecret, roleOfKey, sha256hex, keyFromRequest, tripcode, WS_PROTOCOL, type KeyHashes, type Role } from "./auth";
 import { CORS_HEADERS, errorResponse, HttpError, json, readJson } from "./http";
 import { isMergedTool, MERGED_ROUTES, NAME_MAX, parseArgs, parseOwnerFrame, ToolError, type MergedTool, type Status, type ToolArgs, type ToolName, ACTIVITY_MAX } from "./tools";
 import { handleMcp } from "./mcp";
@@ -32,8 +32,8 @@ export const JOIN_RATE_MAX = 10;
 export const MAX_AUTO_DESKS = 16;
 export const MAX_MCP_SESSIONS = 2000;
 export const MCP_SESSION_TTL_MS = 7 * 24 * 60 * 60_000;
-/** A same-name+client agent counts as "still at work" (and is not reclaimed by a new join) while seen this recently. */
-export const RECLAIM_AFTER_MS = 90_000;
+/** A same-name+client agent counts as "still at work" (and is not reclaimed by a new join) while seen this recently, unless its MCP sessions are all gone. */
+export const RECLAIM_AFTER_MS = 20_000;
 /** Storage schema: 1 = meta/items/agents/chat only; 2 = + theme, custom kinds ("kind:<slug>"), assets table, designer. */
 export const SCHEMA_VERSION = 2;
 export const UPLOAD_WINDOW_MS = 60_000;
@@ -55,6 +55,8 @@ export interface Agent {
   hue: number;
   emoji?: string;
   client?: string;
+  /** Public proof of a "name#secret" join; part of the display name too ("claude !Ab3dE6fGh_"). */
+  tripcode?: string;
   status: Status;
   activity?: string;
   deskId?: string;
@@ -69,6 +71,8 @@ interface AgentRecord extends Agent {
   sessions: string[];
   /** The name it joined with, before a " 2"-style suffix made it unique; records saved before suffixes lack it. */
   askedName?: string;
+  /** Joined over MCP at least once: with no live session left it is free to reclaim at once. */
+  mcp?: true;
 }
 
 export interface ChatMsg {
@@ -167,7 +171,7 @@ interface WsAttachment {
   sid: string;
 }
 
-const publicAgent = ({ tokenHash: _t, lastRead: _r, sessions: _s, askedName: _n, ...a }: AgentRecord): Agent => a;
+const publicAgent = ({ tokenHash: _t, lastRead: _r, sessions: _s, askedName: _n, mcp: _m, ...a }: AgentRecord): Agent => a;
 
 function hueOf(name: string): number {
   let h = 0;
@@ -879,17 +883,29 @@ export class Office extends DurableObject<Env> implements ToolHost {
     const tokenHash = await sha256hex(token);
     const sessionHash = ctx.sessionId ? await sha256hex(ctx.sessionId) : null;
     const own = await this.resolveAgent(ctx, undefined).catch(() => null);
-    let a = own ?? this.reclaimable(args.name, args.client, now);
+    const hash = args.name.indexOf("#");
+    const baseName = (hash < 0 ? args.name : args.name.slice(0, hash)).trim();
+    const trip = hash < 0 ? null : await tripcode(args.name.slice(hash + 1));
+    const resumed = args.resume ? this.agents.get(this.byToken.get(await sha256hex(args.resume)) ?? "") ?? null : null;
+    const tripped = trip ? ([...this.agents.values()].filter((x) => x.tripcode === trip).sort((p, q) => q.lastSeen - p.lastSeen)[0] ?? null) : null;
+    const claimed = resumed ?? tripped;
+    if (claimed && own && own !== claimed && sessionHash) {
+      own.sessions = own.sessions.filter((s) => s !== sessionHash);
+      await this.saveAgent(own, false);
+    }
+    let a = claimed ?? own ?? this.reclaimable(baseName, args.client, trip, now);
     if (a) {
       this.byToken.delete(a.tokenHash);
       a.tokenHash = tokenHash;
-      if (!own) this.detachSessions(a); // a reclaimed character answers only to the session that reclaimed it
+      if (a !== own) this.detachSessions(a); // a reclaimed character answers only to the session that reclaimed it
     } else {
       if (this.agents.size >= MAX_AGENTS) throw new ToolError(409, `the office is full (${MAX_AGENTS} agents) — try again later`);
-      a = { id: `${slug(args.name)}-${shortId()}`, name: "", hue: 0, status: "idle", joinedAt: now, lastSeen: now, tokenHash, lastRead: 0, sessions: [] };
+      a = { id: `${slug(baseName)}-${shortId()}`, name: "", hue: 0, status: "idle", joinedAt: now, lastSeen: now, tokenHash, lastRead: 0, sessions: [] };
     }
-    a.askedName = args.name.trim().slice(0, NAME_MAX);
-    a.name = this.uniqueName(a.askedName, a.id);
+    a.askedName = baseName;
+    if (trip) a.tripcode = trip;
+    else delete a.tripcode;
+    a.name = this.uniqueName(trip ? `${baseName} !${trip}` : baseName, a.id);
     a.hue = args.hue ?? hueOf(a.name);
     if (args.emoji) a.emoji = args.emoji;
     else delete a.emoji;
@@ -897,8 +913,9 @@ export class Office extends DurableObject<Env> implements ToolHost {
     else delete a.client;
     a.lastSeen = now;
     if (a.status === "away") a.status = "idle";
-    if (sessionHash && !a.sessions.includes(sessionHash)) {
-      a.sessions = [...a.sessions, sessionHash].slice(-8);
+    if (sessionHash) {
+      a.mcp = true;
+      if (!a.sessions.includes(sessionHash)) a.sessions = [...a.sessions, sessionHash].slice(-8);
       this.sessions.set(sessionHash, a.id);
     }
     this.agents.set(a.id, a);
@@ -916,6 +933,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       agent: publicAgent(a),
       desk: desk ? { id: desk.id, x: desk.x, z: desk.z, rot: desk.rot } : null,
       office: { id: this.mustMeta().id, name: this.mustMeta().name },
+      ...(args.resume ? { resumed: resumed !== null } : {}),
       next:
         this.designer === a.id
           ? "You are this office's designer: over MCP, connect with ?mode=design for the design tools and the office-designer prompt (prompts/get), then follow it — office_look's design summary is your floor plan; humans will ask you for changes in chat."
@@ -923,12 +941,13 @@ export class Office extends DurableObject<Env> implements ToolHost {
     };
   }
 
-  /** A same-name+client agent left behind by an earlier session (not seen in the last 90s): rejoining takes it over. */
-  private reclaimable(name: string, client: string | undefined, now: number): AgentRecord | null {
+  /** A same-name+client agent left behind by an earlier session (its MCP sessions all ended, or silent for RECLAIM_AFTER_MS): rejoining takes it over. */
+  private reclaimable(name: string, client: string | undefined, trip: string | null, now: number): AgentRecord | null {
     const n = name.trim().toLowerCase();
+    const abandoned = (a: AgentRecord) => now - a.lastSeen > RECLAIM_AFTER_MS || (a.mcp === true && !a.sessions.some((h) => this.mcpSessions.has(h)));
     return (
       [...this.agents.values()]
-        .filter((a) => (a.askedName ?? a.name).toLowerCase() === n && (a.client ?? "") === (client ?? "") && now - a.lastSeen > RECLAIM_AFTER_MS)
+        .filter((a) => (a.askedName ?? a.name).toLowerCase() === n && (a.client ?? "") === (client ?? "") && (a.tripcode ?? null) === trip && abandoned(a))
         .sort((p, q) => q.lastSeen - p.lastSeen)[0] ?? null
     );
   }

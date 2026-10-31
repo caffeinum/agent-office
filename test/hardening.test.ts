@@ -1,7 +1,7 @@
 import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { applyOp, defaultLayout, footprint, OfficeError } from "../src/shared/catalog";
-import { CHAT_READ_MAX, MAX_AUTO_DESKS, type Office } from "../src/office";
+import { CHAT_READ_MAX, MAX_AUTO_DESKS, RECLAIM_AFTER_MS, type Office } from "../src/office";
 import { call, createOffice, join, ORIGIN, type Created } from "./helpers";
 
 const stubOf = (id: string) => env.OFFICE.get(env.OFFICE.idFromName(id));
@@ -159,6 +159,8 @@ describe("agent etiquette and chat", () => {
     const o = await createOffice();
     await runInDurableObject(stubOf(o.id), async (inst: Office) => {
       const ctx = (sessionId: string) => ({ role: "join" as const, token: null, sessionId, ip: "x", origin: "https://o" });
+      await inst.startSession("s-old");
+      await inst.startSession("s-new");
       const old = await (inst as any).join({ name: "Pixel", client: "cc" }, ctx("s-old"));
       (inst as any).agents.get(old.agent.id).lastSeen = Date.now() - 5 * 60_000;
       const taken = await (inst as any).join({ name: "Pixel", client: "cc" }, ctx("s-new"));
@@ -167,6 +169,81 @@ describe("agent etiquette and chat", () => {
       const back = await (inst as any).join({ name: "Pixel", client: "cc" }, ctx("s-old"));
       expect(back.agent.id).not.toBe(old.agent.id);
       expect(back.agent.name).toBe("Pixel 2");
+    });
+  });
+});
+
+describe("instant rejoin", () => {
+  const ctx = (sessionId: string | null) => ({ role: "join" as const, token: null, sessionId, ip: "x", origin: "https://o" });
+
+  it("resume with the previous agentToken takes the character back at once, from a new session", async () => {
+    const o = await createOffice();
+    await runInDurableObject(stubOf(o.id), async (inst: Office) => {
+      await inst.startSession("s-1");
+      await inst.startSession("s-2");
+      const first = await (inst as any).join({ name: "Grok", client: "xai" }, ctx("s-1"));
+      const again = await (inst as any).join({ name: "Grok", client: "xai", resume: first.agentToken }, ctx("s-2"));
+      expect(again.agent.id).toBe(first.agent.id);
+      expect(again.agent.name).toBe("Grok");
+      expect(again.resumed).toBe(true);
+      await expect(inst.callTool("office_status", { status: "idle" }, ctx("s-1"))).rejects.toThrow(/office_join/);
+      expect(((await inst.callTool("office_look", {}, ctx("s-2"))) as any).you.id).toBe(first.agent.id);
+      const stale = await (inst as any).join({ name: "Grok", client: "xai", resume: first.agentToken }, ctx(null));
+      expect(stale.resumed).toBe(false);
+      expect(stale.agent.name).toBe("Grok 2");
+    });
+  });
+
+  it("name#secret gives a tripcode; the same secret reclaims from any session, a different one is someone else", async () => {
+    const o = await createOffice();
+    await runInDurableObject(stubOf(o.id), async (inst: Office) => {
+      for (const s of ["t1", "t2", "t3"]) await inst.startSession(s);
+      const first = await (inst as any).join({ name: "claude#correct-horse-battery", client: "cc" }, ctx("t1"));
+      expect(first.agent.name).toMatch(/^claude ![A-Za-z0-9_-]{10}$/);
+      expect(first.agent.tripcode).toBe(first.agent.name.slice("claude !".length));
+      expect(first.agent.id).toMatch(/^claude-/);
+      expect(JSON.stringify(first)).not.toContain("correct-horse");
+      const other = await (inst as any).join({ name: "claude#someone-elses-secret", client: "cc" }, ctx("t2"));
+      expect(other.agent.id).not.toBe(first.agent.id);
+      expect(other.agent.tripcode).not.toBe(first.agent.tripcode);
+      const back = await (inst as any).join({ name: "claude#correct-horse-battery", client: "other-client" }, ctx("t3"));
+      expect(back.agent.id).toBe(first.agent.id); // live session t1 or not, the secret wins
+      await expect(inst.callTool("office_status", { status: "idle" }, ctx("t1"))).rejects.toThrow(/office_join/);
+      const plain = await (inst as any).join({ name: "claude", client: "cc" }, ctx(null));
+      expect(plain.agent.name).toBe("claude");
+      expect([first.agent.id, other.agent.id]).not.toContain(plain.agent.id);
+    });
+  });
+
+  it("rejects fake tripcodes in names and short secrets", async () => {
+    const o = await createOffice();
+    expect((await call(o, "join", { name: "claude !Ab3dE6fGh_" })).status).toBe(400);
+    expect((await call(o, "join", { name: "claude#short" })).body.error).toMatch(/secret/);
+    expect((await call(o, "join", { name: "#long-enough-secret" })).status).toBe(400);
+  });
+
+  it("over REST, resume works without waiting", async () => {
+    const o = await createOffice();
+    const first = await join(o, "Rest", { client: "chatgpt" });
+    const again = await join(o, "Rest", { client: "chatgpt", resume: first.agentToken });
+    expect(again.agent.id).toBe(first.agent.id);
+    expect((await call(o, "look", {}, { token: first.agentToken })).status).toBe(401);
+  });
+
+  it("a new session reclaims at once when the old MCP sessions are gone, or after a short silence", async () => {
+    const o = await createOffice();
+    await runInDurableObject(stubOf(o.id), async (inst: Office) => {
+      for (const s of ["a", "b", "c", "d"]) await inst.startSession(s);
+      const first = await (inst as any).join({ name: "Turn", client: "claude-ai" }, ctx("a"));
+      await inst.endSession("a");
+      const second = await (inst as any).join({ name: "Turn", client: "claude-ai" }, ctx("b"));
+      expect(second.agent.id).toBe(first.agent.id);
+      const live = await (inst as any).join({ name: "Turn", client: "claude-ai" }, ctx("c"));
+      expect(live.agent.name).toBe("Turn 2"); // session b is still open and the agent was just seen
+      (inst as any).agents.get(first.agent.id).lastSeen = Date.now() - RECLAIM_AFTER_MS - 1000;
+      const third = await (inst as any).join({ name: "Turn", client: "claude-ai" }, ctx("d"));
+      expect(third.agent.id).toBe(first.agent.id);
+      await expect(inst.callTool("office_status", { status: "idle" }, ctx("b"))).rejects.toThrow(/office_join/);
     });
   });
 });

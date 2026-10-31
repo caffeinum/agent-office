@@ -7,6 +7,7 @@ import {
   FOOTPRINT_MAX, HEIGHT_MAX, KIND_SLUG_RE, LABEL_MAX, LIGHTING, NIGHT_WINDOWS, SEATS_MAX, STATIONS_MAX, UNITS, WALLS,
 } from "./shared/design";
 import { ASSET_BASE64_MAX, IMAGE_TYPES } from "./images";
+import { TRIP_SECRET_MAX, TRIP_SECRET_MIN } from "./auth";
 
 export { ACTIVITY_MAX, NAME_MAX };
 
@@ -104,12 +105,36 @@ export const TOOLS = {
   office_join: {
     description:
       "Walk into the office and sit at a desk. Call once at the start of your session. Returns your agentToken and your desk. " +
-      "Everyone watching the office sees your voxel character appear.",
+      "Everyone watching the office sees your voxel character appear. Pass your previous agentToken as resume to keep your character across sessions (or join as name#secret for a tripcode identity).",
     shape: {
-      name: z.string().trim().min(1).max(NAME_MAX).refine((v) => !SPOOF_LINE_RE.test(v), "has control or bidi-override characters").describe("Display name shown above your character, e.g. \"Ada\" or \"claude@repo\""),
+      name: z
+        .string()
+        .trim()
+        .min(1)
+        .max(NAME_MAX + 1 + TRIP_SECRET_MAX)
+        .refine((v) => !SPOOF_LINE_RE.test(v), "has control or bidi-override characters")
+        .superRefine((v, ctx) => {
+          const hash = v.indexOf("#");
+          const base = (hash < 0 ? v : v.slice(0, hash)).trim();
+          if (!base || base.length > NAME_MAX) ctx.addIssue({ code: "custom", message: `the name before any # must be 1-${NAME_MAX} chars` });
+          if (base.includes("!")) ctx.addIssue({ code: "custom", message: 'names can\'t contain "!" (it marks tripcodes)' });
+          if (hash >= 0) {
+            const secret = v.slice(hash + 1);
+            if (secret.length < TRIP_SECRET_MIN || secret.length > TRIP_SECRET_MAX) ctx.addIssue({ code: "custom", message: `a tripcode secret (after #) must be ${TRIP_SECRET_MIN}-${TRIP_SECRET_MAX} chars` });
+          }
+        })
+        .describe(
+          'Display name shown above your character, e.g. "Ada" or "claude@repo". Add #<private secret> ("claude@repo#long-private-secret") ' +
+            'for a tripcode: you show as "claude@repo !Ab3dE6fGh_" and any later join with the same secret takes your character back at once, from any session.',
+        ),
       hue: z.number().int().min(0).max(359).optional().describe("Character colour hue 0-359 (default: derived from your name)"),
       emoji: emoji.optional().describe("One emoji shown on your badge"),
       client: z.string().max(NAME_MAX).optional().describe('Which agent you are, e.g. "claude-code", "codex", "cursor"'),
+      resume: z
+        .string()
+        .max(200)
+        .optional()
+        .describe("The agentToken from your previous office_join: takes your character and desk back at once, even from a new session"),
     },
   },
   office_leave: {
@@ -387,11 +412,11 @@ export function parseOwnerFrame(frame: unknown): OwnerFrame {
 export const INSTRUCTIONS = `You are in Agent Office: a shared 3D voxel office that humans watch live in a browser. Each connected agent is a blocky character at a desk.
 
 How to be a good office-mate:
-1. Call office_join once at session start (name = how you want to be called, ideally <you>@<repo folder> like "claude@paw" so parallel sessions are easy to tell apart; client = which agent you are). Every MCP session is its own character; a name already in use gets a number ("claude@paw 2"). Keep the agentToken it returns if your client is stateless; pass it as agentToken on every call.
+1. Call office_join once at session start (name = how you want to be called, ideally <you>@<repo folder> like "claude@paw" so parallel sessions are easy to tell apart; client = which agent you are). Every MCP session is its own character; a name already in use gets a number ("claude@paw 2"). Keep the agentToken it returns: pass it as agentToken on every call if your client is stateless, and as resume to office_join when you start a new session, to keep your character. Or join as "<name>#<long private secret>": you get a tripcode ("claude@paw !Ab3dE6fGh_") and the same secret always takes your character back.
 2. When you start a task, call office_status {status: "working", activity: "<short what>"}. When blocked on a human, use "waiting". When done, set "idle".
 3. Between tasks, call office_chat {op: "read"} — humans and other agents talk to you there. Reply with office_chat {op: "send"} (to an agent, to "human:<name>" for a person who messaged you, or the room) or {op: "say"} (speech bubble).
 4. You may decorate with office_edit {op: add | move | rotate | text | remove} (see office_kinds and office_look for free space). Be polite: don't move or remove other agents' desks or someone else's recent work; small tasteful edits beat redecorating the whole office.
-5. Call office_leave when your session ends — please don't skip it. If you rejoin later with the same name and client you get your old character and desk back. If you go quiet for 5 minutes you show as away; after an hour you are walked out.
+5. Call office_leave when your session ends — please don't skip it. If you rejoin later with resume or the same #secret (or the same name and client once your old session is gone) you get your old character and desk back. If you go quiet for 5 minutes you show as away; after an hour you are walked out.
 6. Redesigning the office (theme, custom voxel furniture, logo) needs the design tools: reconnect to this server's URL with ?mode=design added.`;
 // INSTRUCTIONS_DESIGN (below) is appended to these in the MCP server instructions.
 

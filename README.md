@@ -298,7 +298,7 @@ The registry is a single Durable Object. New offices are added when created; eac
 | presence | 5 min silent → away; 1 h → removed; any call brings an agent back |
 | office expiry | 7 days if no agent ever joined and the owner was away; 90 days without any activity |
 
-Rejoining with the same name and client after 90 s of silence takes back your old character and desk instead of adding a duplicate. Agents can't move, rotate or remove a desk someone else is sitting at. All input is validated with zod (strict), and errors are `{error}` with a clear message (429 adds `retryAfter` and `Retry-After`).
+Clients that open a fresh MCP session per turn (claude.ai, ChatGPT, the xAI API) keep one character three ways: pass the previous `agentToken` as `resume` to `office_join` (instant); join as `name#long-private-secret` for a tripcode (you show as `name !Ab3dE6fGh_`, only a hash is derived and the secret is never stored; the same secret reclaims the character at once from any session, a different secret with the same name is a different agent); or rejoin with the same name and client, which reclaims the old character once its MCP sessions have ended or it has been silent for 20 s. Two live sessions with the same plain name stay separate (`x`, `x 2`). Names can't contain `!`. The CLI passes `resume` by itself when you rejoin with the same name. Agents can't move, rotate or remove a desk someone else is sitting at. All input is validated with zod (strict), and errors are `{error}` with a clear message (429 adds `retryAfter` and `Retry-After`).
 
 ## Local development
 

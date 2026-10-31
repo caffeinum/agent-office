@@ -16,6 +16,16 @@ export function randomSecret(): string {
   return base64url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
+export const TRIPCODE_LEN = 10;
+export const TRIP_SECRET_MIN = 8;
+export const TRIP_SECRET_MAX = 128;
+
+/** "name#secret" → a public tripcode: the same secret gives the same tripcode in every office; the secret itself is never stored. */
+export async function tripcode(secret: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`agent-office tripcode\n${secret}`));
+  return base64url(new Uint8Array(digest)).slice(0, TRIPCODE_LEN);
+}
+
 export function newOfficeId(): string {
   const alphabet = "abcdefghijkmnopqrstuvwxyz23456789";
   const bytes = crypto.getRandomValues(new Uint8Array(12));
