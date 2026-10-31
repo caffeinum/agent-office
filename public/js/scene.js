@@ -10,18 +10,20 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { footprint, kindOf } from "../shared/catalog.js";
+import { DEFAULT_THEME } from "../shared/theme.js";
 import {
-  SEATED, blockedCells, deskSeating, entryPoint, hashStr, idleSpots, layoutBatches, limbAngles, pickSpot, poseFor, route, seatOf,
+  SEATED, assignSpots, blockedCells, deskSeating, entryPoint, hashStr, idleSpots, kindGeometryPlan, layoutBatches, limbAngles, poseFor,
+  route, seatOf, themeLook, usableSpots,
 } from "./model.js";
 import { MODELS, SEAT_Y, WALL_H } from "./furniture.js";
 import { buildGeometry, vbox } from "./voxel.js";
-import { CROWN, applyLimbs, awayMaterial, baseMaterial, blink, buildCharacter } from "./character.js";
+import { CROWN, applyLimbs, applyProps, awayMaterial, baseMaterial, blink, buildCharacter } from "./character.js";
 import * as T from "./textures.js";
 
 const WALK_SPEED = 1.7;
 const POP_MS = 420;
 const BORDER = 2.5;
-const SPOT_SEAT_Y = { sofa: 0.48, beanbag: 0.4, chair: SEAT_Y };
+const FADE_MS = 900;
 const THEMES = {
   day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.28, threshold: 0.92, glow: 1.0, lamp: 0.95, point: 0, exposure: 1.0 },
   night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.5, sun: 0.35, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 0.72, glow: 1.2, lamp: 2.4, point: 9, exposure: 1.05 },
@@ -31,7 +33,7 @@ const easeOutBack = (t) => { const c = 1.6; return 1 + (c + 1) * Math.pow(t - 1,
 const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 const angDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 
-export function createScene(container) {
+export function createScene(container, { fetchAsset = (url) => fetch(url), onError = (msg) => console.error(msg) } = {}) {
   const probe = document.createElement("canvas");
   if (!probe.getContext("webgl2")) throw new Error("this browser has no WebGL2 (disabled, or no GPU) — the office needs it.");
 
@@ -77,8 +79,28 @@ export function createScene(container) {
   const tex = {
     grain: T.grainTexture(), wood: T.woodTexture(), plaster: T.plasterTexture(), grass: T.grassTexture(), plinth: T.plinthTexture(),
     rug: T.rugTexture(), screen: T.screenTexture(), tv: T.tvTexture(), rack: T.rackTexture(),
-    windowDay: T.windowTexture(false), windowNight: T.windowTexture(true), skyDay: T.skyTexture(false), skyNight: T.skyTexture(true), blob: T.blobTexture(),
+    windowDay: T.windowTexture(false), skyDay: T.skyTexture(false), skyNight: T.skyTexture(true), blob: T.blobTexture(),
   };
+  const texCache = new Map();
+  const cachedTex = (key, make) => { if (!texCache.has(key)) texCache.set(key, make()); return texCache.get(key); };
+  const floorTex = (m) => cachedTex(`floor:${m}`, () => T.floorTexture(m));
+  const wallTex = (m) => cachedTex(`wall:${m}`, () => T.wallTexture(m));
+  const nightWindowTex = (style) => cachedTex(`night:${style}`, () => T.nightWindowTexture(style));
+
+  /** A standard material whose map crossfades: shows mix(map, map2, uMix). */
+  function fadeMaterial(opts) {
+    const m = new THREE.MeshStandardMaterial(opts);
+    const u = { map2: { value: opts.map }, uMix: { value: 0 } };
+    m.userData.xfade = u;
+    m.onBeforeCompile = (sh) => {
+      sh.uniforms.map2 = u.map2;
+      sh.uniforms.uMix = u.uMix;
+      sh.fragmentShader = sh.fragmentShader
+        .replace("#include <map_pars_fragment>", "#include <map_pars_fragment>\nuniform sampler2D map2;\nuniform float uMix;")
+        .replace("#include <map_fragment>", "#ifdef USE_MAP\n  diffuseColor *= mix(texture2D(map, vMapUv), texture2D(map2, vMapUv), uMix);\n#endif");
+    };
+    return m;
+  }
   const mats = {
     base: new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.grain, roughness: 0.86, metalness: 0 }),
     accent: new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.grain, roughness: 0.82, metalness: 0 }),
@@ -86,7 +108,20 @@ export function createScene(container) {
     ghost: new THREE.MeshBasicMaterial({ color: "#7dffb0", transparent: true, opacity: 0.45, depthWrite: false }),
     blob: new THREE.MeshBasicMaterial({ map: tex.blob, transparent: true, depthWrite: false }),
     outline: new THREE.MeshBasicMaterial({ color: "#ffe066", transparent: true, opacity: 0.35, depthWrite: false }),
+    // themed: desk tops / desk rails, and the custom-kind box materials
+    finish: new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.grain, roughness: 0.7, metalness: 0 }),
+    rail: new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.grain, roughness: 0.6, metalness: 0.05 }),
+    glossy: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.28, metalness: 0.15 }),
+    glass: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.38, depthWrite: false }),
+    emissive: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: true }),
+    // room surfaces (persist across room rebuilds so a theme fade survives a grid change)
+    floor: fadeMaterial({ map: floorTex("wood"), roughness: 0.78 }),
+    wallPlain: fadeMaterial({ vertexColors: true, map: wallTex("plaster"), roughness: 0.95 }),
+    wallBack: fadeMaterial({ vertexColors: true, map: wallTex("plaster"), roughness: 0.95 }),
+    wallLeft: fadeMaterial({ vertexColors: true, map: wallTex("plaster"), roughness: 0.95 }),
+    trim: new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.grain, roughness: 0.8 }),
   };
+  mats.emissive.userData = { baseColor: new THREE.Color("#ffffff"), lamp: false, window: false };
   const charBase = baseMaterial(tex.grain);
   const charAway = awayMaterial(tex.grain);
 
@@ -95,31 +130,93 @@ export function createScene(container) {
     room: null, walls: {}, furniture: new THREE.Group(), batches: new Map(), texts: new Map(), itemAnim: new Map(), leavingItems: new Map(),
     chars: new Map(), lampLights: [], glowMats: new Map(), selectedItem: null, ghost: null, hidden: new Set(),
     camAnim: null, insets: { left: 0, right: 0 }, clock: 0, last: performance.now(), size: { w: 1, h: 1 }, frameCbs: [], raf: 0, raycaster: new THREE.Raycaster(),
+    custom: {}, look: themeLook(DEFAULT_THEME), palette: null, fade: null, kindColor: new Map(), assign: new Map(),
+    logo: { id: null, img: null, tex: null }, assets: [], themeObj: null, fetchAsset, onError,
   };
   scene.add(S.furniture);
 
   /* ── kind assets ───────────────────────────────────────────────────────────────────────────── */
 
   const kindAssets = new Map();
+  const screenMats = new Set();
+
+  /** The current screen picture: the office logo when there is one, else the classic code lines / dashboard. */
+  const screenMap = (m) => (m.userData.logo ? S.logo.tex ?? m.userData.fallback : m.userData.fallback);
+
+  /**
+   * Everything needed to draw one kind: parts [{role, geo, mat}] in the item frame, the model's text panel
+   * and accent default. Built-ins come from furniture.js, custom kinds from their boxes (kindGeometryPlan).
+   */
   function assetsFor(kind) {
     if (kindAssets.has(kind)) return kindAssets.get(kind);
-    const m = MODELS[kind]();
-    const a = {
-      model: m,
-      base: m.base.length ? buildGeometry(m.base) : null,
-      accent: m.accent.length ? buildGeometry(m.accent) : null,
-      glow: m.glow ? buildGeometry(m.glow.boxes, { ao: false }) : null,
-      glowMat: null,
-      defaultColor: new THREE.Color(m.defaultColor),
-    };
-    if (m.glow) {
-      const map = m.glow.tex === "window" ? tex.windowDay : m.glow.tex ? tex[m.glow.tex] : null;
-      a.glowMat = new THREE.MeshBasicMaterial({ map, color: m.glow.color ?? "#ffffff", toneMapped: true });
-      a.glowMat.userData = { baseColor: new THREE.Color(m.glow.color ?? "#ffffff"), lamp: !!m.glow.lamp, window: m.glow.tex === "window" };
-      S.glowMats.set(kind, a.glowMat);
-    }
+    const a = Object.hasOwn(MODELS, kind) ? builtinAssets(kind) : customAssets(kind);
     kindAssets.set(kind, a);
     return a;
+  }
+
+  function builtinAssets(kind) {
+    const m = MODELS[kind]();
+    const parts = [];
+    if (m.base.length) parts.push({ role: "base", geo: buildGeometry(m.base), mat: mats.base });
+    if (m.finish?.length) parts.push({ role: "finish", geo: buildGeometry(m.finish), mat: mats.finish });
+    if (m.rail?.length) parts.push({ role: "rail", geo: buildGeometry(m.rail), mat: mats.rail });
+    if (m.accent.length) parts.push({ role: "accent", geo: buildGeometry(m.accent), mat: m.accentMap === "rug" ? mats.rug : mats.accent });
+    if (m.glow) {
+      const fallback = m.glow.tex === "window" ? tex.windowDay : m.glow.tex ? tex[m.glow.tex] : null;
+      const glowMat = new THREE.MeshBasicMaterial({ map: fallback, color: m.glow.color ?? "#ffffff", toneMapped: true });
+      const screen = m.glow.tex === "screen" || m.glow.tex === "tv";
+      glowMat.userData = { baseColor: new THREE.Color(m.glow.color ?? "#ffffff"), lamp: !!m.glow.lamp, window: m.glow.tex === "window", screen, fallback, logo: screen && !!kindOf(kind)?.screen };
+      if (screen) { glowMat.map = screenMap(glowMat); screenMats.add(glowMat); }
+      S.glowMats.set(kind, glowMat);
+      applyGlow(glowMat);
+      parts.push({ role: "glow", geo: buildGeometry(m.glow.boxes, { ao: false }), mat: glowMat });
+    }
+    return { parts, model: m, defaultColor: new THREE.Color(m.defaultColor), custom: false };
+  }
+
+  function customAssets(kind) {
+    const def = S.custom[kind];
+    if (!def) throw new Error(`no model for kind "${kind}" (not built in, not defined in this office)`);
+    const plan = kindGeometryPlan(def);
+    const boxes = (list, extra = {}) => list.map((b) => vbox(b.cx, b.y0, b.cz, b.w, b.h, b.d, b.color, extra));
+    const parts = [];
+    if (plan.matte.length) parts.push({ role: "base", geo: buildGeometry(boxes(plan.matte)), mat: mats.base });
+    if (plan.glossy.length) parts.push({ role: "base", geo: buildGeometry(boxes(plan.glossy)), mat: mats.glossy });
+    if (plan.glass.length) parts.push({ role: "glass", geo: buildGeometry(boxes(plan.glass), { ao: false }), mat: mats.glass });
+    if (plan.emissive.length) {
+      S.glowMats.set("@emissive", mats.emissive);
+      applyGlow(mats.emissive);
+      parts.push({ role: "emissive", geo: buildGeometry(boxes(plan.emissive), { ao: false }), mat: mats.emissive });
+    }
+    if (plan.screen.length) {
+      const glowMat = new THREE.MeshBasicMaterial({ color: "#ffffff", toneMapped: true });
+      glowMat.userData = { baseColor: new THREE.Color("#ffffff"), lamp: false, window: false, screen: true, fallback: tex.screen, own: true, logo: def.screen };
+      glowMat.map = screenMap(glowMat);
+      screenMats.add(glowMat);
+      S.glowMats.set(`@screen:${kind}`, glowMat);
+      applyGlow(glowMat);
+      parts.push({ role: "glow", geo: buildGeometry(boxes(plan.screen, { unitUV: true }), { ao: false }), mat: glowMat });
+    }
+    // a textable custom kind gets a sign-like panel on its front face, sized to the model
+    let text = null;
+    if (def.textable) {
+      let top = 0;
+      for (const b of def.boxes) top = Math.max(top, (b.y + b.h) / 16);
+      const w = Math.max(0.4, def.w * 0.86), h = Math.min(Math.max(0.3, top * 0.6), 1.2);
+      text = { x: 0, y: Math.max(h / 2 + 0.05, top - h / 2 - 0.08), z: def.d / 2 + 0.006, w, h, bg: S.look.signBg, fg: S.look.signFg, tw: Math.round(172 * w), th: Math.round(172 * h) };
+    }
+    return { parts, model: { text, noShadow: def.layer === "floor" }, defaultColor: new THREE.Color("#ffffff"), custom: true, plan };
+  }
+
+  /** Forget a kind's cached geometry (it was redefined or removed). */
+  function dropKind(kind) {
+    const a = kindAssets.get(kind);
+    if (!a) return;
+    for (const p of a.parts) {
+      p.geo.dispose();
+      if (p.mat.userData?.own) { screenMats.delete(p.mat); p.mat.dispose(); S.glowMats.delete(`@screen:${kind}`); }
+    }
+    kindAssets.delete(kind);
   }
 
   /* ── room ──────────────────────────────────────────────────────────────────────────────────── */
@@ -137,13 +234,11 @@ export function createScene(container) {
     const W = grid.w, D = grid.d;
     const own = (mesh) => { mesh.userData.ownGeo = true; return mesh; };
 
-    // floor
-    const wood = tex.wood.clone();
-    wood.needsUpdate = true;
-    wood.repeat.set(W, D);
-    const floorMat = new THREE.MeshStandardMaterial({ map: wood, roughness: 0.78 });
-    const floor = own(new THREE.Mesh(new THREE.PlaneGeometry(W, D), floorMat));
-    floor.userData.ownMat = true;
+    // floor: one texture tile per cell (UVs scaled, so the shared themed textures need no per-grid repeat)
+    const floorGeo = new THREE.PlaneGeometry(W, D);
+    const fuv = floorGeo.attributes.uv;
+    for (let i = 0; i < fuv.count; i++) fuv.setXY(i, fuv.getX(i) * W, fuv.getY(i) * D);
+    const floor = own(new THREE.Mesh(floorGeo, mats.floor));
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(W / 2, 0, D / 2);
     floor.receiveShadow = true;
@@ -192,51 +287,56 @@ export function createScene(container) {
       g.add(dm);
     }
 
-    // walls: full + low stub each, the camera-side ones swap to the stub (cutaway)
+    // walls: full + low stub each, the camera-side ones swap to the stub (cutaway). The body is white
+    // boxes on a themed material (plaster / brick / wood panels × wall colour); cap, baseboard and posts
+    // are white/grey boxes on the trim material.
     const wallBoxes = (len, doorAt) => {
       const segs = doorAt == null ? [[0, len]] : [[0, doorAt - 1], [doorAt + 1, len]];
-      const full = [], stub = [];
+      const body = [], trim = [], stubBody = [], stubTrim = [];
       for (const [a, b] of segs) {
         const L = b - a, c = (a + b) / 2;
-        full.push(vbox(c, 0, -0.12, L, WALL_H, 0.24, "#f3e6cf"));
-        full.push(vbox(c, WALL_H, -0.12, L + 0.02, 0.1, 0.3, "#b98a5e"));
-        full.push(vbox(c, 0, 0.015, L, 0.14, 0.03, "#e1cfb2"));
-        stub.push(vbox(c, 0, -0.12, L, 0.32, 0.24, "#f3e6cf"));
-        stub.push(vbox(c, 0.32, -0.12, L + 0.02, 0.06, 0.3, "#b98a5e"));
+        body.push(vbox(c, 0, -0.12, L, WALL_H, 0.24, "#ffffff"));
+        trim.push(vbox(c, WALL_H, -0.12, L + 0.02, 0.1, 0.3, "#ffffff"));
+        trim.push(vbox(c, 0, 0.015, L, 0.14, 0.03, "#d8d8d8"));
+        stubBody.push(vbox(c, 0, -0.12, L, 0.32, 0.24, "#ffffff"));
+        stubTrim.push(vbox(c, 0.32, -0.12, L + 0.02, 0.06, 0.3, "#ffffff"));
       }
-      if (doorAt != null) full.push(vbox(doorAt, 2.1, -0.12, 2, WALL_H - 2.1, 0.24, "#f3e6cf"));
-      return { full, stub };
+      if (doorAt != null) body.push(vbox(doorAt, 2.1, -0.12, 2, WALL_H - 2.1, 0.24, "#ffffff"));
+      return { body, trim, stubBody, stubTrim };
     };
-    const plasterMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.plaster, roughness: 0.95 });
-    const mkWall = (len, doorAt) => {
+    const mkWall = (len, doorAt, bodyMat) => {
       const wb = wallBoxes(len, doorAt);
       const grp = new THREE.Group();
       const full = new THREE.Group();
-      const fm = own(new THREE.Mesh(buildGeometry(wb.full), plasterMat));
-      fm.castShadow = true; fm.receiveShadow = true;
-      full.add(fm);
-      const stub = own(new THREE.Mesh(buildGeometry(wb.stub), plasterMat));
-      stub.receiveShadow = true;
+      for (const [boxes, mat] of [[wb.body, bodyMat], [wb.trim, mats.trim]]) {
+        const m = own(new THREE.Mesh(buildGeometry(boxes), mat));
+        m.castShadow = true; m.receiveShadow = true;
+        full.add(m);
+      }
+      const stub = new THREE.Group();
+      for (const [boxes, mat] of [[wb.stubBody, bodyMat], [wb.stubTrim, mats.trim]]) {
+        const m = own(new THREE.Mesh(buildGeometry(boxes), mat));
+        m.receiveShadow = true;
+        stub.add(m);
+      }
       stub.visible = false;
       grp.add(full, stub);
       return { grp, full, stub };
     };
-    const back = mkWall(W); // along +x at z = 0, inner face +z
-    const front = mkWall(W, W / 2);
+    const back = mkWall(W, null, mats.wallBack); // along +x at z = 0, inner face +z
+    const front = mkWall(W, W / 2, mats.wallPlain);
     front.grp.rotation.y = Math.PI; front.grp.position.set(W, 0, D);
-    const left = mkWall(D); // along +z at x = 0, inner face +x
+    const left = mkWall(D, null, mats.wallLeft); // along +z at x = 0, inner face +x
     left.grp.rotation.y = Math.PI / 2; left.grp.position.set(0, 0, D);
-    const right = mkWall(D);
+    const right = mkWall(D, null, mats.wallPlain);
     right.grp.rotation.y = -Math.PI / 2; right.grp.position.set(W, 0, 0);
     // corner posts
     const posts = [];
-    for (const [x, z] of [[0, 0], [W, 0], [0, D], [W, D]]) posts.push(vbox(x, 0, z, 0.3, WALL_H + 0.12, 0.3, "#b98a5e"));
-    const postMesh = own(new THREE.Mesh(buildGeometry(posts), mats.base));
+    for (const [x, z] of [[0, 0], [W, 0], [0, D], [W, D]]) posts.push(vbox(x, 0, z, 0.3, WALL_H + 0.12, 0.3, "#ffffff"));
+    const postMesh = own(new THREE.Mesh(buildGeometry(posts), mats.trim));
     postMesh.castShadow = true;
     g.add(back.grp, front.grp, left.grp, right.grp, postMesh);
     S.walls = { back, front, left, right, posts: postMesh };
-    plasterMat.userData.shared = true;
-    g.userData.plaster = plasterMat;
 
     // sun + shadow frustum
     const c = new THREE.Vector3(W / 2, 0, D / 2);
@@ -279,27 +379,27 @@ export function createScene(container) {
   function rebuildFurniture() {
     for (const b of S.batches.values()) for (const m of b.meshes) m.parent?.remove(m), m.dispose();
     S.batches.clear();
+    // a leaving item of a kind that no longer exists can't be drawn: drop it
+    for (const [id, it] of S.leavingItems) if (!kindOf(it.kind, S.custom)) S.leavingItems.delete(id);
     const all = [...S.items, ...S.leavingItems.values()];
-    const { batches, texts } = layoutBatches(all);
+    const { batches, texts } = layoutBatches(all, S.custom);
     for (const [key, insts] of batches) {
       const kind = insts[0].kind;
       const a = assetsFor(kind);
       const parent = insts[0].wall ? S.walls[insts[0].wall].full : S.furniture;
       const meshes = [];
-      const mk = (geo, mat, role) => {
-        const im = new THREE.InstancedMesh(geo, mat, insts.length);
-        im.castShadow = !a.model.noShadow && role !== "glow";
-        im.receiveShadow = role !== "glow";
-        im.userData.role = role;
+      for (const part of a.parts) {
+        const lit = part.role !== "glow" && part.role !== "emissive";
+        const im = new THREE.InstancedMesh(part.geo, part.mat, insts.length);
+        im.castShadow = !a.model.noShadow && lit && part.role !== "glass";
+        im.receiveShadow = lit;
+        im.userData.role = part.role;
         im.userData.key = key;
         im.frustumCulled = false;
+        if (part.role === "glass") im.renderOrder = 1;
         parent.add(im);
         meshes.push(im);
-        return im;
-      };
-      if (a.base) mk(a.base, mats.base, "base");
-      if (a.accent) mk(a.accent, a.model.accentMap === "rug" ? mats.rug : mats.accent, "accent");
-      if (a.glow) mk(a.glow, a.glowMat, "glow");
+      }
       const batch = { key, kind, insts, meshes, wall: insts[0].wall };
       S.batches.set(key, batch);
       writeBatch(batch, performance.now());
@@ -320,7 +420,8 @@ export function createScene(container) {
       for (const m of batch.meshes) {
         m.setMatrixAt(i, tmpM);
         if (m.userData.role === "accent") {
-          m.setColorAt(i, tmpC.set(inst.color ?? assetsFor(batch.kind).defaultColor));
+          if (inst.color) m.setColorAt(i, tmpC.set(inst.color));
+          else m.setColorAt(i, S.kindColor.get(batch.kind) ?? assetsFor(batch.kind).defaultColor);
         } else if (m.userData.role === "glow" && batch.kind === "desk") {
           m.setColorAt(i, tmpC.setScalar(deskGlow(inst.id)));
         } else if (m.userData.role === "glow") {
@@ -338,17 +439,28 @@ export function createScene(container) {
     for (const [agentId, desk] of S.seating) {
       if (desk.id !== deskId) continue;
       const ag = S.agents.find((x) => x.id === agentId);
-      if (!ag) return 0.08;
-      return ag.status === "working" ? 1 : ag.status === "away" ? 0.12 : 0.5;
+      if (!ag) return S.logo.tex ? 0.45 : 0.08;
+      return ag.status === "working" ? 1 : ag.status === "away" ? 0.25 : 0.6;
     }
-    return 0.08;
+    // with a logo, empty desks show it dimmed (a screensaver) instead of a dark screen
+    return S.logo.tex ? 0.45 : 0.08;
   }
 
+  /** Signs follow the theme's ink colours and, when the theme says so, carry the logo. */
+  function panelStyle(t, spec) {
+    const sign = t.kind === "sign" || assetsFor(t.kind).custom;
+    const logo = sign && S.look.logoOnSigns && S.logo.img ? S.logo.img : null;
+    return { bg: sign ? S.look.signBg : spec.bg, fg: sign ? S.look.signFg : spec.fg, logo };
+  }
+  const textSig = (t, st) => `${t.text}|${t.color}|${t.x}|${t.z}|${t.yaw}|${st.bg}|${st.fg}|${st.logo ? S.logo.id : ""}`;
+
   function syncTexts(texts) {
+    S.lastTexts = texts;
     const want = new Map(texts.map((t) => [t.id, t]));
     for (const [id, o] of S.texts) {
       const t = want.get(id);
-      if (!t || o.userData.sig !== `${t.text}|${t.color}|${t.x}|${t.z}|${t.yaw}`) {
+      const spec = t && assetsFor(t.kind).model.text;
+      if (!t || !spec || o.userData.sig !== textSig(t, panelStyle(t, spec))) {
         o.parent?.remove(o);
         o.geometry.dispose(); o.material.map.dispose(); o.material.dispose();
         S.texts.delete(id);
@@ -358,9 +470,12 @@ export function createScene(container) {
       if (S.texts.has(t.id)) continue;
       const spec = assetsFor(t.kind).model.text;
       if (!spec) throw new Error(`textable kind ${t.kind} has no text panel in its model`);
-      const map = T.textTexture(t.text, { bg: spec.bg, fg: spec.fg, w: spec.tw, h: spec.th });
+      const st = panelStyle(t, spec);
+      const map = st.logo
+        ? T.logoTextTexture(st.logo, t.text, { bg: st.bg, fg: st.fg, w: spec.tw * 2, h: spec.th * 2 })
+        : T.textTexture(t.text, { bg: st.bg, fg: st.fg, w: spec.tw, h: spec.th });
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(spec.w, spec.h), new THREE.MeshStandardMaterial({ map, roughness: 0.9 }));
-      mesh.userData.sig = `${t.text}|${t.color}|${t.x}|${t.z}|${t.yaw}`;
+      mesh.userData.sig = textSig(t, st);
       mesh.userData.itemId = t.id;
       mesh.receiveShadow = true;
       const holder = new THREE.Group();
@@ -384,10 +499,12 @@ export function createScene(container) {
     for (const l of S.lampLights) scene.remove(l);
     S.lampLights = [];
     const th = THEMES[S.theme];
+    const pal = S.palette;
     const lamps = S.items.filter((it) => it.kind === "lamp" || it.kind === "tv").slice(0, 6);
     for (const it of lamps) {
       const f = footprint(it);
-      const pl = new THREE.PointLight(it.kind === "lamp" ? "#ffc27a" : "#8fb6ff", th.point * (it.kind === "lamp" ? 1 : 0.4), 7, 1.6);
+      const pl = new THREE.PointLight(it.kind === "lamp" ? pal.lamp : "#8fb6ff", th.point * (it.kind === "lamp" ? 1 : 0.4), 7, 1.6);
+      pl.userData.lamp = it.kind === "lamp";
       pl.position.set(f.x + f.w / 2, it.kind === "lamp" ? 1.4 : 1.0, f.z + f.d / 2);
       pl.visible = th.point > 0;
       scene.add(pl);
@@ -395,10 +512,11 @@ export function createScene(container) {
     }
     // a soft warm "ceiling" fill at night so the room isn't a cave
     // a crowded floor (lots of desks) swallows light, so the fill grows with the furniture count
-    const density = Math.min(1, S.items.filter((it) => kindOf(it.kind)?.layer === "object").length / (S.grid.w * S.grid.d * 0.12));
-    const fill = new THREE.PointLight("#ffd9a8", th.point * (2.2 + 1.6 * density), Math.hypot(S.grid.w, S.grid.d), 1.2);
+    const density = Math.min(1, S.items.filter((it) => kindOf(it.kind, S.custom)?.layer === "object").length / (S.grid.w * S.grid.d * 0.12));
+    const fill = new THREE.PointLight(pal.fill, th.point * (2.2 + 1.6 * density), Math.hypot(S.grid.w, S.grid.d), 1.2);
     fill.position.set(S.grid.w / 2, 4.5, S.grid.d / 2);
     fill.visible = th.point > 0;
+    fill.userData.fill = true;
     scene.add(fill);
     S.lampLights.push(fill);
   }
@@ -415,12 +533,12 @@ export function createScene(container) {
     hit.position.y = 0.7;
     hit.userData.agentId = agent.id;
     obj.add(hit);
-    const start = initial ? targetFor(agent, new Set()).at : S.entry;
     const c = {
-      id: agent.id, agent, obj, hit, blob, pos: { x: start.x, z: start.z }, yaw: initial ? targetFor(agent, new Set()).yaw : Math.PI,
+      id: agent.id, agent, obj, hit, blob, pos: { x: S.entry.x, z: S.entry.z }, yaw: Math.PI,
       path: [], target: null, pose: "stand", phase: (hashStr(agent.id) % 1000) / 100, pop: { kind: "in", t0: now }, leaving: false,
-      seatY: SEAT_Y, nextWander: now + 15000 + Math.random() * 20000, salt: 0, spotId: null, away: false, waveUntil: initial ? 0 : now + 2200,
+      seatY: SEAT_Y, until: 0, arrivedAt: 0, salt: 0, spotId: null, restless: false, away: false, waveUntil: initial ? 0 : now + 2200,
     };
+    if (initial) c.placeOnArrive = true;
     obj.position.set(c.pos.x, 0, c.pos.z);
     scene.add(obj);
     S.chars.set(agent.id, c);
@@ -433,37 +551,48 @@ export function createScene(container) {
     c.obj.traverse((o) => { if (o.isMesh && o !== c.hit && o !== c.blob) o.material = away ? charAway : charBase; });
   }
 
-  /** Where an agent should go, given everyone else's taken spots. */
-  function targetFor(agent, taken, salt = 0) {
+  /** Where an agent should go: its desk while working, else the seat/station it was assigned, else mill about. */
+  function targetFor(agent, spot, salt = 0) {
     const desk = S.seating.get(agent.id);
     const { pose, place } = poseFor(agent, !!desk);
     if (place === "desk" && desk) {
       const s = seatOf(desk);
       return { key: `desk:${desk.id}`, at: { x: s.x, z: s.z }, yaw: s.yaw, pose, seatY: SEAT_Y };
     }
-    const spot = pickSpot(agent.id, S.spots, taken, salt);
     if (spot) {
-      const item = S.items.find((i) => i.id === spot.itemId);
-      const sitPose = spot.pose === "sit" ? "sit" : spot.pose;
-      return { key: `spot:${spot.id}`, spotId: spot.id, at: { x: spot.x, z: spot.z }, yaw: spot.yaw, pose: pose === "wave" ? "wave" : sitPose, seatY: SPOT_SEAT_Y[item?.kind] ?? SEAT_Y };
+      return { key: `spot:${spot.id}`, spotId: spot.id, at: { x: spot.x, z: spot.z }, yaw: spot.yaw, pose: pose === "wave" ? "wave" : spot.pose, seatY: spot.seatY ?? SEAT_Y, duration: spot.duration };
     }
-    // nowhere to sit: mill about near the entrance, spread out by id
+    // nowhere to go: mill about near the entrance, spread out by id
     const h = hashStr(agent.id + salt);
     return { key: `mill:${h % 97}`, at: { x: S.entry.x + ((h % 5) - 2) * 0.9, z: Math.max(0.5, S.entry.z - 1 - ((h >> 3) % 3) * 0.9) }, yaw: Math.PI, pose: pose === "wave" ? "wave" : "stand", seatY: SEAT_Y };
   }
 
   function retarget() {
-    const taken = new Set();
-    // desk agents first, then lounge agents in join order: stable assignments
-    const order = [...S.chars.values()].filter((c) => !c.leaving).sort((a, b) => a.agent.joinedAt - b.agent.joinedAt);
-    for (const c of order) {
-      const t = targetFor(c.agent, taken, c.salt);
-      if (t.spotId) taken.add(t.spotId);
-      if (!c.target || c.target.key !== t.key) {
+    const live = [...S.chars.values()].filter((c) => !c.leaving);
+    // lounge-bound agents (idle, or deskless) share the seats and stations, one each, stable
+    const wanters = live.filter((c) => poseFor(c.agent, S.seating.has(c.agent.id)).place === "lounge")
+      .map((c) => ({ id: c.id, joinedAt: c.agent.joinedAt, salt: c.salt, current: c.spotId, restless: c.restless }));
+    S.assign = assignSpots(wanters, S.spots);
+    for (const c of live) {
+      const spot = S.assign.get(c.id) ?? null;
+      const t = targetFor(c.agent, spot, c.salt);
+      c.spotId = spot?.id ?? null;
+      c.restless = false;
+      if (c.placeOnArrive) {
+        // first snapshot: everyone is already where they belong, no parade from the door
+        c.placeOnArrive = false;
+        c.pos = { x: t.at.x, z: t.at.z };
+        c.yaw = t.yaw;
+        c.target = t;
+        c.path = [];
+        c.arrivedAt = performance.now() - Math.random() * 20000;
+        c.until = 0;
+      } else if (!c.target || c.target.key !== t.key) {
         c.target = t;
         c.path = route(S.blocked, S.grid, c.pos, t.at);
+        c.until = 0;
       } else {
-        c.target = { ...c.target, pose: t.pose, yaw: t.yaw };
+        c.target = { ...c.target, pose: t.pose, yaw: t.yaw, seatY: t.seatY, duration: t.duration };
       }
       setAway(c, c.agent.status === "away");
     }
@@ -482,15 +611,18 @@ export function createScene(container) {
     } else if (c.target) {
       c.yaw += angDiff(c.yaw, c.target.yaw) * Math.min(1, dt * 8);
       pose = c.waveUntil > now ? "wave" : c.target.pose;
-      if (c.agent.status === "idle" && now > c.nextWander && !c.leaving) {
+      // settled on a seat/station: stay for its duration (± a little), then move on to another
+      if (!c.until) c.until = (c.arrivedAt || now) + ((c.target.duration ?? 40) * (0.8 + Math.random() * 0.4)) * 1000;
+      c.arrivedAt = 0;
+      if (c.agent.status === "idle" && now > c.until && !c.leaving) {
         c.salt++;
-        c.nextWander = now + 25000 + Math.random() * 30000;
-        c.target = null;
+        c.restless = true;
         retarget();
       }
     } else pose = "stand";
     if (c.leaving) pose = "wave";
     c.pose = pose;
+    applyProps(c.obj, pose);
     const a = limbAngles(pose, S.clock, c.phase);
     applyLimbs(c.obj, a, c.target?.seatY ?? SEAT_Y);
     blink(c.obj, S.clock, c.phase);
@@ -522,10 +654,18 @@ export function createScene(container) {
       buildRoom(S.grid);
       resetView(false);
     }
+    // custom kinds: a redefined kind rebuilds its geometry and bumps every placed copy
+    const custom = state.customKinds ?? {};
+    const redefined = new Set();
+    for (const k of new Set([...Object.keys(S.custom), ...Object.keys(custom)])) {
+      if (S.custom[k] !== custom[k]) { redefined.add(k); dropKind(k); }
+    }
+    S.custom = custom;
     // items: diff for pop animations
     const prev = new Map(S.items.map((i) => [i.id, i]));
     const next = new Map(state.items.map((i) => [i.id, i]));
-    let itemsChanged = gridChanged || prev.size !== next.size;
+    let itemsChanged = gridChanged || prev.size !== next.size || redefined.size > 0;
+    for (const it of state.items) if (redefined.has(it.kind) && prev.has(it.id)) S.itemAnim.set(it.id, { kind: "bump", t0: now });
     for (const [id, it] of next) {
       const p = prev.get(id);
       if (!p) { if (S.items.length || !S.firstItemsSeen) S.itemAnim.set(id, { kind: "in", t0: now + Math.random() * 120 }); itemsChanged = true; S.leavingItems.delete(id); }
@@ -542,8 +682,8 @@ export function createScene(container) {
     S.agents = state.agents;
     S.seating = deskSeating(state.agents, state.items);
     if (itemsChanged) {
-      S.blocked = blockedCells(S.items, S.grid);
-      S.spots = idleSpots(S.items);
+      S.blocked = blockedCells(S.items, S.grid, S.custom);
+      S.spots = usableSpots(idleSpots(S.items, S.custom), S.blocked, S.grid);
       S.entry = entryPoint(S.blocked, S.grid);
       rebuildFurniture();
     } else {
@@ -569,26 +709,156 @@ export function createScene(container) {
     }
     if (itemsChanged) for (const c of S.chars.values()) if (c.target) c.path = route(S.blocked, S.grid, c.pos, c.target.at);
     retarget();
+    // design: palette/materials (crossfaded after the first paint) and the logo on every screen
+    const theme = state.theme ?? DEFAULT_THEME;
+    if (theme !== S.themeObj) {
+      const first = !S.themeObj;
+      S.themeObj = theme;
+      applyLook(themeLook(theme), !first);
+    }
+    S.assets = state.assets ?? [];
+    syncLogo();
   }
 
   /* ── theme ─────────────────────────────────────────────────────────────────────────────────── */
 
+  /** Time of day: "day" | "night" (the office theme — palette and materials — is applyLook). */
   function setTheme(theme) {
     if (!THEMES[theme]) throw new Error(`unknown theme ${theme}`);
     S.theme = theme;
     const th = THEMES[theme];
-    hemi.color.set(th.hemiSky); hemi.groundColor.set(th.hemiGround); hemi.intensity = th.hemi;
-    sun.color.set(th.sunColor); sun.intensity = th.sun;
+    hemi.intensity = th.hemi;
+    sun.intensity = th.sun;
     scene.background = theme === "night" ? tex.skyNight : tex.skyDay;
     scene.fog.color.set(th.fog);
     bloom.strength = th.bloom; bloom.threshold = th.threshold;
     renderer.toneMappingExposure = th.exposure;
-    for (const m of S.glowMats.values()) {
-      const k = m.userData.lamp ? th.lamp : th.glow;
-      m.color.copy(m.userData.baseColor).multiplyScalar(k);
-      if (m.userData.window) { m.map = theme === "night" ? tex.windowNight : tex.windowDay; m.color.setScalar(theme === "night" ? 0.95 : 1.05); m.needsUpdate = true; }
-    }
+    for (const m of S.glowMats.values()) applyGlow(m);
+    applyLights();
     if (S.grid) updateLampLights();
+  }
+
+  function applyGlow(m) {
+    const th = THEMES[S.theme];
+    const night = S.theme === "night";
+    m.color.copy(m.userData.baseColor).multiplyScalar(m.userData.lamp ? th.lamp : th.glow);
+    if (m.userData.window) {
+      const map = night ? nightWindowTex(S.look.nightWindow) : tex.windowDay;
+      if (m.map !== map) { m.map = map; m.needsUpdate = true; }
+      m.color.setScalar(night ? 0.95 : 1.05);
+    }
+  }
+
+  /** Sun / sky / lamp tints: the lighting mood of the theme over the time of day. */
+  function applyLights() {
+    const th = THEMES[S.theme], p = S.palette;
+    if (!p) return;
+    const night = S.theme === "night";
+    hemi.color.copy(night ? p.nightSky : p.sky);
+    hemi.groundColor.copy(night ? tmpC.set(th.hemiGround) : p.ground);
+    sun.color.copy(night ? tmpC.set(th.sunColor) : p.sun);
+    for (const l of S.lampLights) l.color.copy(l.userData.fill ? p.fill : l.userData.lamp ? p.lamp : l.color);
+  }
+
+  /* ── office theme: palette + materials, crossfaded ─────────────────────────────────────────── */
+
+  function paletteFor(look) {
+    const C = (h) => new THREE.Color(h);
+    const wallFor = (w) => (look.walls.accent?.wall === w ? look.walls.accent.color : look.walls.color);
+    return {
+      floor: C(look.floor.color), wallPlain: C(look.walls.color), wallBack: C(wallFor("back")), wallLeft: C(wallFor("left")),
+      trim: C(look.walls.trim), finish: C(look.desk.wood), rail: C(look.desk.rail),
+      sun: C(look.mood.sun), sky: C(look.mood.sky), ground: C(look.mood.ground), lamp: C(look.mood.lamp), fill: C(look.mood.fill), nightSky: C(look.mood.nightSky),
+      kinds: new Map(Object.entries(look.kindColors).map(([k, v]) => [k, C(v)])),
+      floorRough: look.floor.roughness,
+    };
+  }
+
+  function lerpPalette(a, b, k) {
+    const out = { kinds: new Map(), floorRough: a.floorRough + (b.floorRough - a.floorRough) * k };
+    for (const key of Object.keys(b)) if (b[key] instanceof THREE.Color) out[key] = a[key].clone().lerp(b[key], k);
+    for (const [kind, c] of b.kinds) out.kinds.set(kind, (a.kinds.get(kind) ?? c).clone().lerp(c, k));
+    return out;
+  }
+
+  const FADE_SURFACES = ["floor", "wallPlain", "wallBack", "wallLeft"];
+  function surfaceTex(look, key) {
+    if (key === "floor") return floorTex(look.floor.material);
+    const acc = look.walls.accent;
+    const wall = key === "wallBack" ? "back" : key === "wallLeft" ? "left" : null;
+    return acc && acc.wall === wall ? wallTex(acc.material) : wallTex("plaster");
+  }
+
+  function paintPalette(p) {
+    S.palette = p;
+    for (const key of [...FADE_SURFACES, "trim", "finish", "rail"]) mats[key].color.copy(p[key]);
+    mats.floor.roughness = p.floorRough;
+    S.kindColor = p.kinds;
+    applyLights();
+  }
+
+  /** Switch to a new look; `animate` crossfades colours and surface textures over FADE_MS. */
+  function applyLook(look, animate) {
+    const to = paletteFor(look);
+    S.look = look;
+    for (const key of FADE_SURFACES) {
+      const u = mats[key].userData.xfade;
+      if (S.fade) { mats[key].map = u.uMix.value > 0.5 ? u.map2.value : mats[key].map; u.uMix.value = 0; }
+      const target = surfaceTex(look, key);
+      if (animate) u.map2.value = target;
+      else { mats[key].map = target; u.map2.value = target; u.uMix.value = 0; }
+    }
+    if (animate && S.palette) S.fade = { t0: performance.now(), from: S.palette, to };
+    else { S.fade = null; paintPalette(to); }
+    for (const m of S.glowMats.values()) applyGlow(m);
+    if (S.logo.img) setLogoTex(S.logo.img);
+    if (S.lastTexts) syncTexts(S.lastTexts);
+    if (S.grid) updateLampLights();
+  }
+
+  function stepFade(now) {
+    const F = S.fade;
+    if (!F) return false;
+    const k = Math.min(1, (now - F.t0) / FADE_MS), e = easeInOut(k);
+    paintPalette(lerpPalette(F.from, F.to, e));
+    for (const key of FADE_SURFACES) mats[key].userData.xfade.uMix.value = e;
+    if (k >= 1) {
+      for (const key of FADE_SURFACES) { const u = mats[key].userData.xfade; mats[key].map = u.map2.value; u.uMix.value = 0; }
+      S.fade = null;
+    }
+    return true;
+  }
+
+  /* ── logo on screens ───────────────────────────────────────────────────────────────────────── */
+
+  function syncLogo() {
+    const id = S.look.logo;
+    if (id === S.logo.id) return;
+    S.logo.id = id;
+    if (!id) { setLogoTex(null); return; }
+    const asset = S.assets.find((a) => a.id === id);
+    if (!asset) {
+      // the theme frame beat its asset frame: show the plain screens and try again on the next state update
+      console.warn(`office: the theme's logo ${id} isn't among this office's assets yet`);
+      S.logo.id = null;
+      if (S.logo.img) setLogoTex(null);
+      return;
+    }
+    S.fetchAsset(asset.url)
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); })
+      .then((b) => createImageBitmap(b))
+      .then((img) => { if (S.logo.id === id) setLogoTex(img); })
+      .catch((e) => { console.error("office: logo load failed", e); S.onError(`couldn't load the office logo (${asset.url}): ${e.message}`); });
+  }
+
+  function setLogoTex(img) {
+    S.logo.tex?.dispose();
+    S.logo.img = img;
+    S.logo.tex = img ? T.logoScreenTexture(img, { bg: S.look.screenBg }) : null;
+    for (const m of screenMats) { m.map = screenMap(m); m.needsUpdate = true; }
+    if (S.lastTexts) syncTexts(S.lastTexts);
+    const desks = S.batches.get("desk");
+    if (desks) writeBatch(desks, performance.now());
   }
 
   /* ── camera ────────────────────────────────────────────────────────────────────────────────── */
@@ -739,16 +1009,16 @@ export function createScene(container) {
   /** ghost: {kind, x, z, rot, valid} | null — a translucent copy of the kind at that cell. */
   function setGhost(g) {
     if (S.ghost && (!g || S.ghost.userData.kind !== g.kind)) { scene.remove(S.ghost); S.ghost = null; }
-    if (!g) { showFootprint(S.selectedItem ? footprint(S.selectedItem) : null, "#ffe066"); return; }
+    if (!g) { showFootprint(S.selectedItem ? footprint(S.selectedItem, S.custom) : null, "#ffe066"); return; }
     if (!S.ghost) {
       const a = assetsFor(g.kind);
       const grp = new THREE.Group();
-      for (const geo of [a.base, a.accent, a.glow]) if (geo) grp.add(new THREE.Mesh(geo, mats.ghost));
+      for (const part of a.parts) grp.add(new THREE.Mesh(part.geo, mats.ghost));
       grp.userData.kind = g.kind;
       scene.add(grp);
       S.ghost = grp;
     }
-    const f = footprint(g);
+    const f = footprint(g, S.custom);
     S.ghost.position.set(f.x + f.w / 2, 0.02, f.z + f.d / 2);
     S.ghost.rotation.y = (g.rot * Math.PI) / 180;
     mats.ghost.color.set(g.valid ? "#7dffb0" : "#ff6b6b");
@@ -757,7 +1027,7 @@ export function createScene(container) {
 
   function selectItem(item) {
     S.selectedItem = item;
-    showFootprint(item ? footprint(item) : null, "#ffe066");
+    showFootprint(item ? footprint(item, S.custom) : null, "#ffe066");
   }
 
   /** Hide items (e.g. the one being moved) from the instanced batches. */
@@ -777,11 +1047,10 @@ export function createScene(container) {
     dl.position.set(-2, 4, 3);
     ts.add(dl);
     const g = new THREE.Group();
-    for (const [geo, role] of [[a.base, "base"], [a.accent, "accent"], [a.glow, "glow"]]) {
-      if (!geo) continue;
-      const m = role === "glow" ? a.glowMat : role === "accent" ? (a.model.accentMap === "rug" ? mats.rug : mats.accent).clone() : mats.base;
-      if (role === "accent") m.color.copy(a.defaultColor);
-      g.add(new THREE.Mesh(geo, m));
+    for (const part of a.parts) {
+      let m = part.mat;
+      if (part.role === "accent") { m = part.mat.clone(); m.color.copy(S.kindColor.get(kind) ?? a.defaultColor); }
+      g.add(new THREE.Mesh(part.geo, m));
     }
     ts.add(g);
     const box = new THREE.Box3().setFromObject(g);
@@ -802,7 +1071,7 @@ export function createScene(container) {
     renderer.setRenderTarget(null);
     renderer.toneMapping = prevTone;
     rt.dispose();
-    for (const m of g.children) if (m.material !== mats.base && m.material !== a.glowMat) m.material.dispose();
+    for (const m of g.children) if (!a.parts.some((p) => p.mat === m.material)) m.material.dispose();
     const cv = document.createElement("canvas");
     cv.width = cv.height = size;
     const ctx = cv.getContext("2d");
@@ -875,8 +1144,9 @@ export function createScene(container) {
         else if (!animating) animating = true;
       } else if (!animating) animating = true;
     }
+    const fading = stepFade(now);
     if (animating === "rebuild") rebuildFurniture();
-    else if (animating) for (const b of S.batches.values()) writeBatch(b, now);
+    else if (animating || fading) for (const b of S.batches.values()) writeBatch(b, now);
 
     for (const c of [...S.chars.values()]) {
       if (!stepChar(c, dt, now)) {
@@ -889,12 +1159,36 @@ export function createScene(container) {
     composer.render(dt);
     for (const cb of S.frameCbs) cb(now);
   }
+  paintPalette(paletteFor(S.look));
   setTheme("day");
   frame();
 
   return {
     setInsets(left, right) { S.insets = { left, right }; applyInsets(); },
     setState, setTheme, resetView, zoom, focusAgent, anchors, pickAt, floorAt, setGhost, selectItem, hideItems, thumbnail,
+    /** Where everyone is and what they're doing (for ?debug and tests in the browser). */
+    debug() {
+      return [...S.chars.values()].map((c) => ({ id: c.id, pose: c.pose, spot: c.spotId, walking: c.path.length > 0, x: +c.pos.x.toFixed(2), z: +c.pos.z.toFixed(2) }));
+    },
+    /** Frame a point of the floor (x, z) from the current angle at distance `dist`. */
+    lookAt(x, z, dist = 12, animate = true) {
+      const t = new THREE.Vector3(x, 0.6, z);
+      const off = camera.position.clone().sub(controls.target).setLength(dist);
+      if (animate) animateTo(t, t.clone().add(off));
+      else { S.camAnim = null; controls.target.copy(t); camera.position.copy(t.clone().add(off)); controls.update(); }
+    },
+    /** Run the characters forward `seconds` without waiting for frames (background tabs barely animate). */
+    advance(seconds) {
+      for (let k = 0; k < seconds / 0.05; k++) {
+        S.clock += 0.05;
+        for (const c of S.chars.values()) stepChar(c, 0.05, performance.now());
+      }
+      controls.update();
+      updateCutaway();
+      for (const c of S.chars.values()) stepChar(c, 0, performance.now());
+      composer.render(0);
+      for (const cb of S.frameCbs) cb(performance.now());
+    },
     get theme() { return S.theme; },
     get grid() { return S.grid; },
     onFrame(cb) { S.frameCbs.push(cb); },

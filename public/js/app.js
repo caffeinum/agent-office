@@ -5,7 +5,7 @@ import { applyFrame } from "./model.js";
 import { kindOf } from "../shared/catalog.js";
 import { createScene } from "./scene.js";
 import { createOverlay } from "./overlay.js";
-import { createUi } from "./ui.js";
+import { createUi, imageFrom } from "./ui.js";
 import { createEditor } from "./editor.js";
 import { connectDemo, connectLive } from "./source.js";
 
@@ -58,7 +58,33 @@ function boot() {
     onZoom: (f) => scene.zoom(f),
     onEdit: () => { const on = editor.toggle(); ui.setEditing(on); if (on) selectAgent(null); },
     onKick: (id) => { if (!source) throw new Error("not connected"); source.send({ type: "kick", id, as: asName() }); },
+    onDesigner: (id) => {
+      if (!source) throw new Error("not connected");
+      source.send({ type: "designer", id, as: asName() });
+    },
+    onImage: (file, to) => { shareImage(file, to).catch((e) => ui.toast(e.message, "err")); },
   });
+
+  /** Owner dropped/pasted an image into a chat box: upload it, then tell the agent (DM, else the designer, else the room) its asset id. */
+  async function shareImage(file, to) {
+    const as = asName();
+    if (file.size > 512 * 1024) throw new Error(`${file.name || "that image"} is ${Math.round(file.size / 1024)} KB; the office takes images up to 512 KB`);
+    ui.toast(`Uploading ${file.name || "image"}…`);
+    const res = await source.upload(file);
+    const target = to ?? state?.designer ?? null;
+    const text = `🖼 here's an image: asset ${res.assetId} (${res.w}×${res.h}) ${res.url} — office_set_logo {"assetId":"${res.assetId}"} puts it on the screens`;
+    source.send({ type: "chat", to: target, text, as });
+    ui.toast(target ? `Sent the image to ${state.agents.find((a) => a.id === target)?.name ?? target}` : "Shared the image with the room");
+  }
+
+  /** Edit panel: upload an image and make it the office logo straight away. */
+  async function uploadLogo(file) {
+    if (file.size > 512 * 1024) throw new Error(`${file.name || "that image"} is ${Math.round(file.size / 1024)} KB; the office takes images up to 512 KB`);
+    ui.toast(`Uploading ${file.name || "logo"}…`);
+    const res = await source.upload(file);
+    await source.setLogo(res.assetId);
+    ui.toast("Logo set — it's on the TV and every screen now");
+  }
 
   if (!demo && !key) {
     ui.screen(`<div class="card"><div class="big">🔑</div><h1>This office needs a key</h1>
@@ -69,13 +95,17 @@ function boot() {
 
   let scene;
   try {
-    scene = createScene(root.querySelector(".stage"));
+    scene = createScene(root.querySelector(".stage"), { onError: (msg) => ui.toast(msg, "err") });
   } catch (e) {
     ui.screen(`<div class="card"><div class="big">🧊</div><h1>The office needs WebGL</h1><p>${esc(e.message)}</p></div>`);
     return;
   }
-  const overlay = createOverlay(root.querySelector(".labels"), { onClick: (id) => selectAgent(id) });
-  const editor = createEditor(root, { scene, send: (m) => source.send({ ...m, as: asName() }), getState: () => state, toast: ui.toast });
+  const overlay = createOverlay(root.querySelector(".labels"), { onClick: (id) => selectAgent(id), onMenu: (id, x, y) => ui.agentMenu(id, x, y) });
+  const editor = createEditor(root, {
+    scene, send: (m) => source.send({ ...m, as: asName() }), getState: () => state, toast: ui.toast,
+    uploadLogo: (file) => uploadLogo(file).catch((e) => ui.toast(e.message, "err")),
+    setLogo: (id) => source.setLogo(id).then(() => ui.toast(id ? "Logo set" : "Logo removed")).catch((e) => ui.toast(e.message, "err")),
+  });
   scene.onFrame(() => overlay.update(scene.anchors()));
   const sideEl = root.querySelector(".side");
   const fitInsets = () => {
@@ -123,15 +153,16 @@ function boot() {
       return;
     }
     document.title = `${state.name ?? state.id} · agent office`;
-    const unknown = state.items.filter((it) => !kindOf(it.kind));
+    const unknown = state.items.filter((it) => !kindOf(it.kind, state.customKinds));
     if (unknown.length) console.warn("office: skipping items of unknown kind", unknown.map((it) => `${it.id}:${it.kind}`));
     try {
-      scene.setState(unknown.length ? { ...state, items: state.items.filter((it) => kindOf(it.kind)) } : state);
+      scene.setState(unknown.length ? { ...state, items: state.items.filter((it) => kindOf(it.kind, state.customKinds)) } : state);
     } catch (e) {
       console.error("office: scene update failed", e);
       ui.toast(`couldn't draw part of the office: ${e.message}`, "err");
     }
     overlay.setAgents(state.agents);
+    overlay.setDesigner(state.designer);
     ui.setState(state);
     editor.sync(state);
     ui.screen(null);
@@ -167,6 +198,14 @@ function boot() {
     if (editor.click(e.clientX, e.clientY)) return;
     const hit = scene.pickAt(e.clientX, e.clientY, { items: false });
     selectAgent(hit?.type === "agent" ? hit.id : null);
+  });
+  // an image dropped on the office goes to the agent you're talking to (or the designer)
+  canvas.addEventListener("dragover", (e) => { if (role === "owner" && [...(e.dataTransfer?.types ?? [])].includes("Files")) e.preventDefault(); });
+  canvas.addEventListener("drop", (e) => {
+    const f = imageFrom(e.dataTransfer);
+    if (!f || role !== "owner") return;
+    e.preventDefault();
+    shareImage(f, selectedAgent).catch((err) => ui.toast(err.message, "err"));
   });
   window.addEventListener("keydown", (e) => {
     if (e.target.closest?.("input, textarea")) return;

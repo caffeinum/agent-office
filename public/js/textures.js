@@ -267,3 +267,157 @@ export function textTexture(text, { bg, fg, w = 128, h = 128, border = null }) {
   t.anisotropy = 4;
   return t;
 }
+
+/* ── themed surfaces: greyscale patterns tinted by the material colour, so colours crossfade smoothly ── */
+
+function grey(g, x, y, v) {
+  const k = Math.round(255 * Math.max(0, Math.min(1, v)));
+  g.fillStyle = `rgb(${k},${k},${k})`;
+  g.fillRect(x, y, 1, 1);
+}
+
+/** Floor tile for one cell (16×16): wood planks, square tiles with grout, poured concrete or carpet. */
+export function floorTexture(material) {
+  const [c, g] = canvas(16, 16);
+  const r = rng({ wood: 11, tile: 13, concrete: 17, carpet: 19 }[material] ?? 23);
+  if (material === "wood") {
+    const tone = [0.98, 0.9, 1.02, 0.93];
+    for (let p = 0; p < 4; p++) {
+      for (let y = p * 4; y < p * 4 + 4; y++) for (let x = 0; x < 16; x++) grey(g, x, y, tone[p] * (0.95 + r() * 0.06) - (y === p * 4 + 3 ? 0.1 : 0));
+      const seam = (p * 7 + 3) % 16;
+      for (let y = p * 4; y < p * 4 + 4; y++) grey(g, seam, y, tone[p] * 0.7);
+      if (r() < 0.6) { const x = Math.floor(r() * 14); grey(g, x, p * 4 + 1, tone[p] * 0.8); grey(g, x + 1, p * 4 + 1, tone[p] * 0.8); }
+    }
+  } else if (material === "tile") {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const grout = x % 8 === 7 || y % 8 === 7;
+      const which = ((x >> 3) + (y >> 3)) % 2;
+      const edge = x % 8 === 0 || y % 8 === 0;
+      grey(g, x, y, grout ? 0.66 : (which ? 0.97 : 0.92) * (edge ? 1.04 : 1) * (0.98 + r() * 0.03));
+    }
+  } else if (material === "concrete") {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      let v = 0.95 + r() * 0.05;
+      if (r() < 0.05) v -= 0.12;
+      if (r() < 0.03) v += 0.08;
+      grey(g, x, y, v);
+    }
+    for (let x = 0; x < 16; x++) grey(g, x, 15, 0.8);
+  } else if (material === "carpet") {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const loop = (x + y) % 4 === 0 ? 0.04 : 0;
+      grey(g, x, y, 0.91 + r() * 0.06 + loop);
+    }
+  } else throw new Error(`floorTexture: unknown material ${JSON.stringify(material)}`);
+  return tex(c, { repeat: true });
+}
+
+/** Wall surface, one tile per world unit: plaster, brick (4 courses, offset joints) or vertical wood-panels. */
+export function wallTexture(material) {
+  const [c, g] = canvas(16, 16);
+  const r = rng({ plaster: 29, brick: 31, "wood-panels": 37 }[material] ?? 41);
+  if (material === "plaster") {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) grey(g, x, y, 0.93 + r() * 0.07);
+  } else if (material === "brick") {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const course = y >> 2;
+      const mortar = y % 4 === 3 || (x + (course % 2) * 4) % 8 === 7;
+      const brickId = course * 2 + (((x + (course % 2) * 4) >> 3) & 1);
+      const tone = 0.78 + ((brickId * 37) % 11) / 60;
+      grey(g, x, y, mortar ? 1.12 + r() * 0.04 : tone * (0.94 + r() * 0.08));
+    }
+  } else if (material === "wood-panels") {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const panel = x >> 2;
+      const groove = x % 4 === 3;
+      grey(g, x, y, groove ? 0.62 : [0.95, 0.88, 0.99, 0.91][panel] * (0.96 + r() * 0.06));
+    }
+  } else throw new Error(`wallTexture: unknown material ${JSON.stringify(material)}`);
+  return tex(c, { repeat: true });
+}
+
+/** Night window variants: stars, a city skyline, a calm aurora, or rain on the glass. */
+export function nightWindowTexture(style) {
+  if (style === "stars" || !style) return windowTexture(true);
+  const [c, g] = canvas(32, 16);
+  const r = rng({ city: 79, aurora: 83, rain: 89 }[style] ?? 97);
+  const grad = g.createLinearGradient(0, 0, 0, 16);
+  if (style === "city") {
+    grad.addColorStop(0, "#151a36"); grad.addColorStop(1, "#3b2f58");
+    g.fillStyle = grad; g.fillRect(0, 0, 32, 16);
+    let x = 0;
+    while (x < 32) {
+      const w = 3 + Math.floor(r() * 4), h = 5 + Math.floor(r() * 9);
+      g.fillStyle = r() < 0.5 ? "#232849" : "#1b1f3c";
+      g.fillRect(x, 16 - h, w, h);
+      for (let wy = 17 - h; wy < 15; wy += 2) for (let wx = x + 1; wx < x + w - 1; wx += 2) if (r() < 0.45) { g.fillStyle = r() < 0.7 ? "#ffd27a" : "#9fd0ff"; g.fillRect(wx, wy, 1, 1); }
+      x += w;
+    }
+  } else if (style === "aurora") {
+    grad.addColorStop(0, "#0b1430"); grad.addColorStop(1, "#16284a");
+    g.fillStyle = grad; g.fillRect(0, 0, 32, 16);
+    for (let x = 0; x < 32; x++) {
+      const y = 5 + Math.round(Math.sin(x * 0.4) * 2 + Math.sin(x * 0.13) * 1.5);
+      g.fillStyle = "#4fe3a8"; g.fillRect(x, y, 1, 2);
+      g.fillStyle = "rgba(140, 120, 255, 0.7)"; g.fillRect(x, y - 2, 1, 2);
+    }
+    for (let i = 0; i < 10; i++) { g.fillStyle = "#cfd8ff"; g.fillRect(Math.floor(r() * 32), Math.floor(r() * 4), 1, 1); }
+    g.fillStyle = "#1d2b3d"; g.fillRect(0, 13, 32, 3);
+  } else if (style === "rain") {
+    grad.addColorStop(0, "#1a2236"); grad.addColorStop(1, "#2c3650");
+    g.fillStyle = grad; g.fillRect(0, 0, 32, 16);
+    g.fillStyle = "#232c44"; g.fillRect(0, 11, 32, 5);
+    for (let x = 1; x < 32; x += 5) if (r() < 0.7) { g.fillStyle = "#ffd27a"; g.fillRect(x, 12 + Math.floor(r() * 3), 1, 1); }
+    for (let i = 0; i < 26; i++) { g.fillStyle = r() < 0.5 ? "rgba(170, 200, 240, 0.75)" : "rgba(120, 150, 200, 0.6)"; g.fillRect(Math.floor(r() * 32), Math.floor(r() * 15), 1, 2); }
+  } else {
+    // unknown style: a plain night sky rather than a guess
+    grad.addColorStop(0, "#141a3a"); grad.addColorStop(1, "#2b2f5e");
+    g.fillStyle = grad; g.fillRect(0, 0, 32, 16);
+  }
+  return tex(c);
+}
+
+/** A screen showing the office logo, letterboxed on a dark panel (aspect = w / h). Linear-filtered so it stays crisp. */
+export function logoScreenTexture(img, { w = 512, h = 288, bg = "#141414", fit = 0.72 } = {}) {
+  const [c, g] = canvas(w, h);
+  g.fillStyle = bg;
+  g.fillRect(0, 0, w, h);
+  const iw = img.width, ih = img.height;
+  const s = Math.min((w * fit) / iw, (h * fit) / ih);
+  const dw = iw * s, dh = ih * s;
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = "high";
+  g.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.generateMipmaps = true;
+  t.anisotropy = 8;
+  return t;
+}
+
+/** A sign panel with the office logo on top and (if any) the text underneath. */
+export function logoTextTexture(img, text, { bg, fg, w = 256, h = 160 }) {
+  const [c, g] = canvas(w, h);
+  g.fillStyle = bg;
+  g.fillRect(0, 0, w, h);
+  const hasText = !!String(text || "").trim();
+  const box = { w: w * 0.8, h: h * (hasText ? 0.5 : 0.78) };
+  const s = Math.min(box.w / img.width, box.h / img.height);
+  const dw = img.width * s, dh = img.height * s;
+  g.imageSmoothingQuality = "high";
+  g.drawImage(img, (w - dw) / 2, hasText ? h * 0.08 + (box.h - dh) / 2 : (h - dh) / 2, dw, dh);
+  if (hasText) {
+    g.fillStyle = fg;
+    g.textBaseline = "middle";
+    let size = Math.round(h * 0.16);
+    const line = String(text).replace(/\s+/g, " ").trim();
+    do { g.font = `700 ${size}px ui-rounded, "SF Pro Rounded", system-ui, sans-serif`; size -= 2; } while (g.measureText(line).width > w * 0.88 && size > 8);
+    g.fillText(line, (w - Math.min(g.measureText(line).width, w * 0.9)) / 2, h * 0.78, w * 0.9);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}

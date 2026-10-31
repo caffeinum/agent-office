@@ -11,7 +11,7 @@ import { KINDS } from "../shared/catalog.js";
 export const SEAT_Y = 0.46;
 export const WALL_H = 2.6;
 
-const WOOD = "#d6a46a", WOOD_D = "#8c5d3c", DESK = "#f3ede2", DARK = "#2e313a", METAL = "#5b6070", WHITE = "#ffffff";
+const WOOD = "#d6a46a", WOOD_D = "#8c5d3c", DARK = "#2e313a", METAL = "#5b6070", WHITE = "#ffffff";
 const LEAF = ["#5fae4e", "#4f9c43", "#72c05a", "#3f8a3a"];
 const POT = "#c9744f";
 
@@ -57,17 +57,21 @@ function books(y, seed) {
   return out;
 }
 
-/** kind → { base, accent, glow: {boxes, tex, color}, defaultColor, text?: {x, y, z, w, h, bg, fg, border} } */
+/** kind → { base, accent, finish?, rail?, glow: {boxes, tex, color}, defaultColor, text?: {x, y, z, w, h, bg, fg, border} }
+ *  finish/rail are white boxes tinted by the theme's desk wood / rail colours. */
 export const MODELS = {
   desk: () => {
     const ch = chairBoxes(0.5, true, WHITE);
     return {
       defaultColor: "#6aa6c9",
+      // finish (desk top) and rail (legs + modesty panel) are painted by the office theme
+      finish: [vbox(0, 0.68, -0.5, 1.86, 0.07, 0.88, WHITE)],
+      rail: [
+        vbox(-0.86, 0, -0.5, 0.08, 0.68, 0.8, WHITE),
+        vbox(0.86, 0, -0.5, 0.08, 0.68, 0.8, WHITE),
+        vbox(0, 0.24, -0.88, 1.64, 0.4, 0.04, WHITE),
+      ],
       base: [
-        vbox(0, 0.68, -0.5, 1.86, 0.07, 0.88, WOOD),
-        vbox(-0.86, 0, -0.5, 0.08, 0.68, 0.8, DESK),
-        vbox(0.86, 0, -0.5, 0.08, 0.68, 0.8, DESK),
-        vbox(0, 0.24, -0.88, 1.64, 0.4, 0.04, DESK),
         vbox(0, 0.75, -0.74, 0.3, 0.025, 0.18, DARK),
         vbox(0, 0.775, -0.75, 0.08, 0.16, 0.05, DARK),
         vbox(0, 0.88, -0.76, 0.88, 0.54, 0.06, DARK),

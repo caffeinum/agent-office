@@ -6,19 +6,21 @@ import { activeSay, clip, cullLabels, hueColors, labelPriority } from "./model.j
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-export function createOverlay(layer, { onClick }) {
+export function createOverlay(layer, { onClick, onMenu }) {
   const nodes = new Map();
   let agents = new Map();
   let selected = null;
+  let designer = null;
 
   function render(a, n) {
     const say = activeSay(a);
-    const sig = `${a.name}|${a.emoji}|${a.status}|${a.activity}|${say}|${a.hue}|${selected === a.id}`;
+    const isDesigner = designer === a.id;
+    const sig = `${a.name}|${a.emoji}|${a.status}|${a.activity}|${say}|${a.hue}|${selected === a.id}|${isDesigner}`;
     if (n.sig === sig) return;
     n.sig = sig;
     const col = hueColors(a.hue ?? 0).css;
     const act = a.status === "working" && a.activity ? `<div class="act">${esc(clip(a.activity, 48))}</div>` : a.status === "waiting" ? `<div class="act wait">${esc(clip(a.activity || "needs input", 48))}</div>` : "";
-    n.el.innerHTML = `${say ? `<div class="bubble">${esc(clip(say, 140))}</div>` : ""}<div class="tag" style="--hue:${col}">${a.emoji ? `<span class="emo">${esc(a.emoji)}</span>` : ""}<b>${esc(a.name)}</b><i class="dot ${a.status}"></i></div>${act}`;
+    n.el.innerHTML = `${say ? `<div class="bubble">${esc(clip(say, 140))}</div>` : ""}<div class="tag" style="--hue:${col}">${a.emoji ? `<span class="emo">${esc(a.emoji)}</span>` : ""}<b>${esc(a.name)}</b>${isDesigner ? `<em class="badge">Designer</em>` : ""}<i class="dot ${a.status}"></i></div>${act}`;
     n.el.classList.toggle("away", a.status === "away");
     n.el.classList.toggle("working", a.status === "working");
     n.el.classList.toggle("sel", selected === a.id);
@@ -34,6 +36,7 @@ export function createOverlay(layer, { onClick }) {
         const el = document.createElement("div");
         el.className = "pill";
         el.addEventListener("click", () => onClick(a.id));
+        el.addEventListener("contextmenu", (e) => { e.preventDefault(); onMenu?.(a.id, e.clientX, e.clientY); });
         layer.appendChild(el);
         n = { el, sig: "", size: null };
         nodes.set(a.id, n);
@@ -80,5 +83,11 @@ export function createOverlay(layer, { onClick }) {
     }
   }
 
-  return { setAgents, setSelected, update };
+  function setDesigner(id) {
+    if (designer === id) return;
+    designer = id;
+    for (const [aid, n] of nodes) { const a = agents.get(aid); if (a) render(a, n); }
+  }
+
+  return { setAgents, setSelected, setDesigner, update };
 }

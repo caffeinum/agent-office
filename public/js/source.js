@@ -63,11 +63,30 @@ export function connectLive({ office, key, onFrame, onStatus }) {
   }
   open();
 
+  /** Owner REST call (the ownerKey may call the design tools without joining). Throws with the server's message. */
+  async function rest(tool, body, { query = "", contentType = "application/json" } = {}) {
+    const r = await fetch(`/api/o/${encodeURIComponent(office)}/${tool}${query}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": contentType },
+      body: contentType === "application/json" ? JSON.stringify(body) : body,
+    });
+    let data = null;
+    try { data = await r.json(); } catch { /* non-JSON error page */ }
+    if (!r.ok) throw new Error(data?.error ?? `${tool} failed: HTTP ${r.status}`);
+    if (!data) throw new Error(`${tool}: the office answered without a JSON body`);
+    return data;
+  }
+
   return {
     send(msg) {
       if (!ws || ws.readyState !== 1) throw new Error("not connected to the office right now — try again in a moment");
       ws.send(JSON.stringify(msg));
     },
+    /** Upload an image file (raw body) → {assetId, url}. */
+    upload(file) {
+      return rest("upload", file, { query: `?filename=${encodeURIComponent(file.name || "image")}`, contentType: file.type || "application/octet-stream" });
+    },
+    setLogo(assetId) { return rest("set_logo", { assetId }); },
     close() { closed = true; clearTimeout(timer); clearInterval(ping); ws?.close(); },
   };
 }
@@ -75,5 +94,10 @@ export function connectLive({ office, key, onFrame, onStatus }) {
 export function connectDemo({ onFrame, onStatus, crowd = 0 }) {
   onStatus({ state: "live", detail: "demo" });
   const demo = createDemo(onFrame, { crowd });
-  return { send: (msg) => demo.receive(msg), close: () => demo.stop() };
+  return {
+    send: (msg) => demo.receive(msg),
+    upload: (file) => demo.upload(file),
+    setLogo: (assetId) => demo.setLogo(assetId),
+    close: () => demo.stop(),
+  };
 }

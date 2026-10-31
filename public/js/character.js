@@ -141,7 +141,23 @@ export function buildCharacter(agent, grain) {
   };
   const armL = arm(1), armR = arm(-1);
 
-  root.userData.parts = { hips, torso, head, eyes, armL, armR, legL, legR };
+  // little hand props, shown per activity (applyProps); the hand sits at y ≈ -0.46 on the arm pivot
+  const prop = (parent, boxes) => {
+    const o = mesh(mk(boxes, { ao: false }));
+    o.castShadow = false;
+    o.visible = false;
+    parent.add(o);
+    return o;
+  };
+  const props = {
+    mug: prop(armR, [vbox(0, -0.56, 0.1, 0.1, 0.12, 0.1, "#fdfaf3"), vbox(0.065, -0.53, 0.1, 0.03, 0.06, 0.04, "#fdfaf3"), vbox(0, -0.45, 0.1, 0.08, 0.01, 0.08, "#6b4630")]),
+    snack: prop(armL, [vbox(0, -0.54, 0.09, 0.12, 0.06, 0.1, "#e8b25a"), vbox(0, -0.49, 0.09, 0.1, 0.02, 0.08, "#f6e3b4")]),
+    book: prop(armL, [vbox(-0.12, -0.5, 0.14, 0.26, 0.2, 0.03, "#c4523f"), vbox(-0.12, -0.5, 0.155, 0.24, 0.18, 0.01, "#fdf6e6")]),
+    can: prop(armR, [vbox(0, -0.6, 0.12, 0.12, 0.14, 0.18, "#5fa7a0"), vbox(0, -0.52, 0.26, 0.04, 0.04, 0.16, "#5fa7a0"), vbox(0, -0.46, 0.12, 0.03, 0.06, 0.12, "#3f7f78")]),
+    marker: prop(armR, [vbox(0, -0.58, 0.04, 0.03, 0.12, 0.03, "#2f6fd0")]),
+  };
+
+  root.userData.parts = { hips, torso, head, eyes, armL, armR, legL, legR, props };
   root.userData.look = look;
   root.userData.dispose = () => { for (const g of geos) g.dispose(); };
   return root;
@@ -156,6 +172,17 @@ export function applyLimbs(ch, a, seatY = SEAT_Y) {
   p.head.rotation.y = a.head; p.head.rotation.x = a.headTilt;
   p.torso.rotation.x = a.lean;
   p.hips.position.y = (a.seated ? seatY + 0.02 : LEG_H) + a.bob;
+}
+
+const POSE_PROPS = { sip: "mug", coffee: "mug", snack: "snack", read: "book", "water-plants": "can", whiteboard: "marker" };
+
+/** Show only the prop the pose uses (mug while sipping, a book while reading, …). */
+export function applyProps(ch, pose) {
+  const want = POSE_PROPS[pose] ?? null;
+  const props = ch.userData.parts.props;
+  if (ch.userData.prop === want) return;
+  ch.userData.prop = want;
+  for (const [name, o] of Object.entries(props)) o.visible = name === want;
 }
 
 export function blink(ch, t, phase) {

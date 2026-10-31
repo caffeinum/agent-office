@@ -6,7 +6,16 @@ import { chatWith, clip, hueColors, isHuman, lastLineOf, relTime, roomChat, spea
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const TEXT_MAX = 280;
 
-export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom, onEdit, onKick }) {
+export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+/** The first image file in a DataTransfer (drop or paste), or null. */
+export function imageFrom(dt) {
+  for (const f of dt?.files ?? []) if (IMAGE_TYPES.includes(f.type)) return f;
+  for (const it of dt?.items ?? []) if (it.kind === "file" && IMAGE_TYPES.includes(it.type)) return it.getAsFile();
+  return null;
+}
+
+export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom, onEdit, onKick, onDesigner, onImage }) {
   root.insertAdjacentHTML("beforeend", `
     <aside class="side glass">
       <header class="side-head">
@@ -46,6 +55,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
       <button data-act="out" title="zoom out">−</button>
       <button data-act="edit" title="edit the office" hidden>✎</button>
     </div>
+    <div class="ctxmenu glass" hidden></div>
     <div class="toasts"></div>
     <div class="empty glass" hidden></div>
     <div class="screen" hidden></div>
@@ -84,6 +94,24 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
     });
     ta.addEventListener("input", () => { ta.style.height = "auto"; ta.style.height = `${Math.min(120, ta.scrollHeight)}px`; });
+    const takeImage = (file) => {
+      if (!canWrite) { toast("Only the owner link can upload images.", "err"); return; }
+      const to = form.dataset.to === "dm" ? dmAgent : null;
+      onImage(file, to);
+    };
+    ta.addEventListener("paste", (e) => {
+      const f = imageFrom(e.clipboardData);
+      if (f) { e.preventDefault(); takeImage(f); }
+    });
+    form.addEventListener("dragover", (e) => { if ([...(e.dataTransfer?.types ?? [])].includes("Files")) { e.preventDefault(); form.classList.add("drop"); } });
+    form.addEventListener("dragleave", () => form.classList.remove("drop"));
+    form.addEventListener("drop", (e) => {
+      form.classList.remove("drop");
+      const f = imageFrom(e.dataTransfer);
+      if (!f) return;
+      e.preventDefault();
+      takeImage(f);
+    });
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       const text = ta.value.trim();
@@ -105,9 +133,10 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
     const last = lastLineOf(state.chat, a.id);
     const col = hueColors(a.hue ?? 0);
     const line = a.status === "working" && a.activity ? a.activity : last ? `“${last.text}”` : a.client ?? "";
-    return `<button class="agent ${a.status} ${dmAgent === a.id ? "sel" : ""}" data-id="${esc(a.id)}">
+    const designer = state.designer === a.id;
+    return `<button class="agent ${a.status} ${dmAgent === a.id ? "sel" : ""} ${designer ? "designer" : ""}" data-id="${esc(a.id)}">
       <span class="av" style="--hue:${col.css}">${a.emoji ? esc(a.emoji) : esc(a.name.slice(0, 1).toUpperCase())}</span>
-      <span class="who"><b>${esc(a.name)}</b><small>${esc(clip(line, 64))}</small></span>
+      <span class="who"><b>${esc(a.name)}${designer ? ` <em class="badge" title="this office's designer">Designer</em>` : ""}</b><small>${esc(clip(line, 64))}</small></span>
       <span class="st"><i class="dot ${a.status}"></i>${esc(statusLabel(a.status))}</span>
     </button>`;
   }
@@ -122,6 +151,48 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
     const b = e.target.closest(".agent");
     if (b) onSelectAgent(b.dataset.id);
   });
+  $(".agents").addEventListener("contextmenu", (e) => {
+    const b = e.target.closest(".agent");
+    if (!b || !canWrite) return;
+    e.preventDefault();
+    agentMenu(b.dataset.id, e.clientX, e.clientY);
+  });
+
+  // owner context menu on an agent (sidebar row or name pill): DM, make / unmake designer, show out
+  const menu = $(".ctxmenu");
+  function agentMenu(id, x, y) {
+    const a = state?.agents.find((g) => g.id === id);
+    if (!a || !canWrite) return;
+    const isDesigner = state.designer === id;
+    menu.innerHTML = `
+      <div class="cm-head">${esc(a.name)}</div>
+      <button data-cm="dm">Message ${esc(a.name)}</button>
+      <button data-cm="designer">${isDesigner ? "Stop being the designer" : "Make designer"}</button>
+      <button data-cm="kick" class="danger">Show out…</button>`;
+    menu.hidden = false;
+    const r = menu.getBoundingClientRect();
+    menu.style.left = `${Math.min(x, window.innerWidth - r.width - 8)}px`;
+    menu.style.top = `${Math.min(y, window.innerHeight - r.height - 8)}px`;
+    menu.onclick = (e) => {
+      const act = e.target.closest("[data-cm]")?.dataset.cm;
+      if (!act) return;
+      menu.hidden = true;
+      try {
+        if (act === "dm") onSelectAgent(id);
+        else if (act === "designer") onDesigner(isDesigner ? null : id);
+        else if (act === "kick" && confirm(`Show ${a.name} out of the office? They can rejoin with the join key.`)) { onKick(id); onSelectAgent(null); }
+      } catch (err) { toast(err.message, "err"); }
+    };
+  }
+  window.addEventListener("pointerdown", (e) => { if (!menu.hidden && !menu.contains(e.target)) menu.hidden = true; });
+  window.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.hidden = true; });
+
+  /** A chat line that mentions one of this office's uploaded images shows it inline. */
+  function assetPreview(text) {
+    const m = /\b(a[0-9a-f]{23})\b/.exec(text);
+    const asset = m && state.assets?.find((x) => x.id === m[1]);
+    return asset ? `<img class="att" alt="" src="${esc(asset.url)}" width="${asset.w}" height="${asset.h}">` : "";
+  }
 
   function msgHtml(m, { showTo }) {
     const human = isHuman(m.from);
@@ -130,7 +201,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
     const toName = m.to ? speakerName(m.to, state.agents) : null;
     return `<div class="msg ${human ? "human" : ""}">
       <div class="meta"><b style="color:${col}">${esc(speakerName(m.from, state.agents))}</b>${showTo && toName ? ` <span class="to">→ ${esc(toName)}</span>` : ""}<time>${relTime(m.ts)}</time></div>
-      <div class="text">${esc(m.text)}</div>
+      <div class="text">${esc(m.text)}</div>${assetPreview(m.text)}
     </div>`;
   }
 
@@ -161,9 +232,11 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
       const col = hueColors(a.hue ?? 0);
       dm.querySelector(".dm-head").innerHTML = `
         <span class="av" style="--hue:${col.css}">${a.emoji ? esc(a.emoji) : esc(a.name.slice(0, 1).toUpperCase())}</span>
-        <div class="who"><b>${esc(a.name)}</b><small><i class="dot ${a.status}"></i>${esc(statusLabel(a.status))}${a.client ? ` · ${esc(a.client)}` : ""}${a.activity ? ` · ${esc(clip(a.activity, 60))}` : ""}</small></div>
-        ${canWrite ? `<button class="kick" title="show ${esc(a.name)} out of the office">show out</button>` : ""}
-        <button class="x" title="close">×</button>`;
+        <div class="who"><b>${esc(a.name)}${state.designer === a.id ? ` <em class="badge">Designer</em>` : ""}</b><small><i class="dot ${a.status}"></i>${esc(statusLabel(a.status))}${a.client ? ` · ${esc(a.client)}` : ""}${a.activity ? ` · ${esc(clip(a.activity, 60))}` : ""}</small></div>
+        <button class="x" title="close">×</button>
+        ${canWrite ? `<div class="dm-acts"><button class="mkdes ${state.designer === a.id ? "on" : ""}" title="${state.designer === a.id ? "stop treating this agent as the office designer" : "make this agent the office designer: it restyles the office from your chat"}">${state.designer === a.id ? "★ designer" : "☆ make designer"}</button><button class="kick" title="show ${esc(a.name)} out of the office">show out</button></div>` : ""}`;
+      const mk = dm.querySelector(".mkdes");
+      if (mk) mk.onclick = () => { try { onDesigner(state.designer === a.id ? null : a.id); } catch (err) { toast(err.message, "err"); } };
       const kick = dm.querySelector(".kick");
       if (kick) kick.onclick = () => {
         if (!confirm(`Show ${a.name} out of the office? They can rejoin with the join key.`)) return;
@@ -174,7 +247,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
     fillLog(dm.querySelector(".dm-log"), chatWith(state.chat, dmAgent), { showTo: true }, `No messages with ${esc(a?.name ?? dmAgent)} yet.`);
     dm.hidden = false;
     const ta = dm.querySelector("textarea");
-    ta.placeholder = a ? `Message ${a.name}…` : "This agent left";
+    ta.placeholder = a ? (state.designer === a.id ? `Ask ${a.name} for a redesign · drop a logo` : `Message ${a.name}…`) : "This agent left";
     dm.querySelector(".composer").hidden = !canWrite || !a;
   }
 
@@ -226,6 +299,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
       s.innerHTML = html ?? "";
     },
     toast,
+    agentMenu,
     get sidebar() { return side; },
   };
 }
