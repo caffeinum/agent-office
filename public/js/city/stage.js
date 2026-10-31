@@ -1,4 +1,4 @@
-// The city stage: renderer (WebGL2, DPR ≤ 1.25, drops to 1.0 under 45 fps), composer + bloom, hemi + sun with a
+// The city stage: renderer (WebGL2, DPR ≤ 1.25, drops to 1.0 under 45 fps), composer + bloom (night only), hemi + sun with a
 // target-following shadow box, day/night THEMES, sky + fog, map-style OrbitControls, WASD, touch (one-finger pan,
 // pinch zoom, twist rotate, two-finger vertical drag tilts) and the rAF loop. Duplicated from the office
 // scene.js on purpose (spec §3); extracting a shared stage is phase-2 debt.
@@ -19,7 +19,7 @@ export const SHADOW_MAP = 2048;
 export const CAMERA = { fov: 30, near: 1, far: 6000, minPolar: 0.32, maxPolar: 1.2, minDist: 30, maxDist: 2500 };
 
 export const THEMES = {
-  day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.22, threshold: 0.95, exposure: 1.0, windows: 0 },
+  day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0, threshold: 0.95, exposure: 1.0, windows: 0 },
   night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.45, sun: 0.3, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.85, threshold: 0.6, exposure: 1.05, windows: 1 },
 };
 
@@ -107,6 +107,7 @@ export function createStage(container, { theme = "day" } = {}) {
     sun.intensity = th.sun;
     scene.background = sky[name];
     scene.fog.color.set(th.fog);
+    bloom.enabled = th.bloom > 0;
     bloom.strength = th.bloom;
     bloom.threshold = th.threshold;
     renderer.toneMappingExposure = th.exposure;
