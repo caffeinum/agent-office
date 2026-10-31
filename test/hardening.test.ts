@@ -152,6 +152,22 @@ describe("agent etiquette and chat", () => {
     expect((await call(o, "look", {}, { token: first.agentToken })).status).toBe(401);
     const twin = await join(o, "Pixel", { client: "claude-code" });
     expect(twin.agent.id).not.toBe(first.agent.id); // the reclaimed one is active right now
+    expect(twin.agent.name).toBe("Pixel 2");
+  });
+
+  it("a reclaimed character drops the old MCP session, which then joins as its own agent", async () => {
+    const o = await createOffice();
+    await runInDurableObject(stubOf(o.id), async (inst: Office) => {
+      const ctx = (sessionId: string) => ({ role: "join" as const, token: null, sessionId, ip: "x", origin: "https://o" });
+      const old = await (inst as any).join({ name: "Pixel", client: "cc" }, ctx("s-old"));
+      (inst as any).agents.get(old.agent.id).lastSeen = Date.now() - 5 * 60_000;
+      const taken = await (inst as any).join({ name: "Pixel", client: "cc" }, ctx("s-new"));
+      expect(taken.agent.id).toBe(old.agent.id);
+      await expect(inst.callTool("office_status", { status: "idle" }, ctx("s-old"))).rejects.toThrow(/office_join/);
+      const back = await (inst as any).join({ name: "Pixel", client: "cc" }, ctx("s-old"));
+      expect(back.agent.id).not.toBe(old.agent.id);
+      expect(back.agent.name).toBe("Pixel 2");
+    });
   });
 });
 

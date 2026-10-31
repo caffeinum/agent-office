@@ -55,6 +55,8 @@ interface AgentRecord extends Agent {
   tokenHash: string;
   lastRead: number;
   sessions: string[];
+  /** The name it joined with, before a " 2"-style suffix made it unique; records saved before suffixes lack it. */
+  askedName?: string;
 }
 
 export interface ChatMsg {
@@ -141,7 +143,7 @@ interface WsAttachment {
   sid: string;
 }
 
-const publicAgent = ({ tokenHash: _t, lastRead: _r, sessions: _s, ...a }: AgentRecord): Agent => a;
+const publicAgent = ({ tokenHash: _t, lastRead: _r, sessions: _s, askedName: _n, ...a }: AgentRecord): Agent => a;
 
 function hueOf(name: string): number {
   let h = 0;
@@ -687,15 +689,18 @@ export class Office extends DurableObject<Env> implements ToolHost {
     const token = randomSecret();
     const tokenHash = await sha256hex(token);
     const sessionHash = ctx.sessionId ? await sha256hex(ctx.sessionId) : null;
-    let a = (await this.resolveAgent(ctx, undefined).catch(() => null)) ?? this.reclaimable(args.name, args.client, now);
+    const own = await this.resolveAgent(ctx, undefined).catch(() => null);
+    let a = own ?? this.reclaimable(args.name, args.client, now);
     if (a) {
       this.byToken.delete(a.tokenHash);
       a.tokenHash = tokenHash;
+      if (!own) this.detachSessions(a); // a reclaimed character answers only to the session that reclaimed it
     } else {
       if (this.agents.size >= MAX_AGENTS) throw new ToolError(409, `the office is full (${MAX_AGENTS} agents) — try again later`);
       a = { id: `${slug(args.name)}-${shortId()}`, name: "", hue: 0, status: "idle", joinedAt: now, lastSeen: now, tokenHash, lastRead: 0, sessions: [] };
     }
-    a.name = args.name.trim().slice(0, NAME_MAX);
+    a.askedName = args.name.trim().slice(0, NAME_MAX);
+    a.name = this.uniqueName(a.askedName, a.id);
     a.hue = args.hue ?? hueOf(a.name);
     if (args.emoji) a.emoji = args.emoji;
     else delete a.emoji;
@@ -730,9 +735,25 @@ export class Office extends DurableObject<Env> implements ToolHost {
     const n = name.trim().toLowerCase();
     return (
       [...this.agents.values()]
-        .filter((a) => a.name.toLowerCase() === n && (a.client ?? "") === (client ?? "") && now - a.lastSeen > RECLAIM_AFTER_MS)
+        .filter((a) => (a.askedName ?? a.name).toLowerCase() === n && (a.client ?? "") === (client ?? "") && now - a.lastSeen > RECLAIM_AFTER_MS)
         .sort((p, q) => q.lastSeen - p.lastSeen)[0] ?? null
     );
+  }
+
+  private detachSessions(a: AgentRecord) {
+    for (const h of a.sessions) this.sessions.delete(h);
+    a.sessions = [];
+  }
+
+  /** Two sessions joining as "claude" become "claude" and "claude 2", so humans and chat `to` can tell them apart. */
+  private uniqueName(name: string, selfId: string): string {
+    const taken = new Set([...this.agents.values()].filter((o) => o.id !== selfId).map((o) => o.name.toLowerCase()));
+    if (!taken.has(name.toLowerCase())) return name;
+    for (let n = 2; ; n++) {
+      const suffix = ` ${n}`;
+      const candidate = name.slice(0, NAME_MAX - suffix.length) + suffix;
+      if (!taken.has(candidate.toLowerCase())) return candidate;
+    }
   }
 
   // ---------- design: theme, custom kinds, assets, designer ----------

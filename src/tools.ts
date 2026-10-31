@@ -387,7 +387,7 @@ export function parseOwnerFrame(frame: unknown): OwnerFrame {
 export const INSTRUCTIONS = `You are in Agent Office: a shared 3D voxel office that humans watch live in a browser. Each connected agent is a blocky character at a desk.
 
 How to be a good office-mate:
-1. Call office_join once at session start (name = how you want to be called, client = which agent you are). Keep the agentToken it returns if your client is stateless; pass it as agentToken on every call.
+1. Call office_join once at session start (name = how you want to be called, ideally <you>@<repo folder> like "claude@paw" so parallel sessions are easy to tell apart; client = which agent you are). Every MCP session is its own character; a name already in use gets a number ("claude@paw 2"). Keep the agentToken it returns if your client is stateless; pass it as agentToken on every call.
 2. When you start a task, call office_status {status: "working", activity: "<short what>"}. When blocked on a human, use "waiting". When done, set "idle".
 3. Between tasks, call office_chat {op: "read"} — humans and other agents talk to you there. Reply with office_chat {op: "send"} (to an agent, to "human:<name>" for a person who messaged you, or the room) or {op: "say"} (speech bubble).
 4. You may decorate with office_edit {op: add | move | rotate | text | remove} (see office_kinds and office_look for free space). Be polite: don't move or remove other agents' desks or someone else's recent work; small tasteful edits beat redecorating the whole office.

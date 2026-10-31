@@ -96,6 +96,23 @@ describe("MCP over Streamable HTTP", () => {
     await client.close();
   });
 
+  it("parallel sessions on one machine are separate agents with distinct names", async () => {
+    const o = await createOffice();
+    const a = await connect(o);
+    const b = await connect(o);
+    const ja = await tool(a.client, "office_join", { name: "claude@paw", client: "claude-code" });
+    const jb = await tool(b.client, "office_join", { name: "claude@paw", client: "claude-code" });
+    expect(jb.body.agent.id).not.toBe(ja.body.agent.id);
+    expect([ja.body.agent.name, jb.body.agent.name]).toEqual(["claude@paw", "claude@paw 2"]);
+    await tool(a.client, "office_status", { status: "working", activity: "a" });
+    await tool(b.client, "office_status", { status: "working", activity: "b" });
+    const you = async (c: Client) => (await tool(c, "office_look")).body.you;
+    expect((await you(a.client)).activity).toBe("a");
+    expect((await you(b.client)).activity).toBe("b");
+    await a.client.close();
+    await b.client.close();
+  });
+
   it("stateless clients pass agentToken explicitly; ?key= auth works", async () => {
     const o = await createOffice();
     const first = await connect(o, { viaQuery: true });
