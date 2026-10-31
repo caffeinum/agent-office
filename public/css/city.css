@@ -45,7 +45,9 @@
 
 /* ── label chips ─────────────────────────────────────────────────────────────────── */
 
-.cu-labels { position: absolute; inset: 0; pointer-events: none; }
+/* chips live in their own layer under every panel: the panel, search, footer and errors (z-index 1) always cover them */
+.cu-labels { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.cu-search, .cu-panel, .cu-attrib, .cu-error { z-index: 1; }
 .cu-ui .cu-chip {
   position: absolute; left: 0; top: 0;
   display: flex; flex-direction: column; align-items: stretch; gap: 1px;
