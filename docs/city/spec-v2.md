@@ -724,6 +724,15 @@ One tool is added to the office ToolSet in `src/tools.ts`. The office MCP lists 
    - after deploy, approve Firegoat's link with one Bearer admin curl.
    - Every chunk path changes version, so the CDN and browser caches are invalidated by the manifest `builtAt` query string.
 
+6. **Integration record (2026-10-31, `main`, not deployed).** Merged W2, W3, W5, W4, W7, W6 with `--no-ff`; one rebuild from the cached raw data (the W2 fetch, Overpass not re-queried); `npm run check`, `city:build` (verify-sf 23/23) and `city:perf --gate` are green, and every [post-int] gate runs on the real build. Output: 1031 chunks + 180 water chunks, 2.2 MB chunks, landmask 169 KB gz, landmarks.bin 11.7 KB gz, walk.bin 494 KB (150 KB gz, 7300 nodes), places.json 2880 places, 49 company sites. Perf at spawn 0.94M triangles / 62 calls, Presidio overview 0.91M / 57. Deviations made at integration:
+   - **Skyline calibration** (`scripts/city/lib/skyline.mjs`, after `applyLandmarks`): each top-50 snapshot row with no landmark recipe has its OSM outline clamped, raised or stamped to `round(heightM/3)`, logged in `report.skyline`. 19 rows changed, mostly OSM heights 2–4 blocks over Wikipedia (rooftop mechanicals); 415 Natoma (2022) is stamped because the DataSF lidar predates it.
+   - Coverage counts DataSF parcels replaced by a §3.4 rank-3 OSM outline as covered (now 97.7%, 8.4 points of it replaced parcels; without the rule it fell to 89.3% once the real `structureKind` made more outlines rank 3). The `unresolvedTower` gate reads only rows 1–50.
+   - Structures on sloping ground restyle on their lowest base (`report.structures.mixedBases`).
+   - Walk graph: `unclassified` roads are walkable (Marine Dr is the only road to Fort Point), dangling vertical connectors are pruned, and xz tolerance is 3 blocks (6 for unnamed paths) to stay inside 150 KB gz.
+   - The viewer adapts to the City DO wire format (`createWireAdapter` in `live.js`): snapshot `sites`, per-site `presence` deltas, `chat.msg`, `left.inside`, standing walkers with speed 0.
+   - The GGB south tower verify point is the OSM tower centroid (37.814014, −122.477891).
+   - `validateWalk` checks reverse edges with sorted numeric keys (decode ~4× faster).
+
 ## 10. risks and cut-lines
 
 - **OSM part quality.** Some parts have levels but no height. §3.4 rule 5 covers it (4 m per level for office parts with ≥10 levels), and the landmark recipe wins for the top 22. Anything left unresolved goes to the report and gates the build.

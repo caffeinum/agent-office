@@ -1,5 +1,7 @@
 # sf voxel city: build spec v1.1
 
+> **Superseded in the repo by v2 (2026-10-31):** `docs/city/spec-v2.md` (grid option a, format v2, Presidio/west extent, landmarks, City DO and walkers) is integrated on `main` and rebuilt; its §9.6 lists what shipped and the integration deviations. v1 rules below still hold where v2 does not replace them. Not deployed yet (operator-only).
+>
 > **Status (2026-10-31): shipped.** Live at `/city/sf`. Where the build differs from this plan, the text below has been updated to what shipped, and section 7 lists every deviation with its reason.
 
 This revision addresses all 16 review items. The repo was not touched. Coordinates in this spec were computed from the projection constants below. Items marked "W2 pins" or "W3 pins" are values the owning workstream must look up and commit before coding against them.
