@@ -1,0 +1,301 @@
+{
+  "about": "spec-v2 §5 landmark recipes. Ops are in blocks; y is blocks above the site base (max ground under the footprint). rect w runs along u (the frame axis nearest compass bearing `toward`), d along v (toward+90). Footprint sizes are the OSM polygon's minimum-area rectangle (measured on the 2026-10-31 cache in SF_PROJ blocks), not the spec's guide column. Heights come from skyline.src.json rows (heightRef) or a sourced realHeightM; checks assert the recipe top equals round(heightM / 3) ±1.",
+  "landmarks": [
+    {
+      "key": "o:w431972186", "name": "Salesforce Tower", "address": "415 Mission St", "lat": 37.7899, "lon": -122.3969, "toward": 320,
+      "heightRef": "salesforce-tower", "palette": "salesforce", "accent": "salesforce-crown",
+      "recipe": [
+        { "op": "part", "name": "tower", "cap": "crown", "accentFrom": 99 },
+        { "op": "rrect", "w": 18, "d": 18, "r": 3 },
+        { "op": "tier", "y1": 35 },
+        { "op": "tier", "inset": 1, "y1": 70 },
+        { "op": "tier", "inset": 2, "y1": 99 },
+        { "op": "rim", "inset": 2, "width": 1, "y1": 104 },
+        { "op": "mesh", "kind": "crown_lattice", "inset": 2, "y0": 104, "y1": 109, "every": 2 },
+        { "op": "rect", "w": 6, "d": 6, "y1": 109 }
+      ]
+    },
+    {
+      "key": "o:w24222973", "name": "Transamerica Pyramid", "address": "600 Montgomery St", "lat": 37.795167, "lon": -122.40279, "toward": 81,
+      "heightRef": "transamerica-pyramid", "palette": "transamerica", "accent": "transamerica",
+      "note": "u runs east: the elevator/stair wings sit on the east and west faces.",
+      "recipe": [
+        { "op": "rect", "w": 18, "d": 18 },
+        { "op": "taper", "to": [6, 6], "y0": 0, "y1": 65 },
+        { "op": "spire", "w": 3, "y1": 75 },
+        { "op": "spire", "w": 1, "y1": 87 },
+        { "op": "rect", "w": 2, "d": 4, "at": [4, 0], "y1": 70 },
+        { "op": "rect", "w": 2, "d": 4, "at": [-4, 0], "y1": 70 }
+      ]
+    },
+    {
+      "key": "o:w445566153", "name": "181 Fremont", "address": "181 Fremont St", "lat": 37.7897, "lon": -122.39535, "toward": 225,
+      "heightRef": "181-fremont", "palette": "fremont-181", "accent": "metal",
+      "recipe": [
+        { "op": "rect", "w": 14, "d": 12 },
+        { "op": "tier", "y1": 60 },
+        { "op": "tier", "chamfer": 2, "y1": 64 },
+        { "op": "tier", "chamfer": 4, "y1": 68 },
+        { "op": "chamfer", "size": 4 },
+        { "op": "slope", "axis": "u", "y0": 68, "y1": 72 },
+        { "op": "prop", "at": [2, 0], "y1": 82, "color": "metal" }
+      ]
+    },
+    {
+      "key": "o:w288511106", "name": "555 California Street", "address": "555 California St", "lat": 37.7921036, "lon": -122.40377, "toward": 81,
+      "heightRef": "555-california-street", "palette": "california-555", "accent": "california-555",
+      "note": "The banking hall is a separate building outside this OSM polygon; it is left to the generic pipeline.",
+      "recipe": [
+        { "op": "rect", "w": 28, "d": 14 },
+        { "op": "sawtooth", "faces": "long", "step": 2, "depth": 1 },
+        { "op": "tier", "y1": 79 }
+      ]
+    },
+    {
+      "key": "o:w588355355", "name": "345 California Center", "address": "345 California St", "lat": 37.7926, "lon": -122.400463, "toward": 81,
+      "heightRef": "345-california-center", "palette": "california-345", "accent": "metal",
+      "recipe": [
+        { "op": "rect", "w": 28, "d": 14, "y1": 27 },
+        { "op": "rect", "w": 16, "d": 10, "y1": 64 },
+        { "op": "prop", "at": [-5, 0], "y1": 71, "color": "metal" },
+        { "op": "prop", "at": [5, 0], "y1": 71, "color": "metal" }
+      ]
+    },
+    {
+      "key": "o:w72963089", "name": "Millennium Tower", "address": "301 Mission St", "lat": 37.79042, "lon": -122.396187, "toward": 316,
+      "heightRef": "millennium-tower", "palette": "millennium", "accent": "glass",
+      "recipe": [
+        { "op": "rrect", "w": 16, "d": 11, "r": 3 },
+        { "op": "tier", "y1": 58 },
+        { "op": "tier", "inset": 1, "y1": 61 },
+        { "op": "tier", "inset": 2, "y1": 64 },
+        { "op": "tier", "inset": 3, "y1": 66 }
+      ]
+    },
+    {
+      "key": "o:w693629257", "name": "The Avery", "address": "488 Folsom St", "lat": 37.787759, "lon": -122.394564, "toward": 44,
+      "heightRef": "the-avery", "palette": "precast-2", "accent": "precast-1",
+      "recipe": [
+        { "op": "rect", "w": 19, "d": 14 },
+        { "op": "tier", "y1": 62 },
+        { "op": "tier", "inset": 1, "y1": 63 }
+      ]
+    },
+    {
+      "key": "o:w611390934", "name": "Park Tower at Transbay", "address": "250 Howard St", "lat": 37.7903676, "lon": -122.394305, "toward": 45,
+      "heightRef": "park-tower-at-transbay", "palette": "precast-3", "accent": "precast-3",
+      "recipe": [{ "op": "rect", "w": 19, "d": 18, "y1": 62 }]
+    },
+    {
+      "key": "lm:one-rincon-hill-south", "name": "One Rincon Hill (South Tower)", "address": "425 1st St", "lat": 37.785766, "lon": -122.392162, "toward": 45,
+      "heightRef": "one-rincon-hill", "palette": "rincon", "accent": "glass-dark",
+      "note": "OSM maps only the shared 5-level podium (w260320982), so the tower is placed at the list's coordinate on the SoMa grid bearing.",
+      "recipe": [
+        { "op": "rect", "w": 14, "d": 14 },
+        { "op": "tier", "y1": 59 },
+        { "op": "rim", "width": 1, "y1": 61 }
+      ]
+    },
+    {
+      "key": "lm:the-harrison", "name": "The Harrison", "address": "401 Harrison St", "lat": 37.786417, "lon": -122.392044, "toward": 45,
+      "heightRef": "the-harrison", "palette": "glass", "accent": "glass-dark",
+      "note": "One Rincon Hill North Tower; OSM has no separate tower polygon.",
+      "recipe": [{ "op": "rect", "w": 12, "d": 12, "y1": 55 }]
+    },
+    {
+      "key": "o:w1279505488", "name": "101 California Street", "address": "101 California St", "lat": 37.7928646, "lon": -122.397956, "toward": 81,
+      "heightRef": "101-california-street", "palette": "precast-1", "accent": "glass",
+      "recipe": [
+        { "op": "part", "name": "glass base", "facade": "curtain", "palette": "glass", "accent": "glass-dark" },
+        { "op": "rect", "w": 27, "d": 27 },
+        { "op": "chamfer", "size": 6 },
+        { "op": "tier", "y1": 3 },
+        { "op": "tier", "inset": 3, "y1": 6 },
+        { "op": "tier", "inset": 6, "y1": 9 },
+        { "op": "part", "name": "tower", "palette": "precast-1", "accent": "precast-2" },
+        { "op": "oct", "d": 18, "y1": 61 }
+      ]
+    },
+    {
+      "key": "o:w288716396", "name": "50 Fremont Center", "address": "50 Fremont St", "lat": 37.790515, "lon": -122.397272, "toward": 315,
+      "heightRef": "salesforce-west", "palette": "precast-4", "accent": "precast-4",
+      "recipe": [
+        { "op": "rect", "w": 17, "d": 13 },
+        { "op": "chamfer", "size": 2 },
+        { "op": "tier", "y1": 61 }
+      ]
+    },
+    {
+      "key": "o:w32963382", "name": "575 Market Street", "address": "575 Market St", "lat": 37.78957, "lon": -122.40038, "toward": 135,
+      "heightRef": "575-market-street", "palette": "market-575", "accent": "market-575",
+      "recipe": [{ "op": "rect", "w": 15, "d": 10, "y1": 58 }]
+    },
+    {
+      "key": "o:w32612608", "name": "Embarcadero Center", "address": "1–4 Embarcadero Center", "lat": 37.794485, "lon": -122.39962, "toward": 81,
+      "heightRef": "one-embarcadero-center", "palette": "embarcadero", "accent": "embarcadero",
+      "note": "Four slab towers, one site (and one part) each under one parent; sawtooth long faces, ends stepping down three tiers of 2.",
+      "recipe": [
+        { "op": "rect", "w": 25, "d": 11 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 52 },
+        { "op": "rect", "w": 21, "d": 11 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 54 },
+        { "op": "rect", "w": 17, "d": 11 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 56 },
+        { "op": "rect", "w": 13, "d": 11 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 58 },
+        { "op": "site", "key": "o:w32612520", "name": "Two Embarcadero Center", "lat": 37.794998, "lon": -122.398478, "toward": 81, "heightRef": "two-embarcadero-center" },
+        { "op": "rect", "w": 26, "d": 11 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 36 },
+        { "op": "rect", "w": 22, "d": 11 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 38 },
+        { "op": "rect", "w": 18, "d": 11 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 40 },
+        { "op": "rect", "w": 14, "d": 11 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 42 },
+        { "op": "site", "key": "o:w32612538", "name": "Three Embarcadero Center", "lat": 37.795136, "lon": -122.397368, "toward": 81, "heightRef": "three-embarcadero-center" },
+        { "op": "rect", "w": 26, "d": 11 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 36 },
+        { "op": "rect", "w": 22, "d": 11 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 38 },
+        { "op": "rect", "w": 18, "d": 11 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 40 },
+        { "op": "rect", "w": 14, "d": 11 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 42 },
+        { "op": "site", "key": "o:w616812910", "name": "Four Embarcadero Center", "lat": 37.795306, "lon": -122.396198, "toward": 81, "heightRef": "four-embarcadero-center" },
+        { "op": "rect", "w": 21, "d": 12 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 52 },
+        { "op": "rect", "w": 17, "d": 12 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 54 },
+        { "op": "rect", "w": 13, "d": 12 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 56 },
+        { "op": "rect", "w": 9, "d": 12 }, { "op": "sawtooth", "faces": "long", "step": 2, "depth": 2 }, { "op": "tier", "y1": 58 }
+      ]
+    },
+    {
+      "key": "o:w558731934", "name": "Ferry Building", "address": "1 Ferry Building", "lat": 37.79554, "lon": -122.3936, "toward": 144,
+      "realHeightM": 74.7, "source": "https://en.wikipedia.org/w/index.php?title=San_Francisco_Ferry_Building&oldid=1378049077",
+      "palette": "ferry", "accent": "ferry",
+      "note": "245 ft clock tower (74.7 m). u runs SE along the shed; v points SW to the Embarcadero front, where the tower stands at mid-length.",
+      "recipe": [
+        { "op": "part", "name": "shed", "facade": "arcade" },
+        { "op": "rect", "w": 67, "d": 18, "y1": 5 },
+        { "op": "part", "name": "clock tower", "cap": "dome", "facade": "blank" },
+        { "op": "rect", "w": 6, "d": 6, "at": [0, 6], "y1": 15 },
+        { "op": "rect", "w": 5, "d": 5, "at": [0, 6], "y1": 18 },
+        { "op": "rect", "w": 4, "d": 4, "at": [0, 6], "y1": 21 },
+        { "op": "rect", "w": 3, "d": 3, "at": [0, 6], "y1": 24 },
+        { "op": "prop", "at": [0, 6], "y1": 25, "color": "flag" }
+      ]
+    },
+    {
+      "key": "o:w28824850", "name": "Coit Tower", "address": "1 Telegraph Hill Blvd", "lat": 37.80239, "lon": -122.40582, "toward": 0,
+      "realHeightM": 64.0, "source": "https://en.wikipedia.org/w/index.php?title=Coit_Tower&oldid=1372957781",
+      "palette": "coit", "accent": "coit",
+      "note": "210 ft (64.0 m) tower.",
+      "recipe": [
+        { "op": "part", "name": "tower", "facade": "ribbed" },
+        { "op": "circle", "d": 5, "y1": 20 },
+        { "op": "rim", "width": 1, "y1": 21 }
+      ]
+    },
+    {
+      "key": "o:w32946942", "name": "Grace Cathedral", "address": "1100 California St", "lat": 37.7919, "lon": -122.4134, "toward": 270,
+      "realHeightM": 75.3, "source": "https://en.wikipedia.org/w/index.php?title=Grace_Cathedral,_San_Francisco&oldid=1382173852",
+      "palette": "precast-3", "accent": "metal",
+      "note": "Flèche 247 ft (75.3 m) and west-front towers 174 ft (53.0 m) above street level. u points west, to the towers.",
+      "recipe": [
+        { "op": "part", "name": "nave", "facade": "blank" },
+        { "op": "rect", "w": 32, "d": 14, "y1": 8 },
+        { "op": "part", "name": "west towers", "facade": "blank" },
+        { "op": "rect", "w": 5, "d": 5, "at": [13.5, 4.5], "y1": 18 },
+        { "op": "rect", "w": 5, "d": 5, "at": [13.5, -4.5], "y1": 18 },
+        { "op": "prop", "at": [-4, 0], "y1": 25, "color": "metal" }
+      ]
+    },
+    {
+      "key": "lm:oracle-park", "name": "Oracle Park", "address": "24 Willie Mays Plaza", "lat": 37.7786, "lon": -122.3893, "toward": 0,
+      "realHeightM": 54.84, "source": "https://data.sf.gov/resource/ynuv-fyni.json?area_id=3",
+      "palette": "brick-dark", "accent": "seats",
+      "note": "realHeightM is DataSF hgt_maxcm for the stadium footprint (area_id 3), the light towers. Stands top out at hmax 10 behind home, so the light towers (18) stand 2 above the spec's Hmax+6 guide.",
+      "recipe": [
+        {
+          "op": "ballpark",
+          "sources": {
+            "outline": "https://data.sf.gov/resource/ynuv-fyni.json?area_id=3",
+            "field": "https://www.openstreetmap.org/way/500283910",
+            "infield": "https://www.openstreetmap.org/relation/7332929"
+          },
+          "outline": [[37.779235,-122.38882],[37.779332,-122.388704],[37.778615,-122.387811],[37.778547,-122.387817],[37.778545,-122.38783],[37.778468,-122.387896],[37.778435,-122.387962],[37.778414,-122.388048],[37.778361,-122.388044],[37.778367,-122.387973],[37.778166,-122.387949],[37.777452,-122.389835],[37.777471,-122.38987],[37.777404,-122.390046],[37.777472,-122.390152],[37.777463,-122.390169],[37.777482,-122.390201],[37.777496,-122.390197],[37.777522,-122.390247],[37.777548,-122.390224],[37.777749,-122.390568],[37.777511,-122.390776],[37.777817,-122.391163],[37.77802,-122.390974],[37.778039,-122.391007],[37.778054,-122.390993],[37.778045,-122.390977],[37.778206,-122.390836],[37.778214,-122.39085],[37.77823,-122.390838],[37.778217,-122.390813],[37.778257,-122.39078],[37.778309,-122.390785],[37.778337,-122.390823],[37.778314,-122.390867],[37.778396,-122.390956],[37.779598,-122.389447],[37.779566,-122.389405],[37.779604,-122.389357],[37.779637,-122.389385],[37.779709,-122.389293],[37.779687,-122.389252],[37.779726,-122.389203],[37.779382,-122.388777],[37.779377,-122.388783],[37.779358,-122.38876],[37.779274,-122.388869]],
+          "field": [[37.778367,-122.390015],[37.778318,-122.389998],[37.778238,-122.389891],[37.777969,-122.389394],[37.777954,-122.38921],[37.777888,-122.389107],[37.778101,-122.388588],[37.778644,-122.388649],[37.77901,-122.389111],[37.779019,-122.389144],[37.778976,-122.389191],[37.778739,-122.389593],[37.778629,-122.389748],[37.778423,-122.38999]],
+          "infield": [[37.778402,-122.389369],[37.778486,-122.389397],[37.778558,-122.389459],[37.778609,-122.389544],[37.778637,-122.389642],[37.778398,-122.389894],[37.778392,-122.389935],[37.778367,-122.389952],[37.778337,-122.389937],[37.778331,-122.389887],[37.778132,-122.389586],[37.778174,-122.38949],[37.778237,-122.389419],[37.778315,-122.389377]],
+          "hmax": 10,
+          "outfieldMin": 3,
+          "lights": { "angles": [-130, -85, -40, 40, 85, 130], "y1": 18 },
+          "scoreboard": { "w": 8, "d": 2, "y1": 9 },
+          "stands": { "cap": "seats", "facade": "arcade", "palette": "brick-dark", "accent": "seats" },
+          "scoreboardPalette": { "facade": "blank", "palette": "concrete-dark" }
+        }
+      ]
+    },
+    {
+      "key": "o:w579646390", "name": "Chase Center", "address": "1 Warriors Way", "lat": 37.768, "lon": -122.3877, "toward": 0,
+      "realHeightM": 38.1, "source": "https://www.openstreetmap.org/way/579646390",
+      "palette": "chase", "accent": "chase",
+      "note": "Height is the OSM height tag (38.1 m). Drum wall 10 plus a 3-block dome; a 2-block glass band at the street.",
+      "recipe": [
+        { "op": "circle", "d": 50 },
+        { "op": "part", "name": "drum", "facade": "ribbed" },
+        { "op": "arena", "wall": 10, "rise": 3 },
+        { "op": "part", "name": "glass band", "facade": "curtain", "palette": "glass", "accent": "glass" },
+        { "op": "rim", "width": 1, "y1": 2 }
+      ]
+    },
+    {
+      "key": "lm:bay-bridge-west", "name": "Bay Bridge (west span)", "address": "I-80, Rincon Hill to Yerba Buena Island", "lat": 37.795588, "lon": -122.380648, "toward": 41,
+      "realHeightM": 160.3, "source": "https://en.wikipedia.org/w/index.php?title=San_Francisco%E2%80%93Oakland_Bay_Bridge&oldid=1382322044",
+      "palette": "bay-bridge", "accent": "bay-bridge",
+      "note": "Towers 526 ft (160.3 m); 220 ft (67.1 m) clearance below the west span; 57.5 ft (17.5 m) west roadway width. Pier positions are OSM bridge:support centroids (W1–W7). The upper deck 3 blocks above the lower is a drawing choice.",
+      "bridge": {
+        "palette": "bay-bridge",
+        "points": [
+          { "ref": "W1", "source": "https://www.openstreetmap.org/way/1136339258", "lat": 37.786379, "lon": -122.390512, "kind": "anchor" },
+          { "ref": "W2", "source": "https://www.openstreetmap.org/way/432712476", "lat": 37.790753, "lon": -122.385823, "kind": "tower" },
+          { "ref": "W3", "source": "https://www.openstreetmap.org/way/432712477", "lat": 37.795588, "lon": -122.380648, "kind": "tower" },
+          { "ref": "W4", "source": "https://www.openstreetmap.org/way/236374789", "lat": 37.79819, "lon": -122.37786, "kind": "anchor", "anchorTop": { "heightM": 67, "source": "https://www.openstreetmap.org/way/236374789" } },
+          { "ref": "W5", "source": "https://www.openstreetmap.org/way/432712478", "lat": 37.800787, "lon": -122.37508, "kind": "tower" },
+          { "ref": "W6", "source": "https://www.openstreetmap.org/way/432712479", "lat": 37.805622, "lon": -122.3699, "kind": "tower" },
+          { "ref": "W7", "source": "https://www.openstreetmap.org/way/1136339259", "lat": 37.808182, "lon": -122.367156, "kind": "anchor" }
+        ],
+        "decks": [{ "clearanceM": 67.1 }, { "clearanceM": 67.1, "above": 3 }],
+        "deckWidth": 6,
+        "towerLegs": { "w": 2, "d": 3 },
+        "crossBeams": [0.45, 0.7, 0.95],
+        "cableSag": 2,
+        "suspenderEvery": 6,
+        "anchorSize": 8
+      }
+    },
+    {
+      "key": "lm:golden-gate-bridge-south", "name": "Golden Gate Bridge (south half)", "address": "Golden Gate Bridge, Presidio", "lat": 37.814014, "lon": -122.477891, "toward": 355,
+      "realHeightM": 227.4, "source": "https://en.wikipedia.org/w/index.php?title=Golden_Gate_Bridge&oldid=1373898858",
+      "palette": "golden-gate", "accent": "golden-gate",
+      "note": "Towers 746 ft (227.4 m) above the water; 220 ft (67.1 m) clearance; 90 ft (27.4 m) wide. The south tower is the centroid of its 18 OSM tower parts (e.g. w1330049620); midspan is halfway to the north tower centroid (37.825503, -122.479233). The spec's 37.8113 tower coordinate was 300 m short.",
+      "bridge": {
+        "palette": "golden-gate",
+        "points": [
+          { "ref": "South Anchorage", "source": "https://www.openstreetmap.org/way/1560010167", "lat": 37.809653, "lon": -122.477416, "kind": "anchor" },
+          { "ref": "South Tower", "source": "https://www.openstreetmap.org/way/1330049620", "lat": 37.814014, "lon": -122.477891, "kind": "tower" },
+          { "ref": "Midspan", "source": "https://www.openstreetmap.org/way/1329761880", "lat": 37.819759, "lon": -122.478562, "kind": "end" }
+        ],
+        "decks": [{ "clearanceM": 67.1 }],
+        "deckWidth": 9,
+        "towerLegs": { "w": 2, "d": 3 },
+        "crossBeams": [0.45, 0.7, 0.95],
+        "cableSag": 2,
+        "suspenderEvery": 6,
+        "anchorSize": 8
+      }
+    },
+    {
+      "key": "o:w288371295", "name": "Palace of Fine Arts", "address": "3601 Lyon St", "lat": 37.8029, "lon": -122.4484, "toward": 0,
+      "realHeightM": 49.4, "source": "https://en.wikipedia.org/w/index.php?title=Palace_of_Fine_Arts&oldid=1382918252",
+      "palette": "palace", "accent": "palace",
+      "covers": ["o:w288371306", "o:w288371310", "o:w288371313", "o:w288371314"],
+      "note": "162 ft (49.4 m) rotunda. Colonnade outlines are OSM building=roof ways w288371310 (north, height 19 m) and w288371306 (south, 20 m).",
+      "recipe": [
+        { "op": "part", "name": "rotunda", "cap": "dome", "facade": "blank" },
+        { "op": "circle", "d": 22, "y1": 4 },
+        { "op": "circle", "d": 14, "y1": 12 },
+        { "op": "circle", "d": 10, "y1": 16 },
+        { "op": "part", "name": "colonnade", "facade": "arcade" },
+        { "op": "poly", "y1": 6, "ll": [[37.803918,-122.44825],[37.803693,-122.448198],[37.803614,-122.448187],[37.803598,-122.448331],[37.803618,-122.448422],[37.803522,-122.448565],[37.803486,-122.448598],[37.803348,-122.448666],[37.803218,-122.448749],[37.803128,-122.448761],[37.803109,-122.448766],[37.803098,-122.44879],[37.803107,-122.448815],[37.803129,-122.448822],[37.80318,-122.448815],[37.803329,-122.44874],[37.803416,-122.448692],[37.803547,-122.448605],[37.803613,-122.448494],[37.803695,-122.44841],[37.803652,-122.448361],[37.803666,-122.448252],[37.803866,-122.448263],[37.80394,-122.448308]] },
+        { "op": "poly", "y1": 6, "ll": [[37.802627,-122.448661],[37.802585,-122.448642],[37.802473,-122.44852],[37.802362,-122.448413],[37.802305,-122.448315],[37.802263,-122.448144],[37.802264,-122.448062],[37.802281,-122.447919],[37.802056,-122.447863],[37.801977,-122.447858],[37.80205,-122.4479],[37.802247,-122.447947],[37.802231,-122.448054],[37.802183,-122.448071],[37.802225,-122.448149],[37.802282,-122.448336],[37.802348,-122.448444],[37.802434,-122.448575],[37.802572,-122.448673],[37.802611,-122.44871],[37.80263,-122.448722],[37.80265,-122.44871],[37.802654,-122.448683],[37.802639,-122.448662]] }
+      ]
+    }
+  ]
+}

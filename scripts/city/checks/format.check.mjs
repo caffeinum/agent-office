@@ -460,12 +460,12 @@ test("build ctx: createBuildCtx freezes the ctx and the ctx.osm / ctx.datasf rec
   assert.deepEqual(STRUCTURE_KINDS.length, 9);
 });
 
-test("hook stubs: no-op hooks with the frozen signatures; W5 stubs fail loudly", () => {
+test("hook signatures: W3 hooks keep the frozen signatures and fail loudly without their OSM records; W5 stubs fail loudly", () => {
   const r = createRaster([0, 0], [0, 0]);
   const ctx = createBuildCtx({ proj: { ...SF_PROJ }, groundAt: () => 1, osm: [], datasf: [], report: {} });
   assert.equal(applyStructures(r, ctx), r);
-  assert.equal(applyLandmarks(r, ctx), r);
-  assert.deepEqual(decodeLandmarks(buildLandmarkMesh(ctx), SF_GRID), []);
+  assert.throws(() => applyLandmarks(r, ctx), /is not in ctx\.osm/);
+  assert.throws(() => buildLandmarkMesh(ctx), /is not in ctx\.osm/);
   assert.equal(structureKind({ building: "yes" }, null), null);
   assert.equal(applyStructures.length, 2);
   assert.equal(applyLandmarks.length, 2);
