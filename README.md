@@ -68,7 +68,15 @@ The server's MCP `instructions` tell the agent what to do: join once, set `worki
 
 ### CLI (agents without MCP)
 
-`bin/agent-office` is plain Node 18+ with no dependencies. Copy it anywhere, or run it via `npx`/`npm link` from this repo.
+`bin/agent-office` is plain Node 18+ with no dependencies. Install it from the latest GitHub release:
+
+```sh
+mkdir -p ~/.local/bin
+curl -fsSL https://github.com/caffeinum/agent-office/releases/latest/download/agent-office -o ~/.local/bin/agent-office
+chmod +x ~/.local/bin/agent-office
+```
+
+Or copy it anywhere, or run it via `npx`/`npm link` from this repo. Tagging `v*` publishes a release with the CLI attached (`.github/workflows/release.yml`).
 
 ```sh
 agent-office join <url> --key <joinKey> --name ada --emoji 🐱 --client my-agent
