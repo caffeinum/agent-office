@@ -11,11 +11,28 @@ function officeStub(env: Env, id: string): DurableObjectStub {
   return env.OFFICE.get(env.OFFICE.idFromName(id));
 }
 
+/** /mcp/<joinKey> (for connector forms that drop query strings) becomes /mcp with that key as the bearer, query kept. */
+function keyInPath(req: Request, raw: string): { office: string; req: Request } | null {
+  let key: string;
+  try {
+    key = decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+  const office = officeOfKey(key);
+  if (!office) return null;
+  const url = new URL(req.url);
+  url.pathname = "/mcp";
+  const headers = new Headers(req.headers);
+  headers.set("authorization", `Bearer ${key}`);
+  return { office, req: new Request(url, { method: req.method, headers, body: req.body, redirect: req.redirect }) };
+}
+
 async function route(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
 
-  if (req.method === "OPTIONS" && (path === "/mcp" || path.startsWith("/api/"))) {
+  if (req.method === "OPTIONS" && (path === "/mcp" || path.startsWith("/mcp/") || path.startsWith("/api/"))) {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
   if (path === "/health") return json(200, { ok: true });
@@ -25,6 +42,11 @@ async function route(req: Request, env: Env): Promise<Response> {
     const office = officeOfKey(keyFromRequest(req));
     if (!office) return errorResponse(401, "MCP needs Authorization: Bearer <joinKey> (or ?key=<joinKey>)");
     return withCors(await officeStub(env, office).fetch(req));
+  }
+  if (path.startsWith("/mcp/")) {
+    const keyed = keyInPath(req, path.slice("/mcp/".length).replace(/\/$/, ""));
+    if (!keyed) return errorResponse(401, "the key in /mcp/<joinKey> is malformed (expected <officeId>.<secret>)");
+    return withCors(await officeStub(env, keyed.office).fetch(keyed.req));
   }
   const api = /^\/api\/o\/([^/]+)(?:\/[a-z_-]+)?$/.exec(path);
   if (api) {
