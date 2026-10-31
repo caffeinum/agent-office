@@ -9,6 +9,7 @@ import { createUi, imageFrom } from "./ui.js";
 import { createEditor } from "./editor.js";
 import { createConnect } from "./connect.js";
 import { connectDemo, connectLive } from "./source.js";
+import { errorBanner } from "./city/banner.js";
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const params = new URLSearchParams(location.search);
@@ -54,7 +55,10 @@ function boot() {
   if (cityMatch) {
     document.getElementById("app").hidden = true;
     document.getElementById("landing").hidden = true;
-    import("./city/app.js").then((m) => m.bootCity(cityMatch[1]));
+    import("./city/app.js").then((m) => m.bootCity(cityMatch[1]), (e) => {
+      errorBanner(`could not load the city viewer (${e.message})`);
+      console.error(e);
+    });
     return;
   }
   const root = document.getElementById("app");
