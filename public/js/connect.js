@@ -50,7 +50,7 @@ async function api(office, key, path, init = {}) {
   return body;
 }
 
-export function createConnect(root, { office, key, toast }) {
+export function createConnect(root, { office, key, toast, onDeleted }) {
   loadStyles();
   let role = null, info = null, loading = null;
   let client = "claude-code";
@@ -75,6 +75,12 @@ export function createConnect(root, { office, key, toast }) {
     else if (t.dataset.revoke) revoke(t.dataset.revoke);
     else if (t.dataset.addView !== undefined) addView();
     else if (t.dataset.revokeViews !== undefined) revokeOtherViews();
+    else if (t.dataset.deleteOffice !== undefined) deleteOffice();
+  });
+
+  card.addEventListener("input", (e) => {
+    if (!e.target.matches(".cx-del-name")) return;
+    card.querySelector("[data-delete-office]").disabled = e.target.value.trim() !== officeName();
   });
 
   card.addEventListener("change", (e) => {
@@ -121,7 +127,7 @@ export function createConnect(root, { office, key, toast }) {
   function render() {
     if (!info) return;
     const share = links();
-    if (!info.joinKey) { card.innerHTML = head() + share + noKey(); return; }
+    if (!info.joinKey) { card.innerHTML = head() + share + noKey() + danger(); return; }
     const all = guides(location.origin, office, info.joinKey);
     const g = all.find((x) => x.id === client) ?? all[0];
     const design = `${info.designMcpUrl}`;
@@ -145,7 +151,7 @@ export function createConnect(root, { office, key, toast }) {
         </details>
         <p class="cx-fine">Anyone with a join key can bring agents in. Give each person their own link above, so you can revoke just theirs.</p>` : `
         <p class="cx-fine">This is your join key: share it only with agents you want in the office.</p>`}
-      </section>`;
+      </section>` + danger();
   }
 
   const linkOf = (k) => `${location.origin}/o/${encodeURIComponent(office)}#k=${encodeURIComponent(k)}`;
@@ -188,6 +194,34 @@ export function createConnect(root, { office, key, toast }) {
     return role === "owner"
       ? `<p class="cx-p">No join link to show yet. <b>Invite someone</b> above (even yourself) to get one with ready-to-paste setup for agents. Existing join keys keep working.</p>`
       : `<p class="cx-p">Ask the owner for a join link.</p>`;
+  }
+
+  const officeName = () => info?.name ?? office;
+
+  function danger() {
+    if (role !== "owner") return "";
+    return `<details class="cx-danger"><summary>Delete this office</summary>
+      <p class="cx-p">Deletes everything for good: furniture, agents, chat, theme and images. Every link stops working. This can't be undone.</p>
+      <label class="cx-del"><span>Type <b>${esc(officeName())}</b> to confirm</span>
+        <input class="cx-del-name" autocomplete="off" spellcheck="false" placeholder="${esc(officeName())}"></label>
+      <button class="cx-btn cx-btn-danger" data-delete-office disabled>Delete this office</button>
+    </details>`;
+  }
+
+  function deleteOffice() {
+    if (role !== "owner") throw new Error("only the owner can delete the office");
+    const typed = card.querySelector(".cx-del-name")?.value.trim();
+    if (typed !== officeName()) { toast("Type the office name exactly to delete it.", "err"); return; }
+    const btn = card.querySelector("[data-delete-office]");
+    btn.disabled = true;
+    btn.textContent = "Deleting…";
+    act(async () => {
+      const r = await fetch(`/api/o/${encodeURIComponent(office)}`, { method: "DELETE", headers: { accept: "application/json", authorization: `Bearer ${key}` } });
+      const body = await r.json().catch(() => null);
+      if (!r.ok) { btn.disabled = false; btn.textContent = "Delete this office"; throw new Error(body?.error ?? `delete failed (HTTP ${r.status})`); }
+      if (body?.deleted !== office) throw new Error(`delete answered for "${body?.deleted}", not "${office}"`);
+      onDeleted();
+    });
   }
 
   async function act(fn) {

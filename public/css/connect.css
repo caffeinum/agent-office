@@ -90,3 +90,12 @@
 .cx-linkrow .cx-revoke { min-width: 0; }
 .cx-linkrow .cx-revoke:hover { background: rgba(220, 70, 60, 0.16); color: #c0392b; }
 .cx-linkrow > button + button { margin-left: -4px; }
+
+.cx-danger { margin-top: 18px; padding: 8px 12px; border-radius: 12px; border: 1px solid rgba(220, 70, 60, 0.35); }
+.cx-danger summary { cursor: pointer; font-size: 12.5px; font-weight: 800; color: #c0392b; }
+#app[data-theme="night"] .cx-danger summary { color: #ff8a7a; }
+.cx-danger[open] summary { margin-bottom: 4px; }
+.cx-del { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 10px; font-size: 12px; color: var(--ink-2); }
+.cx-del-name { height: 34px; padding: 0 10px; border: 1px solid var(--glass-line); border-radius: 10px; background: var(--chip); color: var(--ink); font: inherit; font-size: 13px; }
+.cx-btn-danger { background: #c0392b; box-shadow: 0 3px 0 #8e2a20; }
+.cx-btn-danger:disabled { opacity: 0.45; cursor: not-allowed; }

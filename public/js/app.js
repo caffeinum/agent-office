@@ -119,7 +119,7 @@ function boot() {
     uploadLogo: (file) => uploadLogo(file).catch((e) => ui.toast(e.message, "err")),
     setLogo: (id) => source.setLogo(id).then(() => ui.toast(id ? "Logo set" : "Logo removed")).catch((e) => ui.toast(e.message, "err")),
   });
-  const connect = key ? createConnect(root, { office, key, toast: ui.toast }) : null;
+  const connect = key ? createConnect(root, { office, key, toast: ui.toast, onDeleted: () => { forgetKey(office); location.assign("/"); } }) : null;
   scene.onFrame(() => overlay.update(scene.anchors()));
   const sideEl = root.querySelector(".side");
   fitInsets = () => {

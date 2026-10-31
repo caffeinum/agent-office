@@ -152,6 +152,7 @@ describe("REST tools", () => {
     const info = (await call(o, "connect", {}, { method: "GET", ...owner })).body;
     expect(info.joinKey).toBe(o.joinKey);
     expect(info.invites).toHaveLength(3);
+    expect(info.name).toBe("Test Office");
     expect((await call(o, "connect", {}, { method: "GET", key: bob.key })).body).toMatchObject({ as: "Bob", joinKey: null });
     const sock = await openWs(o, bob.key);
     const closed = new Promise<number>((r) => sock.ws.addEventListener("close", (e) => r(e.code)));

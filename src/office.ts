@@ -1345,7 +1345,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     const joinKey = pick ? kept[pick.id]! : null;
     const viewKey = (await this.keptViewKeys()).at(-1) ?? null;
     return {
-      office: meta.id, mcpUrl: `${origin}/mcp`, designMcpUrl: `${origin}/mcp?mode=design`, joinKey, joinUrl: this.keyLink(joinKey, origin), viewUrl: this.keyLink(viewKey, origin),
+      office: meta.id, name: meta.name, mcpUrl: `${origin}/mcp`, designMcpUrl: `${origin}/mcp?mode=design`, joinKey, joinUrl: this.keyLink(joinKey, origin), viewUrl: this.keyLink(viewKey, origin),
       as: match.invite?.label ?? null,
       ...(owner ? { invites: await this.inviteList(origin), viewKeys: meta.keys.view.length } : {}),
     };
