@@ -1,5 +1,7 @@
 # sf voxel city: build spec v1.1
 
+> **Status (2026-10-31): shipped.** Live at `/city/sf`. Where the build differs from this plan, the text below has been updated to what shipped, and section 7 lists every deviation with its reason.
+
 This revision addresses all 16 review items. The repo was not touched. Coordinates in this spec were computed from the projection constants below. Items marked "W2 pins" or "W3 pins" are values the owning workstream must look up and commit before coding against them.
 
 > **Operator decisions (made by agent-office on the operator's behalf, 2026-10-31; the operator asked us to "decide on exact scale"):** 1 block = 3 m horizontal and vertical, 1:1 elevation, no tower compression; lots 2–3 blocks wide, residential roadway 4 blocks + 1-block sidewalks (matches "buildings 2-3-5 blocks, roads 4-5 blocks" as widths); staircase grids accepted as Minecraft style; 1 office cell = 1/4 block. Section 0 sign-off is therefore DONE — W2 does not wait.
@@ -61,7 +63,7 @@ The operator confirms these on the fixture (`/city/fixture`) at the end of W1. W
   | OpenAI, 1455 3rd St (EAS 489890) | 37.770061 | −122.3887726 | 3849.2 | 2393.5 | 60,37 |
 
   - The OpenAI row is the EAS point for 1455 03RD ST (eas_baseid 489890, parcel 8721033), set by W3 together with the check.
-- **Default spawn:** target 3610,1667, distance 600, day theme.
+- **Default spawn:** target 3520,1580, distance 900, day theme (`SPAWN` in `scripts/city/sf/config.mjs`). The planned 3610,1667 at 600 cut Transamerica's top at 1280×800; the shipped spawn frames the 15 tallest FiDi tops, chips included, at 1280×800 and 390×844.
 
 ## 2. data pipeline
 
@@ -99,12 +101,13 @@ No GDAL.
    - every query is prefixed with `[out:json][timeout:300][maxsize:1073741824];`.
    - three queries:
      - roads: `way["highway"](bbox);out geom tags;`
-     - land: one union query, for both ways and multipolygon relations, with `out geom tags;`. It covers:
+     - land: one union query, for both ways and multipolygon relations, with `out geom;`. It covers:
        - `leisure~park|garden|pitch|golf_course`
        - `landuse~grass|forest|cemetery|recreation_ground|railway`
        - `natural~wood|water|sand|beach|scrub|grassland`
        - `man_made=pier`, `railway~rail|light_rail`, `amenity=parking`, and `highway=pedestrian+area=yes`
-     - buildings: `wr["building"](bbox);out geom tags;`
+     - buildings: `wr["building"](bbox);out geom;`
+   - land and buildings end in `out geom;`, not `out geom tags;`: the `tags` verbosity drops relation members, so multipolygons arrived without geometry. The default (body) verbosity keeps tags and member geometry (`scripts/city/lib/osm.mjs`).
    - `natural=coastline` is not in the land query. It is fetched only if the fallback in source 5 is needed.
    - fallback if Overpass stays down: a BBBike or Geofabrik `.osm.pbf` extract. That needs a pbf reader dependency, which is a W1 decision made only if the fallback is triggered.
 3. **Terrain:** AWS Terrarium z15 tiles, `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/15/{x}/{y}.png`, decoded as `R*256+G+B/256-32768`.
@@ -199,7 +202,7 @@ No GDAL.
   - the variant within a group is `hash(id)`. Landmarks are set by override.
 - **Building ids:** u32, assigned sequentially after sorting by source key. They are stable only within one build, which is fine because companies are re-placed on every build.
 
-**Output** (committed and served as static ASSETS; no Worker change):
+**Output** (committed and served as static ASSETS; the asset server answers them directly, see section 7):
 
 - **`public/city/sf/manifest.json`**:
   `{version:1, city:"sf", name, blockM:3, chunk:64, proj:{lon0,lat0,latRef,mPerDegLat,mPerDegLon}, chunks:{min:[42,14], max:[62,46], list:[[cx,cz,bytesGz],...]}, yRange:[min,max], spawn:{x,z,dist}, attribution:[...], sources:[...], builtAt}`.
@@ -273,11 +276,12 @@ No GDAL.
 - **Route:** in `public/js/app.js` `boot()`, the first statement matches `/^\/city\/([a-z0-9-]+)\/?$/`. On a match it hides `#app` and `#landing`, runs `import("./city/app.js").then(m => m.bootCity(id))`, and returns.
   - this runs before any use of the module-scope office `demo` flag (`app.js` line 15, used from line 54 on), so office demo logic never runs on `/city/*`.
   - the city does not read `demo` at all. Its demo flag is `?pins=demo` (see URL state).
-  - the Worker needs no change: the SPA fallback already serves index.html.
+  - the SPA fallback serves index.html for `/city/:id`. `wrangler.jsonc` `run_worker_first` is a route list: the Worker runs first everywhere except `/city/*/chunks/*`, `/city/*/manifest.json`, `/city/*/companies.json` and `/city/*/LICENSE.txt`, which the asset server answers directly (one Worker invocation per page instead of ~630). `public/_headers` gives them the Worker's `nosniff` and `no-referrer` headers.
+  - if `./city/app.js` itself fails to load, `app.js` shows the same red banner (`city/banner.js`).
   - `/city/fixture` serves the synthetic test city.
 - **Do not refactor `scene.js`.** The city gets its own `public/js/city/stage.js`, about 200 duplicated lines covering:
   - renderer: WebGL2, DPR cap 1.25, adaptive down to 1.0 when fps < 45.
-  - composer and bloom.
+  - composer and bloom (bloom at night only; the day theme disables the pass).
   - hemi light and sun.
   - day/night THEMES.
   - sky and fog.
@@ -313,16 +317,16 @@ No GDAL.
     - top faces are merged by (y, colour).
     - side faces are emitted only where the neighbour column is lower, as one quad per run of equal heights. An absent neighbour counts as water (y=0).
     - deck slabs are included, and pillars come from negative `deck`.
-  - **vertex AO:**
-    - top vertices get Minecraft-style corner occlusion from the three neighbouring heights.
-    - side faces darken over the bottom block.
+  - **vertex AO (LOD0 only; regions have none):**
+    - top vertices get Minecraft-style corner occlusion from the three neighbouring heights, so top faces merge by (y, colour, corner AO), not only (y, colour).
+    - a side quad whose bottom meets the neighbour's top (a contact edge) gets its bottom vertices shaded to 0.72, which reads as a gradient up the whole merged run rather than a darkened bottom block.
   - **UVs (LOD0 only):**
     - UVs are world-scaled, so the existing `grainTexture()` gives a constant 1-block grain.
     - wall UVs: u is the block along the wall, v is y. They sample a 128 px window atlas (8×8 blocks, 16 px per block) from `city/textures.js`.
     - the atlas has a lit-window emissive map, faded in at night and picked up by bloom.
   - **output:**
     - LOD0 is two meshes per chunk: opaque (terrain, roofs, decks) and walls.
-    - LOD1 and LOD2 are **one mesh per region**, using vertex colour only. At night, wall vertices get a flat emissive tint instead of the atlas.
+    - LOD1 and LOD2 are **one mesh per region**, using vertex colour only. Building-wall vertices carry a `glow` attribute; at night the region material draws a procedural window grid on them in world blocks (u = x+z, v = y, a hashed 38% lit share and the atlas's pane size), fading to a dimmed average once a cell is sub-pixel. A flat tint left the city dark outside the 3×3 LOD0 square.
     - positions are region- or chunk-local Float32, colours Uint8 normalised, indices Uint32.
 - **LOD and regions:** distance is the Chebyshev distance in chunks from `controls.target`, with ±0.5 hysteresis.
   - **LOD0:** r ≤ 1 (3×3 = 9 chunks). Per-chunk meshes, full detail, cast and receive shadows.
@@ -332,6 +336,7 @@ No GDAL.
     - it is re-meshed when its skip set or LOD changes. At most 4 regions touch LOD0 at once.
   - **LOD1:** 2×2 downsample at max top, receives shadows, no cast.
   - **LOD2:** 4×4 downsample.
+  - as shipped, land above y=1 also rounds **up** to a multiple of the downsample factor in LOD1/LOD2 (fewer hill terraces, no seam toward LOD0), and region border cells next to unknown cells skirt down to their lowest ground.
   - per frame: at most 2 mesh uploads. Replaced meshes are disposed.
   - frustum culling is on, with one bounding box per mesh.
   - **budget arithmetic at spawn** (distance 600):
@@ -354,7 +359,9 @@ No GDAL.
   - fov 30, near 1, far 6000.
   - polar angle 0.32..1.2, distance 30..2500.
   - target clamped to the manifest bbox.
-  - `target.y` lerps to `groundAt(target)` so panning glides over hills.
+  - `target.y` lerps to `groundAt(target)` so panning glides over hills; zoomed in it rises to within `dist × 0.5` of the roof under it, so orbiting a tower pivots on the tower.
+  - the camera stays 3 blocks above the heightfield (building tops, decks, ground) in the 3×3 columns under it: it never ends up inside a building.
+  - fly-to (`?c=`, search, chip click) uses distance `clamp(4.5 × height in blocks, 160, 900)`, so the chip at `roofY+2` stays in frame.
   - fog near/far = dist×1.5 / dist×4.5, clamped to the far plane.
 - **Shadows:** a 2048 sun map with an orthographic box of ±128 blocks around the target, snapped to texels.
 - **Style:** colours live in `public/shared/city.js` (owned by W4 after W1, see section 5), taken from the scale scout's palette.
@@ -435,21 +442,25 @@ No GDAL.
 
 **Source file:** `scripts/city/sf/companies.src.json`, curated by hand and committed. Each entry:
 
-`{id, companyId, name, primary, address, easId?, status:"hq"|"office"|"former"|"landmark", category, color, sources:[{url, kind:"occupancy"|"registry"|"news"|"company", date?}], verifiedAt:"YYYY-MM-DD", hint:{lat,lon,from:<url>|"scout"}, note?, ship:true|false}`
+`{id, companyId, name, primary, address, easId?, status:"hq"|"office"|"former"|"landmark", category, color, sources:[{url, kind:"occupancy"|"registry"|"news"|"company", date?, accessed?} | {kind:"operator", statement, date}], verifiedAt:"YYYY-MM-DD", hint:{lat,lon,from:<url>|"scout"}, building?:{lat,lon,from:<url>,reason}, note?, ship:true|false}`
+
+- `date` is when a source was **published**; `accessed` is when we read it (for undated live pages such as contact pages). Rules compare `date` only. A read date never goes in `date`.
+- `kind:"operator"` is the operator's own statement, with no URL to cite. Rule 1 accepts it for `hq`/`office` only when the entry's `note` says the address rests on the operator's word (Firegoat, 501 2nd St).
+- `building` is a documented placement override: a point inside the intended footprint, its source and the reason. Used when the EAS point lands on the wrong footprint (PG&E, 77 Beale).
 
 - `hint.from` records where the hint point came from. A `"scout"` hint is allowed but is flagged in output and in the report.
 - `easId` pins the EAS record when there are multiple hits (rule 2).
 
 **Output:** `public/city/sf/companies.json`:
 
-`{version:1, city:"sf", builtAt, sites:[{...src fields minus ship/hint/easId, lat, lon, eas:{id,parcel}, hintFrom, buildingId, block:{x,z}, chunk:[cx,cz], anchor:{x,y,z}, roofY, heightM, placement:"contains"|"nearest", placementDistM}]}`
+`{version:1, city:"sf", builtAt, sites:[{...src fields minus ship/hint/easId/building, lat, lon, eas:{id,parcel}, hintFrom, buildingId, block:{x,z}, chunk:[cx,cz], anchor:{x,y,z}, roofY, heightM, placement:"contains"|"nearest"|"override", placementDistM}]}`
 
 **Rules in `companies-sf.mjs`. Each one fails the run loudly:**
 
 1. **Sources.** A shipped site needs at least one source and a `verifiedAt`.
    - `hq` and `office` need at least one `occupancy` source: the company's careers, contact or office page, or dated lease or move news.
    - a Registered Business Locations (g8m3-pdis) record has `kind:"registry"`. It can corroborate, but it is never enough on its own for `hq` or `office`, because it often holds a registered-agent or mailing address.
-   - `former` needs a dated news or company source showing occupancy and departure.
+   - `former` needs a dated news or company source showing occupancy and departure. A filing that shows the company's **new** principal office documents the departure: it is `company`, never `occupancy` for the old site.
    - entries that so far rest only on the scout's memory are not shipped.
 2. **EAS geocoding** (authoritative; `lib/eas.mjs`):
    - **normalisation**, applied to both the source address and the EAS fields:
@@ -466,7 +477,7 @@ No GDAL.
    - fail if there is no match, or if the EAS point is more than 60 m from `hint`. The error names `hint.from`.
    - responses are cached under `raw/eas/<id>.json`.
 3. **Bbox.** The site must lie inside the built bbox. Sites outside it are listed as skipped, for example ILM in the Presidio.
-4. **Placement** uses the chunk `bldg` grid:
+4. **Placement** uses the chunk `bldg` grid (a src `building` override wins, placement `override`, and must be a building column within 15 blocks):
    - if the EAS column is a building, placement is `contains`.
    - else the nearest building column within 15 blocks (45 m) is taken, with placement `nearest`.
    - else the build fails.
@@ -474,7 +485,7 @@ No GDAL.
 6. **Shared buildings.** Several sites may share a building, for example 415 Mission (Salesforce and Slack) and 303 2nd St (Scale, Reddit, DoorDash).
 7. **Campuses.** A campus is several sites under one `companyId` with exactly one `primary`, for example OpenAI at 1455 3rd St (primary), 1515 3rd St and 550 Terry Francois.
 8. **Conflicting addresses**, for example Anthropic at 500 Howard (lease news) against 400 Howard (business registry):
-   - the address with the newest dated `occupancy` source becomes `primary` with status `hq`.
+   - the address with the newest dated `occupancy` source (publication `date`, never `accessed`) becomes `primary` with status `hq`. On a tie the hand-set primary stays, and its note says why (Databricks: the same 2025-03-06 press release names One Sansome the new HQ and says Databricks keeps its Spear St office until 2026 renovations finish; nothing dated confirms the move and the contact page, read 2026-10-31, still lists 160 Spear, so 160 Spear is primary `hq` and 1 Sansome is `office`).
    - another address with its own occupancy source ships as `office`.
    - a registry-only address is not shipped.
    - if neither has an occupancy source, the company is not shipped. The W6 "search anthropic" gate then switches to a different shipped company (see W6).
@@ -544,7 +555,7 @@ W1 goes first and is small, about half a day: it lays down the contract and stub
   - `geo.check.mjs` passes, including the ring-assembly cases.
   - `verify-sf.mjs` known points:
     - Ferry Building ground = 1, and its columns are building or PIER, not water.
-    - Grace Cathedral (37.7919, −122.4134) ground 34±3.
+    - Grace Cathedral (37.7919, −122.4134) ground **30±3** as shipped. The planned 34 is the Nob Hill summit (about 103 m, one block west); the cathedral itself stands lower: DataSF footprint `area_id` 550 records `gnd_min_m` 90.04 m (30 blocks) and the Terrarium DEM gives 92.5 m.
     - Coit Tower base (37.8024, −122.4058) 28±3.
     - Salesforce Tower `top-base` 109±3, which proves the OSM merge.
     - Transamerica 87±3.
@@ -685,3 +696,22 @@ W1 goes first and is small, about half a day: it lays down the contract and stub
 8. shrinking the bbox to cx 51..59, cz 19..27 (FiDi/SoMa core, 81 chunks). Anchors outside that box (Ghirardelli, Grace, Coit, Pier 39, OpenAI) move to "skipped" in `verify-sf.mjs`, which does not fail the run.
 
 **Never cut:** real elevation at 1:1, the vector water mask, sources and EAS for every company, the attribution footer, and loud errors on bad data.
+
+## 7. as shipped: deviations from the plan
+
+| plan | shipped | why |
+|---|---|---|
+| land/buildings Overpass queries `out geom tags;` | `out geom;` | `tags` verbosity drops relation members, so multipolygons had no geometry |
+| Grace Cathedral ground 34±3 | 30±3 | 34 is the Nob Hill summit; the cathedral's DataSF `gnd_min_m` is 90.04 m (30 blocks), DEM 92.5 m |
+| side AO darkens the bottom block | bottom vertices of a contact quad shaded 0.72 (gradient over the run) | keeps greedy side runs merged; one quad per run |
+| top faces merge by (y, colour) | by (y, colour, corner AO) | AO is baked per vertex, so different AO cannot share a quad |
+| AO on all LODs (implied) | LOD0 only | regions are far and already downsampled |
+| LOD1/LOD2 max-top downsample | plus terrain rounded up to the factor, border skirts | fewer terraces, no seam toward LOD0 |
+| night: flat emissive tint on region walls | procedural window grid on region walls | a flat tint left LOD1/LOD2 dark, with a hard lit square around LOD0 |
+| bloom in both themes | night only | day bloom barely showed and cost the whole bloom chain (71 → 58 draw calls) |
+| no Worker change | `run_worker_first` route list + `public/_headers` | static chunk/manifest/companies files skip the Worker |
+| spawn 3610,1667 @600 | 3520,1580 @900 | frames the whole FiDi skyline at 1280×800 and 390×844 |
+| camera: polar/distance limits only | min height over the heightfield; target rises toward the roof when close | the camera could end up inside towers |
+| source `{url, kind, date?}` | adds `accessed?`, `kind:"operator"`, src `building` override, placement `override` | separate publication from read dates; honest operator-only addresses; documented placement fixes |
+| former sites cite their 10-K as `occupancy` | `company` | the 10-K shows the new office, i.e. the departure |
+| Salesforce top−base 109±3 | 110 | within the gate |
