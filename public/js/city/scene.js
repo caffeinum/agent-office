@@ -370,7 +370,7 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     return { x: (proj.x * 0.5 + 0.5) * w, y: (-proj.y * 0.5 + 0.5) * h, visible: proj.z > -1 && proj.z < 1 && Math.abs(proj.x) <= 1 && Math.abs(proj.y) <= 1 };
   }
 
-  // a tap / click that barely moved is a pick
+  // a tap / click that barely moved is a pick, run only when someone listens (the UI picks on its own)
   const tapCbs = [];
   let down = null;
   const canvas = renderer.domElement;
@@ -379,7 +379,7 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     if (!down || down.id !== e.pointerId) return;
     const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), long = performance.now() - down.t > 600;
     down = null;
-    if (moved > 6 || long || e.button !== 0) return;
+    if (moved > 6 || long || e.button !== 0 || !tapCbs.length) return;
     const hit = pick(e.clientX, e.clientY);
     for (const fn of tapCbs) fn({ clientX: e.clientX, clientY: e.clientY, hit });
   });
