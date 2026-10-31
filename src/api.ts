@@ -5,6 +5,7 @@ import { BIG_BODY_MAX, errorResponse, json, readBytes, readJson } from "./http";
 import { resolveToolName, TOOL_NAMES, ToolError, type ToolName } from "./tools";
 import { ASSET_BYTES_MAX } from "./images";
 import type { CallCtx, ToolHost } from "./office";
+import { CITY_ID, LINK_ACTIONS, LINK_STATES, type CityResult, type LinkAction, type LinkRow, type LinkState } from "./city/do";
 
 export const ADMIN_KEY_MIN = 24;
 const GET_TOOLS = new Set<ToolName>(["office_look", "office_kinds", "office_chat_read", "office_chat_wait", "office_theme_get"]);
@@ -132,6 +133,27 @@ export async function handleAdmin(req: Request, env: Env, rest: string): Promise
     return errorResponse(404, "no such office", { removedFromRegistry });
   }
   return res;
+}
+
+/** City link admin (spec-v2 §7.4): GET /api/city/sf/links?state=pending, POST /api/city/sf/links/:officeId/{approve|reject|revoke}. */
+export async function handleCityAdmin(req: Request, env: Env, officeId: string | null, action: string | null): Promise<Response> {
+  const url = new URL(req.url);
+  if (url.searchParams.has("key")) return errorResponse(400, "the admin key never goes in a query string: send Authorization: Bearer <ADMIN_KEY>");
+  const refused = await refuseNonAdmin(req, env, "city link admin");
+  if (refused) return refused;
+  const city = env.CITY.get(env.CITY.idFromName(CITY_ID));
+  if (officeId === null) {
+    if (req.method !== "GET") return errorResponse(405, `GET /api/city/${CITY_ID}/links?state=pending lists link requests`);
+    const state = url.searchParams.get("state");
+    if (state !== null && !(LINK_STATES as readonly string[]).includes(state)) return errorResponse(400, `state must be one of ${LINK_STATES.join(", ")}`);
+    return json(200, { links: await city.listLinks(state as LinkState | null) });
+  }
+  if (req.method !== "POST") return errorResponse(405, `POST /api/city/${CITY_ID}/links/:officeId/{approve|reject|revoke}`);
+  if (!OFFICE_ID_RE.test(officeId)) return errorResponse(404, "no such office");
+  if (action === null || !Object.hasOwn(LINK_ACTIONS, action)) return errorResponse(400, `action must be one of ${Object.keys(LINK_ACTIONS).join(", ")}`);
+  const res = (await city.decideLink(officeId, action as LinkAction)) as CityResult<LinkRow>;
+  if (!res.ok) return errorResponse(res.status, res.error, res.extra);
+  return json(200, { ok: true, link: res.value });
 }
 
 async function adminOffice(req: Request, stub: DurableObjectStub, usage: string): Promise<Response> {

@@ -16,6 +16,7 @@ import { grantFromRequest, type OAuthGrant } from "./oauth";
 import { handleRest } from "./api";
 import { registryStub } from "./registry";
 import { validateWebhookUrl, WebhookError, Webhooks } from "./webhook";
+import { CITY_ID, NO_LINK, type BridgeAgent, type CityArgs, type CityResult, type LinkRow, type LinkState } from "./city/do";
 
 export const MAX_CHAT = 200;
 /** Join keys in plaintext by invite id, and view keys oldest first, so the owner's viewer can share them (connect guide, copy links). */
@@ -62,6 +63,10 @@ export const IDLE_EXPIRE_MS = 90 * 24 * 60 * 60_000;
 export const ACTIVITY_PERSIST_MS = 10 * 60_000;
 /** Close code viewers get when the office is deleted (by its owner, an admin, or expiry). */
 export const WS_CLOSE_DELETED = 4404;
+/** The city presence bridge pushes at most this often, plus a heartbeat (the City DO drops presence after 3 min). */
+export const CITY_PUSH_MS = 5000;
+export const CITY_HEARTBEAT_MS = 60_000;
+export const CITY_SITE_RE = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const ASSETS_DDL =
   "CREATE TABLE IF NOT EXISTS assets (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, w INTEGER NOT NULL, h INTEGER NOT NULL, size INTEGER NOT NULL, by TEXT NOT NULL, at INTEGER NOT NULL, bytes BLOB NOT NULL)";
 
@@ -81,6 +86,8 @@ export interface Agent {
   joinedAt: number;
   lastSeen: number;
   says?: { text: string; ts: number };
+  /** Out walking the city map (office_city): the desk shows an "in the city" tag. */
+  inCity?: true;
 }
 
 interface AgentRecord extends Agent {
@@ -259,6 +266,12 @@ export class Office extends DurableObject<Env> implements ToolHost {
   /** Created with the ADMIN_KEY; null for offices created before this was recorded. */
   private admin: boolean | null = null;
   private hooks: Webhooks;
+  /** This office's link to a company site on the city map (the City DO holds the authoritative state). */
+  private cityLink: { siteId: string; state: LinkState } | null = null;
+  /** Invites whose agents the owner let into the city (owner-key agents always may walk). */
+  private cityInvites = new Set<string>();
+  private cityPushedAt = 0;
+  private cityDirty = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -294,6 +307,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.registered = (await ctx.storage.get<boolean>("registered")) ?? false;
     this.admin = (await ctx.storage.get<boolean>("admin")) ?? null;
     this.activity = (await ctx.storage.get<Activity>("activity")) ?? null;
+    this.cityLink = (await ctx.storage.get<{ siteId: string; state: LinkState }>("cityLink")) ?? null;
+    this.cityInvites = new Set((await ctx.storage.get<string[]>("cityInvites")) ?? []);
     if (!this.activity) {
       this.activity = this.inferActivity();
       await ctx.storage.put("activity", this.activity);
@@ -396,6 +411,12 @@ export class Office extends DurableObject<Env> implements ToolHost {
         if (req.method === "GET") return json(200, { invites: await this.inviteList(url.origin) });
         if (req.method !== "POST") return errorResponse(405, "GET /api/o/:office/invites lists them; POST {op: \"create\", label} | {op: \"revoke\", id}");
         return json(200, await this.manageInvites(((await readJson(req)) ?? {}) as Record<string, unknown>, url.origin));
+      }
+      // PUT/GET /api/o/:office/city is the owner's link to a company site; POST is the office_city tool (REST mirror)
+      if (m && m[1] === "city" && (req.method === "PUT" || req.method === "GET")) {
+        if (role !== "owner") return errorResponse(403, "the city link needs the ownerKey");
+        if (req.method === "GET") return json(200, { link: this.cityLink, cityInvites: [...this.cityInvites] });
+        return json(200, await this.requestCityLink(((await readJson(req)) ?? {}) as Record<string, unknown>, ip));
       }
       if (m && (m[1] === "kick" || m[1] === "rotate-keys" || m[1] === "rotate_keys" || m[1] === "designer" || m[1] === "view-keys")) {
         if (role !== "owner") return errorResponse(403, `${m[1]} needs the ownerKey`);
@@ -527,6 +548,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
   private async wipe(reason: string): Promise<{ ok: true; deleted: string }> {
     const id = this.mustMeta().id;
     await registryStub(this.env).remove(id);
+    if (this.cityLink) await this.cityStub().officeGone(id);
     for (const ws of this.ctx.getWebSockets()) {
       try {
         ws.close(WS_CLOSE_DELETED, reason);
@@ -558,6 +580,9 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.registered = false;
     this.admin = null;
     this.hooks.clearAll();
+    this.cityLink = null;
+    this.cityInvites.clear();
+    this.cityDirty = false;
     console.log(`office ${id}: deleted (${reason})`);
     return { ok: true, deleted: id };
   }
@@ -614,7 +639,9 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   private async saveAgent(a: AgentRecord, broadcast = true): Promise<void> {
     await this.ctx.storage.put(`agent:${a.id}`, a);
-    if (broadcast) this.broadcast({ type: "agent", agent: publicAgent(a) });
+    if (!broadcast) return;
+    this.broadcast({ type: "agent", agent: publicAgent(a) });
+    this.markCityDirty();
   }
 
   private async removeAgent(a: AgentRecord): Promise<void> {
@@ -629,6 +656,14 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.waiters.get(a.id)?.("gone");
     await this.ctx.storage.delete(`agent:${a.id}`);
     this.broadcast({ type: "agent-left", id: a.id });
+    if (this.cityLink) {
+      try {
+        await this.cityStub().removeWalker(this.mustMeta().id, a.id);
+      } catch (e) {
+        console.error(`office ${this.mustMeta().id}: removing ${a.id}'s city walker failed`, e);
+      }
+      this.markCityDirty();
+    }
   }
 
   private async postChat(from: string, to: string | null, text: string): Promise<ChatMsg> {
@@ -693,6 +728,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
       const due = a.status === "away" ? a.lastSeen + this.removeAfter(a) : a.lastSeen + AWAY_MS;
       if (next === null || due < next) next = due;
     }
+    const city = this.cityPushDue();
+    if (city !== null && (next === null || city < next)) next = city;
     if (next === null) return;
     if (this.alarmAt !== null && this.alarmAt <= next && this.alarmAt > Date.now() - 1000) return;
     this.alarmAt = next;
@@ -716,6 +753,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
         await this.saveAgent(a);
       }
     }
+    const city = this.cityPushDue();
+    if (this.cityDirty || (city !== null && city <= now)) await this.pushCity();
     await this.scheduleAlarm();
   }
 
@@ -931,6 +970,9 @@ export class Office extends DurableObject<Env> implements ToolHost {
       }
       case "office_look":
         result = this.look(agent, ctx.role === "owner");
+        break;
+      case "office_city":
+        result = await this.cityCall(agent, args as ToolArgs<"office_city">);
         break;
       case "office_add": {
         const { agentToken: _t, ...op } = args as ToolArgs<"office_add">;
@@ -1415,6 +1457,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     return this.mustMeta().keys.join.map((i) => ({
       id: i.id, label: i.label, createdAt: i.createdAt, key: kept[i.id] ?? null, url: this.keyLink(kept[i.id] ?? null, origin),
       agents: [...this.agents.values()].filter((a) => a.inviteId === i.id).length,
+      city: this.cityInvites.has(i.id),
     }));
   }
 
@@ -1433,7 +1476,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       const invite: Invite = { id: `inv-${shortId()}`, hash: await sha256hex(key), label, createdAt: Date.now() };
       this.meta = { ...meta, keys: { ...meta.keys, join: [...meta.keys.join, invite] } };
       await this.ctx.storage.put({ meta: this.meta, [JOIN_KEYS_SLOT]: { ...(await this.keptJoinKeys()), [invite.id]: key } });
-      return { ok: true, invite: { id: invite.id, label, createdAt: invite.createdAt, key, url: this.keyLink(key, origin), agents: 0 } };
+      return { ok: true, invite: { id: invite.id, label, createdAt: invite.createdAt, key, url: this.keyLink(key, origin), agents: 0, city: false } };
     }
     if (body.op === "revoke") {
       const invite = meta.keys.join.find((i) => i.id === body.id);
@@ -1441,14 +1484,24 @@ export class Office extends DurableObject<Env> implements ToolHost {
       if (body.kick !== undefined && typeof body.kick !== "boolean") throw new ToolError(400, "kick must be a boolean");
       const { [invite.id]: _gone, ...kept } = await this.keptJoinKeys();
       this.meta = { ...meta, keys: { ...meta.keys, join: meta.keys.join.filter((i) => i !== invite) } };
-      await this.ctx.storage.put({ meta: this.meta, [JOIN_KEYS_SLOT]: kept });
+      this.cityInvites.delete(invite.id);
+      await this.ctx.storage.put({ meta: this.meta, [JOIN_KEYS_SLOT]: kept, cityInvites: [...this.cityInvites] });
       for (const ws of this.ctx.getWebSockets(`k:${invite.hash}`)) ws.close(4401, "this invite was revoked");
       const theirs = body.kick === false ? [] : [...this.agents.values()].filter((a) => a.inviteId === invite.id);
       for (const a of theirs) await this.removeAgent(a);
       if (theirs.length) await this.postChat("office", null, `${theirs.map((a) => a.name).join(", ")} left: ${invite.label}'s invite was revoked`);
       return { ok: true, revoked: invite.id, label: invite.label, kicked: theirs.map((a) => a.id) };
     }
-    throw new ToolError(400, 'invites: POST {op: "create", label} or {op: "revoke", id, kick?}');
+    if (body.op === "city") {
+      const invite = meta.keys.join.find((i) => i.id === body.id);
+      if (!invite) throw new ToolError(404, `no invite "${String(body.id)}" (GET /api/o/:office/invites lists them)`);
+      if (typeof body.city !== "boolean") throw new ToolError(400, "city must be a boolean: whether agents on this invite may walk the city");
+      if (body.city) this.cityInvites.add(invite.id);
+      else this.cityInvites.delete(invite.id);
+      await this.ctx.storage.put("cityInvites", [...this.cityInvites]);
+      return { ok: true, invite: invite.id, city: body.city };
+    }
+    throw new ToolError(400, 'invites: POST {op: "create", label}, {op: "revoke", id, kick?} or {op: "city", id, city: boolean}');
   }
 
   /** Owner public links: {op: "add"} mints one more view key (nothing is revoked); {op: "revoke-others", keep} drops every other view key. */
@@ -1548,8 +1601,100 @@ export class Office extends DurableObject<Env> implements ToolHost {
       stations: spots.stations.map((p) => `${p.id} ${p.activity} x${p.x} z${p.z} face${Math.round((p.yaw * 180) / Math.PI)}`),
       design: designSummary({ grid: meta.grid, items, theme: this.theme, custom: this.customKinds }),
       designer: this.designer,
+      city: this.cityLink,
       unreadChat: unread,
     };
+  }
+
+  // ---------- city: link, office_city, presence bridge (spec-v2 §7.3–7.4) ----------
+
+  private cityStub() {
+    return this.env.CITY.get(this.env.CITY.idFromName(CITY_ID));
+  }
+
+  private async requestCityLink(body: Record<string, unknown>, ip: string) {
+    const meta = this.mustMeta();
+    if (body.city !== CITY_ID) throw new ToolError(400, `city must be "${CITY_ID}"`);
+    if (typeof body.siteId !== "string" || !CITY_SITE_RE.test(body.siteId)) throw new ToolError(400, "siteId must be a company site id from companies.json, e.g. \"firegoat-501-2nd\"");
+    const { success } = await this.env.CITY_LINK_LIMIT.limit({ key: `city-link:${ip}` });
+    if (!success) throw new ToolError(429, "too many city link requests from this address — try again in a minute");
+    const res = (await this.cityStub().requestLink(meta.id, body.siteId, meta.name)) as CityResult<LinkRow>;
+    if (!res.ok) throw new ToolError(res.status, res.error, res.extra);
+    this.cityLink = { siteId: res.value.siteId, state: res.value.state };
+    await this.ctx.storage.put("cityLink", this.cityLink);
+    this.markCityDirty();
+    return { ok: true, link: this.cityLink, note: this.cityLink.state === "pending" ? "an admin approves the link; until then the office shows nothing in the city" : undefined };
+  }
+
+  /** The City DO tells the office an admin decided its link: approval pushes presence now, anything else takes walkers off the map. */
+  async cityLinkDecided(siteId: string, state: LinkState): Promise<void> {
+    if (!this.meta || !this.cityLink || this.cityLink.siteId !== siteId) return;
+    this.cityLink = { siteId, state };
+    await this.ctx.storage.put("cityLink", this.cityLink);
+    if (state === "approved") {
+      this.cityDirty = true;
+      await this.pushCity();
+      return;
+    }
+    for (const a of this.agents.values()) if (a.inCity) await this.setInCity(a, false);
+  }
+
+  private async cityCall(agent: AgentRecord, args: ToolArgs<"office_city">): Promise<unknown> {
+    const meta = this.mustMeta();
+    if (!this.cityLink) throw new ToolError(403, NO_LINK(meta.id));
+    if (agent.inviteId && !this.cityInvites.has(agent.inviteId)) throw new ToolError(403, "your invite isn't allowed in the city; ask the office owner");
+    const { agentToken: _t, ...rest } = args;
+    const res = (await this.cityStub().call(meta.id, { agentId: agent.id, name: agent.name, hue: agent.hue, status: agent.status }, rest as CityArgs)) as CityResult<unknown>;
+    if (!res.ok) throw new ToolError(res.status, `office_city: ${res.error}`, res.extra);
+    if (!agent.inCity) await this.setInCity(agent, true);
+    return res.value;
+  }
+
+  private async setInCity(a: AgentRecord, on: boolean): Promise<void> {
+    if (on) a.inCity = true;
+    else delete a.inCity;
+    await this.saveAgent(a);
+  }
+
+  /** Roster or status changed: push to the city now, or at the end of the debounce window (alarm). */
+  private markCityDirty(): void {
+    if (!this.cityLink) return;
+    this.cityDirty = true;
+    if (Date.now() - this.cityPushedAt >= CITY_PUSH_MS) this.ctx.waitUntil(this.pushCity());
+    else this.ctx.waitUntil(this.scheduleAlarm());
+  }
+
+  private cityPushDue(): number | null {
+    if (!this.cityLink) return null;
+    if (this.cityDirty) return this.cityPushedAt + CITY_PUSH_MS;
+    if (this.cityLink.state === "approved" && this.agents.size) return this.cityPushedAt + CITY_HEARTBEAT_MS;
+    return null;
+  }
+
+  /** Name, hue, status and out only: no activity, no chat. The City DO drops it unless the link is approved. */
+  private async pushCity(): Promise<void> {
+    if (!this.meta || !this.cityLink) return;
+    this.cityDirty = false;
+    this.cityPushedAt = Date.now();
+    const agents: BridgeAgent[] = [...this.agents.values()].map((a) => ({ agentId: a.id, name: a.name, hue: a.hue, status: a.status, out: a.inCity === true }));
+    try {
+      const { state, live } = await this.cityStub().officePresence(this.meta.id, agents);
+      if (state === null) {
+        console.error(`office ${this.meta.id}: the city has no link for this office; dropping the local link record`);
+        this.cityLink = null;
+        await this.ctx.storage.delete("cityLink");
+      } else if (state !== this.cityLink.state) {
+        this.cityLink = { ...this.cityLink, state };
+        await this.ctx.storage.put("cityLink", this.cityLink);
+      }
+      if (state === "approved") {
+        const out = new Set(live);
+        for (const a of this.agents.values()) if (!!a.inCity !== out.has(a.id)) await this.setInCity(a, out.has(a.id));
+      }
+    } catch (e) {
+      console.error(`office ${this.meta.id}: city presence push failed`, e);
+    }
+    await this.scheduleAlarm();
   }
 
   // ---------- viewers ----------

@@ -10,26 +10,33 @@
     "not_found_handling": "single-page-application",
     // the Worker runs first everywhere (headers, /mcp, /api, /o/*, the SPA's /city/:id page) except the static
     // city data files, which the asset server answers directly: no Worker invocation per chunk
-    "run_worker_first": ["/*", "!/city/*/chunks/*", "!/city/*/manifest.json", "!/city/*/companies.json", "!/city/*/LICENSE.txt"]
+    "run_worker_first": ["/*", "!/city/*/chunks/*", "!/city/*/manifest.json", "!/city/*/companies.json", "!/city/*/LICENSE.txt", "!/city/*/walk.bin", "!/city/*/places.json", "!/city/*/landmask.bin", "!/city/*/landmarks.bin"]
   },
   "durable_objects": {
     "bindings": [
       { "name": "OFFICE", "class_name": "Office" },
       { "name": "REGISTRY", "class_name": "Registry" },
-      { "name": "AUTH", "class_name": "Auth" }
+      { "name": "AUTH", "class_name": "Auth" },
+      // one instance per city (idFromName("sf")): links, walkers, presence, city chat (spec-v2 §7.2)
+      { "name": "CITY", "class_name": "City" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Office"] },
     { "tag": "v2", "new_sqlite_classes": ["Registry"] },
-    { "tag": "v3", "new_sqlite_classes": ["Auth"] }
+    { "tag": "v3", "new_sqlite_classes": ["Auth"] },
+    { "tag": "v4", "new_sqlite_classes": ["City"] }
   ],
   // keyless office creation from the landing page: per client IP
   "ratelimits": [
     { "name": "CREATE_LIMIT", "namespace_id": "1001", "simple": { "limit": 3, "period": 60 } },
     // OAuth /register, /token and consent submits: per client IP and endpoint
-    { "name": "OAUTH_LIMIT", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } }
+    { "name": "OAUTH_LIMIT", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } },
+    // PUT /api/o/:office/city link requests: per client IP (the platform allows only 10 s or 60 s periods)
+    { "name": "CITY_LINK_LIMIT", "namespace_id": "1003", "simple": { "limit": 3, "period": 60 } }
   ],
+  // where the City DO reads walk.bin, places.json, companies.json and manifest.json (through ASSETS)
+  "vars": { "CITY_SF_ASSETS": "/city/sf/" },
   "observability": { "enabled": true }
   // secrets: ADMIN_KEY (wrangler secret put ADMIN_KEY; locally in .dev.vars)
 }
