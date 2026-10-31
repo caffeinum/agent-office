@@ -5,7 +5,7 @@
 
 import { BLOCK_M } from "../../shared/city.js";
 
-/** Pure. building = {id, base, top}. → {buildingId, heightM, sites} with sites in company-list order. */
+/** Pure. building = {id (pickId: parent || entry), entryId?, base, top}. → {buildingId, heightM, sites} with sites in company-list order. */
 export function buildingInfo(sites, building) {
   if (!building || !Number.isInteger(building.id)) throw new Error(`buildingInfo: bad building ${JSON.stringify(building)}`);
   if (!Number.isInteger(building.base) || !Number.isInteger(building.top) || building.top <= building.base) {
@@ -14,7 +14,7 @@ export function buildingInfo(sites, building) {
   return {
     buildingId: building.id,
     heightM: (building.top - building.base) * BLOCK_M,
-    sites: sites.filter((s) => s.buildingId === building.id),
+    sites: sites.filter((s) => s.buildingId === building.id || (building.entryId !== undefined && s.buildingId === building.entryId)),
   };
 }
 

@@ -256,10 +256,11 @@ export function applyStructures(raster, ctx, opts = {}) {
       log.notStamped.push({ key: rec.key, kind });
       continue;
     }
-    const base = raster.ground[cols[0][2]];
-    for (const [x, z, i] of cols) {
-      if (raster.ground[i] !== base) throw new Error(`applyStructures: ${rec.key} columns have mixed bases (${raster.ground[i]} at ${x},${z} vs ${base})`);
-    }
+    // a structure stamped over sloping ground (outline plus parts/parcels on different bases) restyles as one
+    // entry on its lowest base; the higher columns keep their tops, so their ground under the building drops
+    const base = Math.min(...cols.map(([, , i]) => raster.ground[i]));
+    const maxBase = Math.max(...cols.map(([, , i]) => raster.ground[i]));
+    if (maxBase !== base) (log.mixedBases ??= []).push({ key: rec.key, kind, base, maxBase });
     const tops = cols.map(([, , i]) => raster.top[i]);
     const top = Math.max(...tops);
     const H = top - base;
@@ -359,7 +360,7 @@ export function applyStructures(raster, ctx, opts = {}) {
           const deckTop = raster.top[i];
           raster.clearBuilding(x, z);
           if (deckTop <= raster.ground[i]) throw new Error(`applyStructures: canopy ${rec.key} deck ${deckTop} not above ground at ${x},${z}`);
-          raster.deck[i] = corners.has(columnKey(x, z)) ? -deckTop : deckTop;
+          raster.setDeck(x, z, deckTop, { pillar: corners.has(columnKey(x, z)) });
         }
         break;
       }

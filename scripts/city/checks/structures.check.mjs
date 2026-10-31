@@ -6,8 +6,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  CAP, CITY_VERSION, FACADE, SF_PROJ, STRUCTURE_KINDS, SURFACE, chunkOf, encodeChunk, decodeChunk, lonLatToBlock, pickId,
+  CAP, CHUNK, CITY_VERSION, FACADE, SF_PROJ, STRUCTURE_KINDS, SURFACE, chunkOf, encodeChunk, decodeChunk, decodeLandmarks, lonLatToBlock, pickId,
 } from "../../../public/shared/city.js";
+import { gunzipSync } from "node:zlib";
 import { createBuildCtx } from "../lib/ctx.mjs";
 import { applyLandmarks, compileLandmark, landmarkKeys, loadLandmarks, loadSkyline } from "../lib/landmarks.mjs";
 import { landmarkMeshBoxes } from "../lib/meshlayer.mjs";
@@ -305,6 +306,75 @@ await test("[post-int] structures on the real build (Oracle Park, Chase Center, 
   const report = JSON.parse(readFileSync(join(ROOT, "public/city/sf/report.json"), "utf8"));
   assert.ok(Array.isArray(report.landmarks) && report.landmarks.some((l) => l.name === "Oracle Park"), "report.landmarks lists Oracle Park");
   assert.ok(report.structures && report.structures.restyled, "report.structures written by applyStructures");
+
+  const dir = join(ROOT, "public/city/sf");
+  const chunks = manifest.chunks.list.map(([cx, cz]) => decodeChunk(new Uint8Array(gunzipSync(readFileSync(join(dir, "chunks", `${cx}_${cz}.bin`)))), manifest.parents));
+  const columnsOf = (parent) => {
+    const out = [];
+    for (const c of chunks) {
+      const byId = new Map(c.buildings.map((b, k) => [k + 1, b]));
+      for (let i = 0; i < CHUNK * CHUNK; i++) {
+        const b = byId.get(c.bldg[i]);
+        if (b && pickId(b) === parent) out.push({ x: c.cx * CHUNK + (i % CHUNK), z: c.cz * CHUNK + Math.floor(i / CHUNK), h: c.top[i] - c.ground[i], b });
+      }
+    }
+    return out;
+  };
+  const bbox = (cols) => ({ x0: Math.min(...cols.map((c) => c.x)), x1: Math.max(...cols.map((c) => c.x)), z0: Math.min(...cols.map((c) => c.z)), z1: Math.max(...cols.map((c) => c.z)) });
+  const columnsIn = (bb, fn) => {
+    for (const c of chunks) {
+      for (let i = 0; i < CHUNK * CHUNK; i++) {
+        const x = c.cx * CHUNK + (i % CHUNK), z = c.cz * CHUNK + Math.floor(i / CHUNK);
+        if (x >= bb.x0 && x <= bb.x1 && z >= bb.z0 && z <= bb.z1) fn(c, i, x, z);
+      }
+    }
+  };
+
+  const oracle = report.landmarks.find((l) => l.name === "Oracle Park");
+  const ocols = columnsOf(oracle.parent);
+  assert.ok(ocols.length > 500, `Oracle Park has ${ocols.length} columns`);
+  const obb = bbox(ocols);
+  const standKey = new Set(ocols.map((c) => `${c.x},${c.z}`));
+  const rowsX = new Map(), rowsZ = new Map();
+  for (const c of ocols) {
+    const rx = rowsX.get(c.z) ?? [Infinity, -Infinity]; rowsX.set(c.z, [Math.min(rx[0], c.x), Math.max(rx[1], c.x)]);
+    const rz = rowsZ.get(c.x) ?? [Infinity, -Infinity]; rowsZ.set(c.x, [Math.min(rz[0], c.z), Math.max(rz[1], c.z)]);
+  }
+  let enclosed = 0, field = 0, fieldBldg = 0;
+  columnsIn(obb, (c, i, x, z) => {
+    if (standKey.has(`${x},${z}`)) return;
+    const rx = rowsX.get(z), rz = rowsZ.get(x);
+    if (!rx || !rz || x <= rx[0] || x >= rx[1] || z <= rz[0] || z >= rz[1]) return;
+    enclosed++;
+    if (c.surface[i] === SURFACE.GRASS || c.surface[i] === SURFACE.DIRT) { field++; if (c.bldg[i]) fieldBldg++; }
+  });
+  console.log(`     Oracle Park: ${ocols.length} stand columns, field ${field}/${enclosed} enclosed columns GRASS/DIRT`);
+  assert.ok(field >= 0.6 * enclosed && field > 500, `Oracle field ${field} of ${enclosed} enclosed columns is GRASS/DIRT`);
+  assert.equal(fieldBldg, 0, "no building on the field");
+  const stands = ocols.filter((c) => c.b.cap === CAP.SEATS);
+  assert.ok(stands.length > 0 && stands.every((c) => c.b.facade === FACADE.ARCADE), "stands: cap seats, facade 4 (brick arcade)");
+  assert.ok(Math.max(...stands.map((c) => c.h)) <= 11, `stands Hmax ${Math.max(...stands.map((c) => c.h))} ≤ 11`);
+  assert.ok(ocols.every((c) => c.b.facade !== FACADE.WINDOWS), "no Oracle Park entry uses the window atlas");
+  let lights = 0;
+  for (const c of chunks) for (const p of c.props) {
+    const x = c.cx * CHUNK + p.lx, z = c.cz * CHUNK + p.lz;
+    if ((p.flags & 1) && x >= obb.x0 - 2 && x <= obb.x1 + 2 && z >= obb.z0 - 2 && z <= obb.z1 + 2) lights++;
+  }
+  assert.equal(lights, 6, "exactly 6 emissive light props at Oracle Park");
+  const boxes = decodeLandmarks(new Uint8Array(gunzipSync(readFileSync(join(dir, manifest.landmarks)))), manifest.chunks.grid);
+  assert.equal(boxes.filter((b) => b.x + b.sx > obb.x0 && b.x < obb.x1 && b.z + b.sz > obb.z0 && b.z < obb.z1).length, 0, "no landmarks.bin boxes over Oracle Park");
+
+  const chase = report.landmarks.find((l) => l.name === "Chase Center");
+  const ccols = columnsOf(chase.parent);
+  const cbb = bbox(ccols);
+  const cx = (cbb.x0 + cbb.x1) / 2, cz = (cbb.z0 + cbb.z1) / 2, R = Math.min(cbb.x1 - cbb.x0, cbb.z1 - cbb.z0) / 2;
+  const centre = Math.max(...ccols.filter((c) => Math.hypot(c.x - cx, c.z - cz) < R * 0.2).map((c) => c.h));
+  const rim = Math.max(...ccols.filter((c) => Math.hypot(c.x - cx, c.z - cz) > R * 0.85 && c.b.cap !== CAP.FLAT).map((c) => c.h), 0);
+  const drum = ccols.filter((c) => Math.hypot(c.x - cx, c.z - cz) > R * 0.85).map((c) => c.h);
+  console.log(`     Chase Center: centre ${centre}, rim ${Math.min(...drum)}..${Math.max(...drum)} (dome rim ${rim})`);
+  assert.ok(centre > Math.min(...drum), "Chase Center dome: the centre is above the rim");
+  assert.ok(centre <= 14, `Chase Center top ${centre} ≤ 14`);
+  assert.ok(ccols.every((c) => c.b.facade !== FACADE.WINDOWS), "no Chase Center entry uses the window atlas");
 });
 
 console.log(`structures.check: ${passed} passed`);

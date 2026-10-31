@@ -188,7 +188,7 @@ export function mountCityUi(city, companies, root, { places, walk, liveUrl }) {
   function refresh() {
     if (!live.ready) return;
     pins.setPresence(presenceForPins(live.presence()));
-    pins.setInside(insideCounts(live.walkers(), sites));
+    pins.setInside(insideCounts(live.presence()));
     people.render({ walkers: live.walkers(), positionOf, chat: live.chat(), selected: follower?.following ?? null });
     if (panel.open && panel.info) panel.setPeople(whoIsHere(panel.info, { presence: live.presence(), walkers: live.walkers(), positionOf }));
   }

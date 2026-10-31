@@ -599,7 +599,7 @@ test("perf frustum: boxes in front of the orbit camera survive, boxes behind it 
   assert.ok(f.triangles > 0 && f.triangles <= FRAME_BUDGET.triangles && f.calls <= FRAME_BUDGET.calls, JSON.stringify(f));
 });
 
-test("[post-int] real downtown chunk 56,26 ≤ 25k triangles at LOD0", () => {
+test("[post-int] real downtown chunks (Salesforce 74,63 and the largest, 76,56) ≤ 25k triangles at LOD0", () => {
   const dir = join(ROOT, "public/city/sf");
   if (!existsSync(join(dir, "manifest.json"))) {
     console.log("  skip: public/city/sf not built yet (post-int gate)");
@@ -611,12 +611,14 @@ test("[post-int] real downtown chunk 56,26 ≤ 25k triangles at LOD0", () => {
     return;
   }
   const city = loadCity(dir);
-  const c = city.get(56, 26);
-  assert.ok(c, "sf manifest has no chunk 56,26");
-  const m = meshChunk(c, neighboursIn(city, c));
-  const n = tris(m.opaque) + tris(m.walls);
-  console.log(`  sf 56,26: ${n} triangles`);
-  assert.ok(n <= 25000, `56,26 has ${n} triangles`);
+  for (const [cx, cz] of [[74, 63], [76, 56]]) {
+    const c = city.get(cx, cz);
+    assert.ok(c, `sf manifest has no chunk ${cx},${cz}`);
+    const m = meshChunk(c, neighboursIn(city, c));
+    const n = tris(m.opaque) + tris(m.walls) + (m.props ? tris(m.props) : 0);
+    console.log(`  sf ${cx},${cz}: ${n} triangles`);
+    assert.ok(n <= 25000, `${cx},${cz} has ${n} triangles`);
+  }
 });
 
 console.log(`mesher.check: ${passed} passed`);

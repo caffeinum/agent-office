@@ -773,6 +773,35 @@ export const packEdgeWidth = (halfWidth10, deck) => (inRange(halfWidth10, 1, 0x7
  * Graph checks (spec-v2 §4): index ranges, every edge in both directions with the same len/name/width/deck,
  * y ∈ [0, WALK_Y_MAX]; with `manifest`, builtAt equals manifest.builtAt and nodes lie inside the reserved grid.
  */
+/** Every edge a→b has exactly one reverse b→a with the same len/name/width/deck (sorted numeric keys, no string Map). */
+function checkReverseEdges(edges, nNodes, nEdges) {
+  if (nNodes * nNodes * nEdges >= Number.MAX_SAFE_INTEGER) throw new Error(`walk: ${nNodes} nodes × ${nEdges} edges too large to key`);
+  const keys = new Float64Array(nEdges);
+  for (let e = 0; e < nEdges; e++) keys[e] = (edges[e * WALK_EDGE_INTS] * nNodes + edges[e * WALK_EDGE_INTS + 1]) * nEdges + e;
+  keys.sort();
+  const pairOf = (k) => Math.floor(k / nEdges);
+  for (let i = 1; i < nEdges; i++) {
+    if (pairOf(keys[i]) === pairOf(keys[i - 1])) {
+      const e = keys[i] % nEdges;
+      throw new Error(`walk edge ${e}: duplicate edge ${edges[e * WALK_EDGE_INTS]},${edges[e * WALK_EDGE_INTS + 1]}`);
+    }
+  }
+  for (let i = 0; i < nEdges; i++) {
+    const e = keys[i] % nEdges, o = e * WALK_EDGE_INTS;
+    const a = edges[o], b = edges[o + 1];
+    const want = b * nNodes + a;
+    let lo = 0, hi = nEdges - 1, r = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1, p = pairOf(keys[mid]);
+      if (p === want) { r = keys[mid] % nEdges; break; }
+      if (p < want) lo = mid + 1; else hi = mid - 1;
+    }
+    if (r < 0) throw new Error(`walk: edge ${a},${b} has no reverse edge ${b},${a}`);
+    const ro = r * WALK_EDGE_INTS;
+    if (edges[ro + 2] !== edges[o + 2] || edges[ro + 3] !== edges[o + 3] || edges[ro + 4] !== edges[o + 4]) throw new Error(`walk: edge ${a},${b} and its reverse disagree on len/name/width/deck`);
+  }
+}
+
 export function validateWalk(g, manifest) {
   exactKeys(g, ["builtAt", "nodes", "edges", "names"], "walk");
   if (!Number.isSafeInteger(g.builtAt) || g.builtAt <= 0) throw new Error(`walk.builtAt must be epoch ms, got ${g.builtAt}`);
@@ -788,29 +817,20 @@ export function validateWalk(g, manifest) {
   const nNodes = g.nodes.length / WALK_NODE_INTS, nEdges = g.edges.length / WALK_EDGE_INTS;
   const limit = manifest ? [manifest.chunks.grid[0] * CHUNK * 10, manifest.chunks.grid[1] * CHUNK * 10] : null;
   for (let n = 0; n < nNodes; n++) {
-    const [x, z, y] = [g.nodes[n * 3], g.nodes[n * 3 + 1], g.nodes[n * 3 + 2]];
+    const x = g.nodes[n * 3], z = g.nodes[n * 3 + 1], y = g.nodes[n * 3 + 2];
     if (y < 0 || y > WALK_Y_MAX * 10) throw new Error(`walk node ${n}: y10 ${y} outside 0..${WALK_Y_MAX * 10}`);
     if (limit && (x < 0 || z < 0 || x >= limit[0] || z >= limit[1])) throw new Error(`walk node ${n}: ${x / 10},${z / 10} outside the reserved grid`);
   }
-  const byPair = new Map();
   for (let e = 0; e < nEdges; e++) {
     const o = e * WALK_EDGE_INTS;
-    const [a, b, len, name] = [g.edges[o], g.edges[o + 1], g.edges[o + 2], g.edges[o + 3]];
+    const a = g.edges[o], b = g.edges[o + 1], len = g.edges[o + 2], name = g.edges[o + 3];
     if (a < 0 || a >= nNodes || b < 0 || b >= nNodes) throw new Error(`walk edge ${e}: node ${a}→${b} outside 0..${nNodes - 1}`);
     if (a === b) throw new Error(`walk edge ${e}: self loop at node ${a}`);
     if (len < 1) throw new Error(`walk edge ${e}: len10 ${len} must be ≥ 1`);
     if (name !== WALK_NO_NAME && (name < 0 || name >= g.names.length)) throw new Error(`walk edge ${e}: nameIdx ${name} outside 0..${g.names.length - 1}`);
     if (edgeHalfWidth10(g.edges, e) < 1) throw new Error(`walk edge ${e}: halfWidth10 must be ≥ 1`);
-    const key = `${a},${b}`;
-    if (byPair.has(key)) throw new Error(`walk edge ${e}: duplicate edge ${key}`);
-    byPair.set(key, `${len},${name},${g.edges[o + 4]}`);
   }
-  for (const [key, v] of byPair) {
-    const [a, b] = key.split(",");
-    const back = byPair.get(`${b},${a}`);
-    if (back === undefined) throw new Error(`walk: edge ${key} has no reverse edge ${b},${a}`);
-    if (back !== v) throw new Error(`walk: edge ${key} and its reverse disagree on len/name/width/deck`);
-  }
+  checkReverseEdges(g.edges, nNodes, nEdges);
   if (manifest && g.builtAt !== Date.parse(manifest.builtAt)) throw new Error(`walk.builtAt ${new Date(g.builtAt).toISOString()} != manifest.builtAt ${manifest.builtAt}`);
   return g;
 }

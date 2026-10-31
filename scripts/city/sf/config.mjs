@@ -133,7 +133,7 @@ export const VERIFY = Object.freeze({
   // spec-v2 §2 Presidio points. Fort Point and the GGB south tower: the spec's Wikipedia coordinates; lagoon = vertex
   // mean of natural=water relation 7471537; Crissy beach = a point inside natural=beach way 934489949 (its vertex mean falls in the water); Main Post = the Main Parade lawn
   fortPoint: { lat: 37.81056, lon: -122.47722 },
-  ggbSouthTower: { lat: 37.8113, lon: -122.4777 },
+  ggbSouthTower: { lat: 37.814014, lon: -122.477891 }, // OSM south tower building:part centroid; the spec-v2 §5 coordinate is ~300 m south, on land
   palaceLagoon: { lat: 37.80303, lon: -122.44775 },
   crissyBeach: { lat: 37.80552, lon: -122.4579 },
   presidioMainPost: { lat: 37.80005, lon: -122.45744 },

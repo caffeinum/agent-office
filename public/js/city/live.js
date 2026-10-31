@@ -3,12 +3,20 @@
 // y comes from the path (the walk graph, §7.6), never from groundAt; walkers keep to the right-hand sidewalk,
 // offset by the street's halfWidth from walk.bin.
 //
-// Wire format (W6 → viewer), one JSON frame or a JSON array of frames per message:
+// Wire format (City DO src/city/do.ts → viewer), one JSON frame or a JSON array of frames per message;
+// createWireAdapter() turns it into the internal frames below:
+//   {type:"snapshot", now, builtAt, sites:[Site], walkers:[WireWalker], chatTail:[WireChat]}
+//   {type:"walk"|"arrive", walker: WireWalker}  {type:"presence", site: Site}  {type:"left", id, inside?}
+//   {type:"say", id, text, ts}  {type:"chat", msg: WireChat}
+//   WireWalker = {id, name, hue, status, site, path:[[x,z,y],…], t0 (server ms), speed (blocks/s, 0 = standing), mode}
+//   Site       = {siteId, companyId, agentCount, agents:[{name, hue, status}], inside}   (inside = walkers gone in)
+//   WireChat   = {seq, ts, from:{id, name}, scope:"near"|"city", say?, text, x, z}
+// Internal frames (createLiveState.apply):
 //   {type:"snapshot", now, walkers:[Walker], presence:[Presence], chatTail:[Chat]}
-//   {type:"walk", walker}  {type:"arrive", walker}  {type:"presence", presence:[Presence]}
-//   {type:"say", id, text, ts}  {type:"left", id}  {type:"chat", chat}
-//   Walker   = {id, name, hue, status, path:[[x,z,y],…], t0 (server ms), speed (blocks/s), mode:"walk"|"ride", inside, siteId|null}
-//   Presence = {companyId, agentCount, agents:[{name, hue, status}]}   (office agents at their building, not out)
+//   {type:"walk"|"arrive", walker}  {type:"presence", presence:[Presence]}  {type:"say", id, text, ts}
+//   {type:"left", id}  {type:"chat", chat}
+//   Walker   = {id, name, hue, status, path, t0, speed, mode, inside, siteId|null}
+//   Presence = {companyId, agentCount, agents:[{name, hue, status}], inside}   (summed over the company's sites)
 //   Chat     = {seq, ts, from (walker id), name, scope:"near"|"city", text, x, z}
 
 import { WALK_EDGE_INTS, WALK_NODE_INTS, edgeHalfWidth10 } from "../../shared/city.js";
@@ -31,7 +39,7 @@ export function sidewalkOffset(hw) {
 export const RECONNECT_MS = Object.freeze({ min: 1000, max: 30000 });
 
 const WALKER_KEYS = ["id", "name", "hue", "status", "path", "t0", "speed", "mode", "inside", "siteId"];
-const PRESENCE_KEYS = ["companyId", "agentCount", "agents"];
+const PRESENCE_KEYS = ["companyId", "agentCount", "agents", "inside"];
 const CHAT_KEYS = ["seq", "ts", "from", "name", "scope", "text", "x", "z"];
 
 function exactKeys(o, keys, what) {
@@ -58,7 +66,7 @@ export function validateWalker(w) {
   const what = `walker ${w.id}`;
   str(w.id, `${what}.id`); str(w.name, `${what}.name`); str(w.status, `${what}.status`);
   num(w.hue, `${what}.hue`); num(w.t0, `${what}.t0`);
-  if (!(w.speed > 0)) throw new Error(`${what}.speed must be > 0 blocks/s, got ${JSON.stringify(w.speed)}`);
+  if (!(w.speed >= 0)) throw new Error(`${what}.speed must be ≥ 0 blocks/s, got ${JSON.stringify(w.speed)}`);
   if (!MODES.includes(w.mode)) throw new Error(`${what}.mode must be ${MODES.join("|")}, got ${JSON.stringify(w.mode)}`);
   if (typeof w.inside !== "boolean") throw new Error(`${what}.inside must be a boolean`);
   if (w.siteId !== null) str(w.siteId, `${what}.siteId`);
@@ -73,6 +81,7 @@ export function validatePresence(list) {
     str(p.companyId, "presence.companyId");
     if (!Array.isArray(p.agents)) throw new Error(`presence ${p.companyId}.agents must be an array`);
     if (p.agentCount !== p.agents.length) throw new Error(`presence ${p.companyId}: agentCount ${p.agentCount} != ${p.agents.length} agents`);
+    if (!Number.isInteger(p.inside) || p.inside < 0) throw new Error(`presence ${p.companyId}.inside must be an integer ≥ 0, got ${JSON.stringify(p.inside)}`);
     p.agents.forEach((a, i) => {
       exactKeys(a, ["name", "hue", "status"], `presence ${p.companyId}.agents[${i}]`);
       str(a.name, `presence ${p.companyId}.agents[${i}].name`); num(a.hue, `presence ${p.companyId}.agents[${i}].hue`); str(a.status, `presence ${p.companyId}.agents[${i}].status`);
@@ -342,17 +351,82 @@ export function badgeText(here, inside) {
   return [here ? `${here} here` : "", inside ? `${inside} inside` : ""].filter(Boolean).join(" / ");
 }
 
-/** Pure. Walkers gone inside their own site, counted per company → Map<companyId, n>. */
-export function insideCounts(walkers, sites) {
-  const byId = new Map(sites.map((s) => [s.id, s]));
+/** Pure. Walkers gone inside, per company, from the live presence (the City DO counts them per site) → Map<companyId, n>. */
+export function insideCounts(presence) {
   const m = new Map();
-  for (const w of walkers) {
-    if (!w.inside) continue;
-    const site = byId.get(w.siteId);
-    if (!site) throw new Error(`walker ${w.id} is inside unknown site ${JSON.stringify(w.siteId)}`);
-    m.set(site.companyId, (m.get(site.companyId) ?? 0) + 1);
-  }
+  for (const p of presence) if (p.inside) m.set(p.companyId, (m.get(p.companyId) ?? 0) + p.inside);
   return m;
+}
+
+const WIRE_WALKER_KEYS = ["id", "name", "hue", "status", "site", "path", "t0", "speed", "mode"];
+const SITE_KEYS = ["siteId", "companyId", "agentCount", "agents", "inside"];
+
+/**
+ * City DO wire frames → internal frames. Stateful: it keeps the per-site presence the server sends as deltas and
+ * hands createLiveState the per-company list. One adapter per socket (a snapshot resets it). → (msg) → frame | frame[]
+ */
+export function createWireAdapter() {
+  const sites = new Map();
+  const site = (s) => {
+    exactKeys(s, SITE_KEYS, `site ${JSON.stringify(s?.siteId)}`);
+    str(s.siteId, "site.siteId"); str(s.companyId, `site ${s.siteId}.companyId`);
+    return s;
+  };
+  const presence = () => {
+    const by = new Map();
+    for (const s of sites.values()) {
+      if (!s.agentCount && !s.inside) continue;
+      const p = by.get(s.companyId) ?? { companyId: s.companyId, agentCount: 0, agents: [], inside: 0 };
+      p.agentCount += s.agentCount;
+      p.agents.push(...s.agents);
+      p.inside += s.inside;
+      by.set(s.companyId, p);
+    }
+    return [...by.values()];
+  };
+  const walker = (w) => {
+    exactKeys(w, WIRE_WALKER_KEYS, `walker ${JSON.stringify(w?.id)}`);
+    const { site: siteId, ...rest } = w;
+    return { ...rest, inside: false, siteId };
+  };
+  const chat = (c) => {
+    const keys = ["seq", "ts", "from", "scope", "text", "x", "z"];
+    exactKeys(c, "say" in (c ?? {}) ? [...keys, "say"] : keys, `chat ${JSON.stringify(c?.seq)}`);
+    exactKeys(c.from, ["id", "name"], `chat ${c.seq}.from`);
+    return { seq: c.seq, ts: c.ts, from: c.from.id, name: c.from.name, scope: c.scope, text: c.text, x: c.x, z: c.z };
+  };
+  const one = (f) => {
+    if (!f || typeof f.type !== "string") throw new Error(`live: bad frame ${JSON.stringify(f)?.slice(0, 120)}`);
+    switch (f.type) {
+      case "snapshot":
+        exactKeys(f, ["type", "now", "builtAt", "sites", "walkers", "chatTail"], "snapshot");
+        if (!Array.isArray(f.sites) || !Array.isArray(f.walkers) || !Array.isArray(f.chatTail)) throw new Error("snapshot.sites, walkers and chatTail must be arrays");
+        sites.clear();
+        for (const s of f.sites) sites.set(site(s).siteId, s);
+        return { type: "snapshot", now: f.now, walkers: f.walkers.map(walker), presence: presence(), chatTail: f.chatTail.map(chat) };
+      case "walk":
+      case "arrive":
+        exactKeys(f, ["type", "walker"], `${f.type} frame`);
+        return { type: f.type, walker: walker(f.walker) };
+      case "presence":
+        exactKeys(f, ["type", "site"], "presence frame");
+        sites.set(site(f.site).siteId, f.site);
+        return { type: "presence", presence: presence() };
+      case "left":
+        exactKeys(f, "inside" in f ? ["type", "id", "inside"] : ["type", "id"], "left frame");
+        return { type: "left", id: f.id };
+      case "say":
+        return f;
+      case "chat":
+        exactKeys(f, ["type", "msg"], "chat frame");
+        return { type: "chat", chat: chat(f.msg) };
+      case "error":
+        throw new Error(`city socket: ${JSON.stringify(f.error)}`);
+      default:
+        throw new Error(`live: unknown frame type ${JSON.stringify(f.type)}`);
+    }
+  };
+  return (msg) => (Array.isArray(msg) ? msg.map(one) : one(msg));
 }
 
 /** Pure. Live presence → the pins.setPresence shape [{companyId, agents:[{id, name, hue, status}]}]. */
@@ -372,6 +446,7 @@ export function connectLive(url, state, { onStatus = () => {}, onError = (e) => 
     onStatus("connecting");
     ws = new WebSocketImpl(url);
     let synced = false;
+    const fromWire = createWireAdapter();
     ws.onopen = () => { delay = RECONNECT_MS.min; };
     ws.onmessage = (ev) => {
       try {
@@ -379,7 +454,7 @@ export function connectLive(url, state, { onStatus = () => {}, onError = (e) => 
         const msg = JSON.parse(ev.data);
         const first = Array.isArray(msg) ? msg[0] : msg;
         if (!synced && first?.type !== "snapshot") throw new Error(`live: the socket must open with a snapshot, got ${JSON.stringify(first?.type)}`);
-        state.apply(msg);
+        state.apply(fromWire(msg));
         if (!synced) { synced = true; onStatus("live"); }
       } catch (e) {
         onError(e instanceof Error ? e : new Error(String(e)));

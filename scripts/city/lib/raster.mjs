@@ -8,7 +8,7 @@ const ENTRY_KEYS = new Set(["id", "parent", "base", "top", "accentFrom", "palett
 /**
  * → raster {x0, z0, w, h, ground: Int16Array, surface: Uint8Array, owner: Int32Array (entry index or -1),
  *   deck: Int16Array, top: Int16Array (per-column building top, 0 = none), entries: Entry[], props: GlobalProp[],
- *   parents: {id: name}, setColumn, setSurface, clearBuilding, addEntry, addProp, entryIndex, newId, addParent}
+ *   parents: {id: name}, setColumn, setSurface, setDeck, clearBuilding, addEntry, addProp, entryIndex, newId, addParent}
  * Starts all open water.
  */
 export function createRaster(minChunk, maxChunk) {
@@ -94,6 +94,12 @@ export function createRaster(minChunk, maxChunk) {
     const i = at(x, z, "clearBuilding");
     raster.owner[i] = -1;
     raster.top[i] = 0;
+  };
+  /** A deck at (x, z) with its top at `top` (above ground); pillar: true draws a pillar under it. */
+  raster.setDeck = (x, z, top, { pillar = false } = {}) => {
+    const i = at(x, z, "setDeck");
+    if (!Number.isInteger(top) || top <= raster.ground[i]) throw new Error(`setDeck ${x},${z}: top ${top} must be an integer above ground ${raster.ground[i]}`);
+    raster.deck[i] = pillar ? -top : top;
   };
   /** A chunk prop at global block (x, z): {y0, y1, color, flags}. */
   raster.addProp = (x, z, { y0, y1, color, flags }) => {

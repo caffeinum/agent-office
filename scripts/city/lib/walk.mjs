@@ -1,7 +1,7 @@
 // W5 (spec-v2 §7.6): the pedestrian graph (walk.bin) and the place list (places.json), built from OSM highway ways,
 // the chunk ground and report.json deck tops. Pure: no file access; walk-sf.mjs does the I/O.
 //
-// Ways: footway, pedestrian, living_street, residential, tertiary, secondary, primary, named service roads (not
+// Ways: footway, pedestrian, living_street, residential, unclassified (Presidio/Marine Dr), tertiary, secondary, primary, named service roads (not
 // parking aisles) and busway, plus their _link ramps, after the v1 keepHighway filter (no tunnels, layer < 0, indoor,
 // sidewalks or crossings: walkers use the street centreline with a right-hand offset of halfWidth). Unnamed service
 // roads (driveways, lots, loading docks) are left out to keep walk.bin inside its 150 KB gzip budget. Bridges ≥ 300 m
@@ -22,12 +22,12 @@ import {
 } from "../../../public/shared/city.js";
 import { highwayClass, keepHighway, roadSpec } from "./osm.mjs";
 
-export const WALK_CLASSES = Object.freeze(["footway", "pedestrian", "living_street", "residential", "tertiary", "secondary", "primary", "service", "busway"]);
+export const WALK_CLASSES = Object.freeze(["footway", "pedestrian", "living_street", "residential", "unclassified", "tertiary", "secondary", "primary", "service", "busway"]);
 /** Bridge ways at or over this length (metres) are not walkable (spec-v2 §3.8). */
 export const DECK_MAX_M = 300;
 /** Simplification tolerances, blocks. */
-export const XZ_TOL = 2;
-export const XZ_TOL_PATH = 4;
+export const XZ_TOL = 3;
+export const XZ_TOL_PATH = 6;
 export const Y_TOL = 1;
 /** A company door must lie within this many blocks of a walkable edge, a landmark or area within SNAP_PLACE. */
 export const SNAP_DOOR = 30;
@@ -663,7 +663,7 @@ function contractShort(sg) {
   return merged;
 }
 
-/** Drop unnamed dead-end segments shorter than SPUR_MAX blocks (driveway and footway stubs), repeatedly. → count */
+/** Drop unnamed dead-end segments shorter than SPUR_MAX blocks (driveway and footway stubs) and dead-end vertical connectors, repeatedly. → count */
 function pruneSpurs(sg) {
   let pruned = 0;
   for (let round = 0; round < 8; round++) {
@@ -671,7 +671,8 @@ function pruneSpurs(sg) {
     for (const [, list] of sg.incidence()) {
       if (list.length !== 1) continue;
       const s = sg.segs[list[0]];
-      if (!s.alive || s.conn || s.name !== WALK_NO_NAME || arcLen(s.pts) >= SPUR_MAX) continue;
+      if (!s.alive) continue;
+      if (!s.conn && (s.name !== WALK_NO_NAME || arcLen(s.pts) >= SPUR_MAX)) continue; // a dangling connector always goes
       s.alive = false;
       changed++;
     }

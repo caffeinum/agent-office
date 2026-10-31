@@ -23,6 +23,7 @@ import { applyParts } from "./lib/parts.mjs";
 import { createBuildCtx } from "./lib/ctx.mjs";
 import { applyStructures, structureKind } from "./lib/structures.mjs";
 import { applyLandmarks } from "./lib/landmarks.mjs";
+import { calibrateSkyline } from "./lib/skyline.mjs";
 import { buildLandmarkMesh } from "./lib/meshlayer.mjs";
 import { renderTopdown } from "./lib/topdown.mjs";
 import { areaSources, coarseTerrainTiles, terrainTiles } from "./fetch-sf.mjs";
@@ -356,6 +357,7 @@ function planDecks(raster, water, decks, overrides, report) {
   for (const d of decks) {
     const centre = [];
     stampLine(d.line, 1, (x, z) => centre.push(rasterIndex(raster, x, z)));
+    if (centre.length === 0) centre.push(rasterIndex(raster, Math.floor(d.line[0][0]), Math.floor(d.line[0][1]))); // sub-block stub
     const inside = centre.filter((i) => i >= 0);
     if (inside.length === 0) continue;
     const short = d.kind === "short";
@@ -591,8 +593,11 @@ function stampBuildings(raster, merged, datasf, report) {
     raster.setColumn(raster.x0 + (i % raster.w), raster.z0 + Math.floor(i / raster.w), { bldg: b.id, base: b.base, top: b.top });
   }
   // coverage over in-area DataSF footprints (by centroid), counting only columns that carry that footprint's own id
+  // a parcel deleted by a §3.4 rank-3 OSM outline counts as covered when that outline was placed (it owns columns)
   const placedByKey = new Map(placed.map((b, k) => [b.key, k]));
-  let totalArea = 0, coveredArea = 0, footprints = 0, lostToNeighbours = 0;
+  const replacedBy = new Map();
+  for (const d of report.deletedParcels) for (const key of d.parcels) replacedBy.set(key, d.key);
+  let totalArea = 0, coveredArea = 0, replacedArea = 0, footprints = 0, lostToNeighbours = 0;
   for (const d of datasf) {
     const [cx, cz] = ringCentroid(d.polygons[0][0]);
     const { lon, lat } = blockToLonLat(cx, cz, PROJ);
@@ -602,6 +607,10 @@ function stampBuildings(raster, merged, datasf, report) {
     totalArea += area;
     const k = placedByKey.get(d.key);
     if (k !== undefined) coveredArea += Math.min(area, owned[k]);
+    else if (replacedBy.has(d.key)) {
+      const r = placedByKey.get(replacedBy.get(d.key));
+      if (r !== undefined && owned[r] > 0) { coveredArea += area; replacedArea += area; }
+    }
     lostToNeighbours += lostColumns.get(d.key) ?? 0;
   }
   const peakDisagree = placed
@@ -613,7 +622,7 @@ function stampBuildings(raster, merged, datasf, report) {
     columns: owned.reduce((s, n) => s + n, 0),
     maxTop: Math.max(...placed.map((b) => b.top)),
     overlapColumnsLost: [...lostColumns.values()].reduce((s, n) => s + n, 0),
-    coverage: { footprints, areaBlocks2: Math.round(totalArea), coveredBlocks2: Math.round(coveredArea), ratio: totalArea ? coveredArea / totalArea : 0, overlapColumnsLostByDatasf: lostToNeighbours },
+    coverage: { footprints, areaBlocks2: Math.round(totalArea), coveredBlocks2: Math.round(coveredArea), replacedByOsmBlocks2: Math.round(replacedArea), ratio: totalArea ? coveredArea / totalArea : 0, overlapColumnsLostByDatasf: lostToNeighbours },
     peak1stDisagreements: { count: peakDisagree.length, list: peakDisagree },
   };
   if (report.buildings.coverage.ratio < MIN_COVERAGE) throw new Error(`buildings: footprint coverage ${(report.buildings.coverage.ratio * 100).toFixed(1)}% < ${MIN_COVERAGE * 100}%`);
@@ -683,14 +692,14 @@ function unresolvedTowers(raster, placed, report) {
   const sky = JSON.parse(readFileSync(SKYLINE_PATH, "utf8"));
   const rows = Array.isArray(sky) ? sky : sky.rows;
   if (!Array.isArray(rows)) throw new Error("skyline.src.json: expected an array of rows or {rows}");
-  const pts = rows.map((r) => {
+  const pts = rows.filter((r) => r.rank === undefined || r.rank <= 50).map((r) => {
     if (!Number.isFinite(r.lat) || !Number.isFinite(r.lon)) throw new Error(`skyline.src.json: row ${JSON.stringify(r).slice(0, 80)} has no lat/lon`);
     return lonLatToBlock(r.lon, r.lat, PROJ);
   });
   const byKey = new Map(placed.map((b) => [b.key, b]));
   report.unresolvedTower = out.filter((t) => pts.some((p) => Math.hypot(p.x - t.x, p.z - t.z) <= TOP50_RADIUS
     || byKey.get(t.key).polygons.some((poly) => pointInPolygon(p.x, p.z, poly))));
-  if (report.unresolvedTower.length) throw new Error(`unresolvedTower: ${report.unresolvedTower.length} top-50 tower(s) unresolved: ${report.unresolvedTower.map((t) => t.key).join(", ")}`);
+  if (report.unresolvedTower.length) throw new Error(`unresolvedTower: ${report.unresolvedTower.length} top-50 tower(s) unresolved: ${JSON.stringify(report.unresolvedTower)}`);
 }
 
 function licenseText(sources) {
@@ -790,13 +799,14 @@ export async function buildSf() {
   finishDecks(raster, deckPlan, report);
   report.shallowColumns = stampShallow(raster);
   applyLandmarks(raster, ctx);
+  calibrateSkyline(raster, ctx);
   lap("hooks");
   unresolvedTowers(raster, placed, report);
 
   for (let cz = range.min[1]; cz <= range.max[1]; cz++) {
     for (let cx = range.min[0]; cx <= range.max[0]; cx++) if (!inArea.has(`${cx},${cz}`)) resetChunkToSea(raster, cx, cz);
   }
-  const parents = { ...raster.parents };
+  const parents = mergeParents(raster.parents, report.parents ?? {});
   const { chunks, water: waterChunks } = rasterToChunks(raster, parents);
   const waterList = waterChunks.filter(([cx, cz]) => inArea.has(`${cx},${cz}`));
   lap(`chunks (${chunks.length} listed, ${waterList.length} water)`);
@@ -883,3 +893,12 @@ export async function buildSf() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await buildSf();
+
+function mergeParents(...maps) {
+  const out = {};
+  for (const m of maps) for (const [id, name] of Object.entries(m)) {
+    if (out[id] !== undefined && out[id] !== name) throw new Error(`parents: id ${id} is both "${out[id]}" and "${name}"`);
+    out[id] = name;
+  }
+  return out;
+}

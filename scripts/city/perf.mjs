@@ -1,5 +1,5 @@
 // `npm run city:perf [-- --city fixture] [-- --gate]`: mesher timings and a simulated frame budget.
-// 1. Times meshChunk on chunk (56,26) (target ≤ 15 ms) and meshRegion at LOD1/LOD2 on its region.
+// 1. Times meshChunk on chunk (76,56) (target ≤ 15 ms) and meshRegion at LOD1/LOD2 on its region.
 // 2. Frame budget (spec-v2 §2, §8 W4): for the `spawn` and `presidio` (overview) cameras it picks the same LOD set
 //    as scene.js (LOD0 ring 1, LOD1 regions within 5 chunks, LOD2 beyond, skips drawn at LOD0), meshes it, adds the
 //    unbuilt-land mesh and the instanced landmark layer, frustum-culls every mesh by its bounding box at 1280×800,
@@ -17,7 +17,7 @@ import { landmarkTriangles } from "../../public/js/city/meshlayer.js";
 import { createUnmapped } from "../../public/js/city/unmapped.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
-const TARGET = [56, 26];
+const TARGET = [76, 56]; // the largest v2 sf chunk (FiDi/North Beach)
 const TARGET_MS = 15;
 const RUNS = 30;
 export const FRAME_BUDGET = Object.freeze({ triangles: 1_500_000, calls: 90 });

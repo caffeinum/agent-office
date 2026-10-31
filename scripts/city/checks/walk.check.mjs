@@ -54,7 +54,7 @@ await test("streetName abbreviates only the final suffix", () => {
 });
 
 await test("isWalkable: spec classes in; motorway, trunk, sidewalks, crossings, tunnels, parking aisles out", () => {
-  for (const h of ["footway", "pedestrian", "living_street", "residential", "tertiary", "secondary", "primary", "busway", "primary_link"]) {
+  for (const h of ["footway", "pedestrian", "living_street", "residential", "unclassified", "tertiary", "secondary", "primary", "busway", "primary_link"]) {
     assert.ok(isWalkable({ highway: h }), h);
   }
   assert.ok(isWalkable({ highway: "service", name: "Jack Kerouac Alley" }));

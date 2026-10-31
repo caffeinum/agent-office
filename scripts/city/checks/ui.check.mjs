@@ -18,7 +18,7 @@ import {
   applyBadges, camState, createFollow, focusDistance, formatCam, liveUrlFor, parseCam, pinScale,
 } from "../../../public/js/city/ui.js";
 import {
-  SAY_MS, SIDEWALK_OUT, badgeText, sidewalkOffset, connectLive, createLiveState, graphIndex, insideCounts, presenceForPins, segmentWidths, validatePath,
+  SAY_MS, SIDEWALK_OUT, badgeText, sidewalkOffset, connectLive, createLiveState, createWireAdapter, graphIndex, insideCounts, presenceForPins, segmentWidths, validatePath,
 } from "../../../public/js/city/live.js";
 import { BEACON_DIST, MAX_CHIPS, STRIDE, chipOrder, createWalkers, drawMode, gaitPhase, pickWalker } from "../../../public/js/city/walkers.js";
 import { FIXTURE_DIR } from "../fixture.mjs";
@@ -234,6 +234,8 @@ assert.deepEqual([28, 29, 30].map((i) => node(i)[2]), [4, 4, 4], "fixture deck n
 const S = 1_000_000_000_000, L = 5_000;
 const walker = (id, path, over = {}) => ({ id, name: id, hue: 200, status: "working", path, t0: S, speed: 2, mode: "walk", inside: false, siteId: null, ...over });
 const snapshot = (over = {}) => ({ type: "snapshot", now: S, walkers: [], presence: [], chatTail: [], ...over });
+const wireWalker = (id, path, over = {}) => ({ id, name: id, hue: 200, status: "working", site: "fixture-labs", path, t0: S, speed: 2, mode: "walk", ...over });
+const wireSnapshot = (over = {}) => ({ type: "snapshot", now: S, builtAt: manifest.builtAt, sites: [], walkers: [], chatTail: [], ...over });
 const near = (a, b, tol, what) => assert.ok(Math.abs(a - b) <= tol, `${what}: ${a} vs ${b} (±${tol})`);
 
 /** Independent centreline reference: lerp along 3-D segment lengths, no offsets. */
@@ -315,14 +317,40 @@ test("live: say bubbles expire after SAY_MS, left removes, presence and inside c
   live.apply([snapshot({ walkers: [walker("a", [node(0)]), walker("in", [node(37)], { inside: true, siteId: "fixture-labs" })] }), { type: "say", id: "a", text: "hi", ts: S }], L);
   assert.equal(live.sayOf("a", L + 100), "hi");
   assert.equal(live.sayOf("a", L + SAY_MS + 1), null);
-  assert.deepEqual([...insideCounts(live.walkers(), sites)], [["fixture-labs", 1]]);
-  assert.throws(() => insideCounts([walker("x", [node(0)], { inside: true, siteId: "nope" })], sites), /unknown site/);
-  live.apply({ type: "presence", presence: [{ companyId: "fixture-labs", agentCount: 1, agents: [{ name: "claude@x", hue: 30, status: "working" }] }] }, L);
+  live.apply({ type: "presence", presence: [{ companyId: "fixture-labs", agentCount: 1, agents: [{ name: "claude@x", hue: 30, status: "working" }], inside: 1 }] }, L);
+  assert.deepEqual([...insideCounts(live.presence())], [["fixture-labs", 1]]);
   assert.deepEqual(presenceForPins(live.presence()), [{ companyId: "fixture-labs", agents: [{ id: "fixture-labs:claude@x", name: "claude@x", hue: 30, status: "working" }] }]);
-  assert.throws(() => live.apply({ type: "presence", presence: [{ companyId: "x", agentCount: 2, agents: [] }] }, L), /agentCount/);
+  assert.throws(() => live.apply({ type: "presence", presence: [{ companyId: "x", agentCount: 2, agents: [], inside: 0 }] }, L), /agentCount/);
   live.apply({ type: "left", id: "a" }, L);
   assert.equal(live.walker("a"), null);
   assert.equal(live.position("a", L), null);
+});
+
+test("wire adapter: City DO frames (sites, per-site presence, msg chat, standing walkers) become internal frames", () => {
+  const fromWire = createWireAdapter();
+  const live = createLiveState({ graph: walk });
+  const site = (siteId, companyId, agents, inside) => ({ siteId, companyId, agentCount: agents.length, agents, inside });
+  const a = { name: "claude@fg", hue: 20, status: "working" };
+  live.apply(fromWire(wireSnapshot({
+    sites: [site("fg-1", "firegoat", [a], 0), site("fg-2", "firegoat", [{ ...a, name: "codex@fg" }], 1)],
+    walkers: [wireWalker("w1", [node(0)], { speed: 0 })],
+    chatTail: [{ seq: 3, ts: S, from: { id: "w1", name: "w1" }, scope: "near", say: true, text: "hi", x: 1, z: 2 }],
+  })), L);
+  assert.deepEqual(live.presence().map((p) => [p.companyId, p.agentCount, p.inside]), [["firegoat", 2, 1]]);
+  assert.deepEqual([...insideCounts(live.presence())], [["firegoat", 1]]);
+  assert.equal(live.walker("w1").siteId, "fixture-labs");
+  assert.equal(live.walker("w1").inside, false);
+  assert.deepEqual(live.chat().map((c) => [c.from, c.name, c.text]), [["w1", "w1", "hi"]]);
+  const p0 = live.position("w1", L + 5000);
+  assert.ok(Math.abs(p0.y - node(0)[2]) < 1e-9 && !p0.moving, "a standing walker (speed 0) stays put");
+  live.apply(fromWire({ type: "presence", site: site("fg-2", "firegoat", [], 0) }), L);
+  assert.deepEqual(live.presence().map((p) => [p.companyId, p.agentCount, p.inside]), [["firegoat", 1, 0]]);
+  live.apply(fromWire({ type: "chat", msg: { seq: 4, ts: S, from: { id: "w1", name: "w1" }, scope: "city", text: "yo", x: 0, z: 0 } }), L);
+  assert.equal(live.chat().at(-1).text, "yo");
+  live.apply(fromWire({ type: "left", id: "w1", inside: true }), L);
+  assert.equal(live.walker("w1"), null);
+  assert.throws(() => fromWire({ type: "walk", walker: { ...wireWalker("x", [node(0)]), officeId: "o1" } }), /unknown field "officeId"/);
+  assert.throws(() => fromWire({ type: "error", error: "the city socket is view-only" }), /view-only/);
 });
 
 test("connectLive: opens with a snapshot, reports live/offline, reconnects with backoff, a bad frame goes to onError", () => {
@@ -337,7 +365,7 @@ test("connectLive: opens with a snapshot, reports live/offline, reconnects with 
     const live = createLiveState({ graph: walk });
     const conn = connectLive("ws://x/city/fixture/ws", live, { WebSocketImpl: FakeWS, onStatus: (s, d) => statuses.push([s, d?.retryMs ?? null]), onError: (e) => errors.push(e.message) });
     sockets[0].onopen();
-    sockets[0].onmessage({ data: JSON.stringify(snapshot({ walkers: [walker("a", [node(0)])] })) });
+    sockets[0].onmessage({ data: JSON.stringify(wireSnapshot({ walkers: [wireWalker("a", [node(0)])] })) });
     assert.ok(live.ready);
     sockets[0].onclose();
     assert.deepEqual(timers.map((t) => t.ms), [1000]);
@@ -542,7 +570,7 @@ test("whoIsHere: office agents, walkers inside, walkers at the door; nobody from
       walker("door", [[door.x + 0.5, door.z + 0.5, 1]]),
       walker("far", [node(0)]),
     ],
-    presence: [{ companyId: "fixture-labs", agentCount: 1, agents: [{ name: "claude@lab", hue: 1, status: "working" }] }, { companyId: "sample-bakery", agentCount: 1, agents: [{ name: "baker", hue: 2, status: "idle" }] }],
+    presence: [{ companyId: "fixture-labs", agentCount: 1, agents: [{ name: "claude@lab", hue: 1, status: "working" }], inside: 1 }, { companyId: "sample-bakery", agentCount: 1, agents: [{ name: "baker", hue: 2, status: "idle" }], inside: 0 }],
   }), L);
   const info = siteInfo(sites, sites[0]);
   const rows = whoIsHere(info, { presence: live.presence(), walkers: live.walkers(), positionOf: (id) => live.position(id, L) });

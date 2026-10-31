@@ -2,7 +2,7 @@ export const BODY_MAX = 16 * 1024;
 
 export const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+  "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
   "access-control-allow-headers": "authorization, content-type, x-agent-token, x-filename, mcp-session-id, mcp-protocol-version, last-event-id",
   "access-control-expose-headers": "mcp-session-id, mcp-protocol-version, retry-after, www-authenticate",
   "access-control-max-age": "86400",
