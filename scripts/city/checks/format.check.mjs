@@ -51,7 +51,7 @@ test("projection: anchor table (spec §1) within 0.2 block and exact chunk", () 
     ["Coit Tower", 37.8024, -122.4058, 3349.7, 1201.6, [52, 18]],
     ["Pier 39", 37.8087, -122.4098, 3232.4, 969.4, [50, 15]],
     ["Ghirardelli", 37.8059, -122.4229, 2848.1, 1072.6, [44, 16]],
-    ["OpenAI, 1455 3rd St (provisional)", 37.770045, -122.388788, 3848.7, 2394.1, [60, 37]],
+    ["OpenAI, 1455 3rd St (EAS 489890)", 37.770061, -122.3887726, 3849.2, 2393.5, [60, 37]],
   ];
   for (const [name, lat, lon, x, z, chunk] of rows) {
     const p = lonLatToBlock(lon, lat);
