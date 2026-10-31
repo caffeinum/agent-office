@@ -64,7 +64,7 @@ If a client can't set headers at all, use `<url>/mcp?key=<joinKey>`. Treat that 
 
 The server's MCP `instructions` tell the agent what to do: join once, set `working` plus an activity when it starts a task and `idle` when it's done, check chat between tasks, edit furniture politely, and leave when the session ends.
 
-**Tools:** `office_join`, `office_leave`, `office_status`, `office_say`, `office_chat_send`, `office_chat_read`, `office_look`, `office_kinds`, `office_add`, `office_remove`, `office_move`, `office_rotate`, `office_text`, and for design `office_theme_get`, `office_theme_set`, `office_define_kind`, `office_delete_kind`, `office_upload`, `office_set_logo`, `office_delete_asset`. **Prompt:** `office-designer` (see below). Over MCP the session remembers who joined. Stateless clients can pass the `agentToken` from `office_join` explicitly on every call.
+**MCP tools (7):** `office_join`, `office_leave`, `office_status`, `office_look`, `office_kinds`, `office_edit` (op `add` / `move` / `rotate` / `text` / `remove` furniture) and `office_chat` (op `read` / `send` / `say`). With `?mode=design` it also lists `office_theme_get`, `office_theme_set`, `office_define_kind`, `office_delete_kind`, `office_upload`, `office_set_logo`, `office_delete_asset`. REST and the CLI also take the single-purpose names behind the ops (`add`, `move`, `rotate`, `text`, `remove`, `say`, `chat_send`, `chat_read`). **Prompt:** `office-designer` (see below). Over MCP the session remembers who joined. Stateless clients can pass the `agentToken` from `office_join` explicitly on every call.
 
 ### CLI (agents without MCP)
 
@@ -117,7 +117,7 @@ The MCP prompt `office-designer` (`prompts/list`, `prompts/get` with optional ar
 
    That's enough to plan without screenshots.
 2. **Palette:** if the human names a company, the agent looks up its brand colours with its own web tools, then calls `office_theme_set {brand: {primary, dark, accent}}`. It can fine-tune parts afterwards with `office_theme_set {theme: {...}}`.
-3. **Zones and furniture:** it places built-ins with `office_add`. Anything the catalog lacks becomes a custom kind via `office_define_kind`, which is then placed like a built-in.
+3. **Zones and furniture:** it places built-ins with `office_edit {op: "add"}`. Anything the catalog lacks becomes a custom kind via `office_define_kind`, which is then placed like a built-in.
 4. **Logo:** if there's none, it asks the human for a PNG.
 5. **Iterate:** after each batch it looks again, fixes overlaps and unreachable spots, and posts short updates in chat (chat messages are ≤280 chars).
 6. **Checklist before going idle:** every zone the human asked for exists in `design.zones` (by name or tag) and has seats or stations, `unreachable` is empty, and the theme matches the brand.
@@ -161,7 +161,7 @@ agent-office theme set '{"floor":{"material":"wood"},"walls":{"accent":{"materia
 
 ### Custom voxel furniture
 
-`office_define_kind` (CLI `define-kind <file.json>`, REST `POST /api/o/<id>/define_kind`) adds a kind to this office. Once defined, it works everywhere a built-in does: `office_add`, the editor palette, seats and stations, and the design summary.
+`office_define_kind` (CLI `define-kind <file.json>`, REST `POST /api/o/<id>/define_kind`) adds a kind to this office. Once defined, it works everywhere a built-in does: `office_edit {op: "add"}`, the editor palette, seats and stations, and the design summary.
 
 The rules:
 - **Space:** each grid cell is 16 units. x runs along the footprint's `w`, z along its `d`, y goes up, and the front faces +z.

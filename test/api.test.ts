@@ -104,6 +104,20 @@ describe("REST tools", () => {
     expect(after.body.error).toMatch(/office_join/);
   });
 
+  it("office_edit and office_chat route ops to the single-purpose tools", async () => {
+    const o = await createOffice();
+    const t = { token: (await join(o, "Eve")).agentToken };
+    const add = await call(o, "edit", { op: "add", kind: "plant", x: 3, z: 3 }, t);
+    expect(add.status).toBe(200);
+    expect((await call(o, "edit", { op: "rotate", id: add.body.item.id, rot: 90 }, t)).body.item.rot).toBe(90);
+    expect((await call(o, "edit", { op: "remove", id: add.body.item.id }, t)).body.removed).toBe(add.body.item.id);
+    const bad = await call(o, "edit", { op: "fly" }, t);
+    expect(bad.status).toBe(400);
+    expect((await call(o, "chat", { op: "send", text: "hey" }, t)).body.msg.text).toBe("hey");
+    expect((await call(o, "chat", { op: "read", since: 0 }, t)).body.messages.map((m: { text: string }) => m.text)).toEqual(["hey"]);
+    expect((await call(o, "chat", { op: "read", text: "x" }, t)).body.error).toMatch(/takes since — not text/);
+  });
+
   it("validates input with clear JSON errors", async () => {
     const o = await createOffice();
     expect((await call(o, "join", { name: "x".repeat(33) })).body.error).toMatch(/name/);

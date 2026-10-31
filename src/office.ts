@@ -8,7 +8,7 @@ import {
 import { ASSET_BYTES_MAX, ASSET_DIM_MAX, ASSETS_MAX, ASSETS_TOTAL_MAX, decodeBase64, sniffImage } from "./images";
 import { newOfficeKey, randomSecret, roleOfKey, sha256hex, keyFromRequest, WS_PROTOCOL, type KeyHashes, type Role } from "./auth";
 import { CORS_HEADERS, errorResponse, HttpError, json, readJson } from "./http";
-import { NAME_MAX, parseArgs, parseOwnerFrame, ToolError, type Status, type ToolArgs, type ToolName, ACTIVITY_MAX } from "./tools";
+import { isMergedTool, MERGED_ROUTES, NAME_MAX, parseArgs, parseOwnerFrame, ToolError, type MergedTool, type Status, type ToolArgs, type ToolName, ACTIVITY_MAX } from "./tools";
 import { handleMcp } from "./mcp";
 import { handleRest } from "./api";
 
@@ -504,9 +504,29 @@ export class Office extends DurableObject<Env> implements ToolHost {
     await this.saveAgent(a, false);
   }
 
+  /** office_edit / office_chat: pick the single-purpose tool for `op`, pass it only the args that op takes. */
+  private async callMerged(name: MergedTool, args: Record<string, unknown>, ctx: CallCtx): Promise<unknown> {
+    const op = args.op as string;
+    const route = (MERGED_ROUTES[name] as Record<string, { tool: ToolName; args: readonly string[] }>)[op];
+    if (!route) throw new ToolError(400, `${name}: unknown op "${op}"`);
+    const stray = Object.keys(args).filter((k) => k !== "op" && k !== "agentToken" && args[k] !== undefined && !route.args.includes(k));
+    if (stray.length) throw new ToolError(400, `${name} op "${op}" takes ${route.args.join(", ")} — not ${stray.join(", ")}`);
+    const picked: Record<string, unknown> = { agentToken: args.agentToken };
+    for (const k of route.args) if (args[k] !== undefined) picked[k] = args[k];
+    try {
+      return await this.callTool(route.tool, picked, ctx);
+    } catch (e) {
+      if (e instanceof ToolError && e.message.startsWith(`${route.tool}:`)) {
+        throw new ToolError(e.status, `${name} op "${op}":${e.message.slice(route.tool.length + 1)}`, e.extra);
+      }
+      throw e;
+    }
+  }
+
   async callTool(name: ToolName, rawArgs: unknown, ctx: CallCtx): Promise<unknown> {
     this.mustMeta();
     const args = parseArgs(name, rawArgs) as Record<string, unknown> & { agentToken?: string };
+    if (isMergedTool(name)) return this.callMerged(name, args, ctx);
     if (name === "office_kinds") return this.kinds((args as ToolArgs<"office_kinds">).kind);
     if (OWNER_TOOLS.has(name)) {
       const by = await this.designActor(ctx, args.agentToken);
@@ -657,7 +677,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
         "Wall kinds hang on a wall: rot 0 with z 0 (back wall) or rot 90 with x 0 (left wall).",
         `Text (sign, poster, whiteboard) ≤ ${TEXT_MAX} chars.`,
         "Seats/stations are in local units (16 per cell) from the footprint's min corner at rot 0; office_look lists them placed in the world.",
-        "Custom kinds: office_define_kind (voxel boxes), then office_add like any built-in; office_kinds {kind} returns a kind in full.",
+        "Custom kinds: office_define_kind (voxel boxes), then office_edit {op: \"add\"} like any built-in; office_kinds {kind} returns a kind in full.",
       ],
     };
   }
@@ -701,7 +721,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       next:
         this.designer === a.id
           ? "You are this office's designer: over MCP, connect with ?mode=design for the design tools and the office-designer prompt (prompts/get), then follow it — office_look's design summary is your floor plan; humans will ask you for changes in chat."
-          : "Set office_status to working with a short activity when you start a task; check office_chat_read between tasks.",
+          : "Set office_status to working with a short activity when you start a task; check chat between tasks (MCP office_chat {op: \"read\"}, CLI `chat read`).",
     };
   }
 
@@ -808,7 +828,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       ok: true,
       kind: { kind: kind.kind, ...summarizeKind(stored) },
       updated: existing ? placed.map((it) => it.id) : undefined,
-      next: placed.length ? undefined : `place it: office_add {kind: "${kind.kind}", x, z, rot}`,
+      next: placed.length ? undefined : `place it: office_edit {op: "add", kind: "${kind.kind}", x, z, rot}`,
     };
   }
 
@@ -816,7 +836,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     if (kindOf(slug)) throw new ToolError(400, `${slug} is a built-in kind`);
     if (!this.customKinds[slug]) throw new ToolError(404, `no custom kind "${slug}" (custom kinds: ${Object.keys(this.customKinds).join(", ") || "none"})`);
     const placed = this.itemList().filter((it) => it.kind === slug).map((it) => it.id);
-    if (placed.length) throw new ToolError(409, `${slug} is in use by ${placed.join(", ")} — office_remove them first`);
+    if (placed.length) throw new ToolError(409, `${slug} is in use by ${placed.join(", ")} — remove them first (office_edit {op: "remove"})`);
     const { [slug]: _gone, ...rest } = this.customKinds;
     this.customKinds = rest;
     await this.ctx.storage.delete(`kind:${slug}`);

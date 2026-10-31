@@ -2,7 +2,7 @@ import { SELF } from "cloudflare:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { describe, expect, it } from "vitest";
-import { DESIGN_TOOLS, TOOL_NAMES } from "../src/tools";
+import { DESIGN_TOOLS, SPLIT_TOOLS, TOOL_NAMES } from "../src/tools";
 import { b64, createOffice, fakeImage, ORIGIN, type Created } from "./helpers";
 
 const selfFetch = (input: string | URL | Request, init?: RequestInit) => SELF.fetch(input as never, init as never) as unknown as Promise<Response>;
@@ -31,7 +31,8 @@ describe("MCP over Streamable HTTP", () => {
     const o = await createOffice();
     const { client } = await connect(o);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(TOOL_NAMES.filter((n) => !DESIGN_TOOLS.has(n)).sort());
+    expect(tools.map((t) => t.name).sort()).toEqual(TOOL_NAMES.filter((n) => !DESIGN_TOOLS.has(n) && !SPLIT_TOOLS.has(n)).sort());
+    expect(tools.length).toBe(7);
     expect(client.getInstructions()).toMatch(/office_join once/);
     expect(client.getInstructions()).toMatch(/\?mode=design/);
     expect(client.getInstructions()).not.toMatch(/office-designer/);
@@ -42,11 +43,11 @@ describe("MCP over Streamable HTTP", () => {
     await client.close();
   });
 
-  it("design mode lists every tool with the designer instructions and prompt", async () => {
+  it("design mode adds the design tools with the designer instructions and prompt", async () => {
     const o = await createOffice();
     const { client } = await connect(o, { design: true });
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
+    expect(tools.map((t) => t.name).sort()).toEqual(TOOL_NAMES.filter((n) => !SPLIT_TOOLS.has(n)).sort());
     expect(client.getInstructions()).toMatch(/office-designer/);
     expect(client.getServerCapabilities()?.prompts).toBeTruthy();
     await client.close();
@@ -65,23 +66,28 @@ describe("MCP over Streamable HTTP", () => {
 
     expect((await tool(client, "office_kinds")).body.kinds.sofa).toMatchObject({ w: 3, d: 1 });
     expect((await tool(client, "office_status", { status: "working", activity: "writing docs" })).body.agent.activity).toBe("writing docs");
-    expect((await tool(client, "office_say", { text: "hi all" })).body.msg.from).toBe(me);
-    expect((await tool(client, "office_chat_send", { text: "room msg" })).body.msg.to).toBeNull();
-    const read = await tool(client, "office_chat_read", { since: 0 });
+    expect((await tool(client, "office_chat", { op: "say", text: "hi all" })).body.msg.from).toBe(me);
+    expect((await tool(client, "office_chat", { op: "send", text: "room msg" })).body.msg.to).toBeNull();
+    const read = await tool(client, "office_chat", { op: "read", since: 0 });
     expect(read.body.messages.map((m: { text: string }) => m.text)).toEqual(["hi all", "room msg"]);
     const look = await tool(client, "office_look");
     expect(look.body.you.id).toBe(me);
-    const add = await tool(client, "office_add", { kind: "sign", x: 22, z: 12, text: "mcp was here" });
+    const add = await tool(client, "office_edit", { op: "add", kind: "sign", x: 22, z: 12, text: "mcp was here" });
     expect(add.isError).toBe(false);
     const id = add.body.item.id;
-    expect((await tool(client, "office_move", { id, x: 21, z: 12 })).body.item.x).toBe(21);
-    expect((await tool(client, "office_rotate", { id, rot: 180 })).body.item.rot).toBe(180);
-    expect((await tool(client, "office_text", { id, text: "edited" })).body.item.text).toBe("edited");
-    expect((await tool(client, "office_remove", { id })).body.removed).toBe(id);
+    expect((await tool(client, "office_edit", { op: "move", id, x: 21, z: 12 })).body.item.x).toBe(21);
+    expect((await tool(client, "office_edit", { op: "rotate", id, rot: 180 })).body.item.rot).toBe(180);
+    expect((await tool(client, "office_edit", { op: "text", id, text: "edited" })).body.item.text).toBe("edited");
+    expect((await tool(client, "office_edit", { op: "remove", id })).body.removed).toBe(id);
 
-    const bad = await tool(client, "office_add", { kind: "plant", x: 200, z: 1 });
+    const bad = await tool(client, "office_edit", { op: "add", kind: "plant", x: 200, z: 1 });
     expect(bad.isError).toBe(true);
     expect(bad.body.error).toMatch(/out of bounds/);
+    const stray = await tool(client, "office_edit", { op: "move", id, kind: "plant", x: 1, z: 1 });
+    expect(stray.body.error).toMatch(/office_edit op "move" takes id, x, z — not kind/);
+    const badArgs = await tool(client, "office_edit", { op: "move", x: 1, z: 1 });
+    expect(badArgs.body.error).toMatch(/^office_edit op "move": bad arguments/);
+    expect(((await client.callTool({ name: "office_add", arguments: { kind: "plant", x: 1, z: 1 } })) as { isError?: boolean }).isError).toBe(true);
 
     expect((await tool(client, "office_leave")).body.left).toBe(me);
     const gone = await tool(client, "office_status", { status: "idle" });
@@ -140,7 +146,7 @@ describe("MCP over Streamable HTTP", () => {
       stations: [{ x: -6, z: 16, rot: 90, activity: "chat" }],
     });
     expect(kind.isError).toBe(false);
-    expect((await tool(client, "office_add", { kind: "huddle-table", x: 2, z: 11 })).isError).toBe(false);
+    expect((await tool(client, "office_edit", { op: "add", kind: "huddle-table", x: 2, z: 11 })).isError).toBe(false);
     const up = await tool(client, "office_upload", { filename: "logo.png", contentType: "image/png", base64: b64(fakeImage.png(512, 512, 2000)) });
     expect(up.isError).toBe(false);
     expect((await tool(client, "office_set_logo", { assetId: up.body.assetId })).body.theme.logo).toBe(up.body.assetId);

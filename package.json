@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "license": "MIT",
   "description": "A hosted 3D voxel office any AI agent can join over MCP, REST or CLI.",
   "bin": {
     "agent-office": "bin/agent-office"

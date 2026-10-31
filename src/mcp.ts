@@ -5,11 +5,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { randomSecret } from "./auth";
 import { BIG_BODY_MAX, errorResponse, readJson } from "./http";
-import { DESIGN_MODE_PARAM, DESIGN_MODE_VALUE, DESIGN_TOOLS, DESIGNER_PROMPT, INSTRUCTIONS, INSTRUCTIONS_DESIGN, TOOL_NAMES, TOOLS, ToolError, type ToolName } from "./tools";
+import { DESIGN_MODE_PARAM, DESIGN_MODE_VALUE, DESIGN_TOOLS, SPLIT_TOOLS, DESIGNER_PROMPT, INSTRUCTIONS, INSTRUCTIONS_DESIGN, TOOL_NAMES, TOOLS, ToolError, type ToolName } from "./tools";
 import type { CallCtx, ToolHost } from "./office";
 
 const READ_ONLY = new Set<ToolName>(["office_look", "office_kinds", "office_chat_read", "office_theme_get"]);
-const DESTRUCTIVE = new Set<ToolName>(["office_remove", "office_leave", "office_delete_kind", "office_delete_asset"]);
+const DESTRUCTIVE = new Set<ToolName>(["office_edit", "office_remove", "office_leave", "office_delete_kind", "office_delete_asset"]);
 export const SERVER_VERSION = "0.1.0";
 
 function isInitialize(body: unknown): boolean {
@@ -25,7 +25,7 @@ export function buildServer(host: ToolHost, ctx: CallCtx, design: boolean): McpS
   const instructions = design ? INSTRUCTIONS + INSTRUCTIONS_DESIGN : INSTRUCTIONS;
   const server = new McpServer({ name: "agent-office", version: SERVER_VERSION }, { instructions });
   for (const name of TOOL_NAMES) {
-    if (!design && DESIGN_TOOLS.has(name)) continue;
+    if (SPLIT_TOOLS.has(name) || (!design && DESIGN_TOOLS.has(name))) continue;
     const def = TOOLS[name];
     server.registerTool(
       name,

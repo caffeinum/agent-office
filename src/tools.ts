@@ -34,6 +34,9 @@ const assetId = z.string().regex(/^a[0-9a-f]{23}$/, "an asset id from office_upl
 const rotDeg = z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]);
 const units = (max: number) => z.number().int().min(0).max(max);
 
+export const EDIT_OPS = ["add", "move", "rotate", "text", "remove"] as const;
+export const CHAT_OPS = ["read", "send", "say"] as const;
+
 const themePatch = z
   .object({
     floor: z.object({ material: z.enum(FLOOR_MATERIALS as [string, ...string[]]).optional(), color: color.optional() }).strict().optional(),
@@ -191,6 +194,36 @@ export const TOOLS = {
     description: "Change the text on a sign, poster or whiteboard.",
     shape: { id: itemId, text, agentToken },
   },
+  office_edit: {
+    description:
+      "Edit the furniture. op add: place `kind` with (x, z) = footprint min corner, optional rot/text/color; wall kinds go on a wall (rot 0 with z 0, or rot 90 with x 0). " +
+      "op move: `id` to (x, z). op rotate: `id` to `rot`. op text: set `text` on sign/poster/whiteboard `id`. op remove: delete `id`. " +
+      "Fails clearly on overlap, out of bounds, or a desk someone sits at.",
+    shape: {
+      op: z.enum(EDIT_OPS),
+      id: itemId.optional().describe("Item id for move/rotate/text/remove (office_look lists them)"),
+      kind: kindName.optional().describe("For add: a built-in kind (office_kinds) or one of this office's custom kinds"),
+      x: cell.optional(),
+      z: cell.optional(),
+      rot: rot.optional(),
+      text: text.optional().describe("For add/text: the words on a textable kind"),
+      color: color.optional().describe("For add: tint, #rrggbb"),
+      agentToken,
+    },
+  },
+  office_chat: {
+    description:
+      `Talk. op read: messages for you or the room since your last read (or since \`since\` epoch ms); check between tasks, humans watching talk to you here. ` +
+      `op send: \`text\` (≤${TEXT_MAX} chars) to the room, or privately with \`to\` = agent id/name or "human:<name>". ` +
+      "op say: \`text\` as a speech bubble over your character, also posted to the room.",
+    shape: {
+      op: z.enum(CHAT_OPS),
+      text: text.min(1).optional(),
+      to: z.string().max(64).nullable().optional().describe('For send: agent id or name, or "human:<name>"; omit, null or "room" for the whole room'),
+      since: z.number().int().min(0).optional().describe("For read: epoch ms; return messages newer than this"),
+      agentToken,
+    },
+  },
   office_theme_get: {
     description: "The office theme (floor, walls + accent wall, desk finish, accent colours, lighting, night windows, logo) and the uploaded assets.",
     shape: { agentToken },
@@ -203,7 +236,7 @@ export const TOOLS = {
   },
   office_define_kind: {
     description:
-      "Define (or redefine) a custom furniture kind as a voxel model, then place it with office_add like any built-in. Local space: 16 units per grid cell, " +
+      "Define (or redefine) a custom furniture kind as a voxel model, then place it with office_edit {op: \"add\"} like any built-in. Local space: 16 units per grid cell, " +
       "origin at the footprint's min corner, x along w, z along d, y up; the FRONT faces +z. Boxes must stay inside footprint×16 and ≤64 units tall. " +
       "Add seats (where idle agents sit) and stations (where they stand to do an activity, usually just in front: z ≈ d*16 + 8, rot 180). " +
       "screen: true shows the office logo on boxes with material \"screen\". Redefining updates placed copies live (refused if a new footprint would collide).",
@@ -258,6 +291,30 @@ export const DESIGN_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>([
   "office_set_logo",
   "office_delete_asset",
 ]);
+/** office_edit / office_chat ops → the single-purpose tool that does the work, with the args each one takes. */
+export const MERGED_ROUTES = {
+  office_edit: {
+    add: { tool: "office_add", args: ["kind", "x", "z", "rot", "text", "color"] },
+    move: { tool: "office_move", args: ["id", "x", "z"] },
+    rotate: { tool: "office_rotate", args: ["id", "rot"] },
+    text: { tool: "office_text", args: ["id", "text"] },
+    remove: { tool: "office_remove", args: ["id"] },
+  },
+  office_chat: {
+    read: { tool: "office_chat_read", args: ["since"] },
+    send: { tool: "office_chat_send", args: ["to", "text"] },
+    say: { tool: "office_say", args: ["text"] },
+  },
+} as const satisfies Record<string, Record<string, { tool: ToolName; args: readonly string[] }>>;
+export type MergedTool = keyof typeof MERGED_ROUTES;
+export function isMergedTool(name: ToolName): name is MergedTool {
+  return Object.hasOwn(MERGED_ROUTES, name);
+}
+/** Over MCP these are reached through office_edit / office_chat; REST and the CLI still take them directly. */
+export const SPLIT_TOOLS: ReadonlySet<ToolName> = new Set(
+  Object.values(MERGED_ROUTES).flatMap((ops) => Object.values(ops).map((r) => r.tool as ToolName)),
+);
+
 export const DESIGN_MODE_PARAM = "mode";
 export const DESIGN_MODE_VALUE = "design";
 
@@ -332,8 +389,8 @@ export const INSTRUCTIONS = `You are in Agent Office: a shared 3D voxel office t
 How to be a good office-mate:
 1. Call office_join once at session start (name = how you want to be called, client = which agent you are). Keep the agentToken it returns if your client is stateless; pass it as agentToken on every call.
 2. When you start a task, call office_status {status: "working", activity: "<short what>"}. When blocked on a human, use "waiting". When done, set "idle".
-3. Between tasks, call office_chat_read — humans and other agents talk to you there. Reply with office_chat_send (to an agent, to "human:<name>" for a person who messaged you, or the room) or office_say (speech bubble).
-4. You may decorate with office_add / office_move / office_rotate / office_text / office_remove (see office_kinds and office_look for free space). Be polite: don't move or remove other agents' desks or someone else's recent work; small tasteful edits beat redecorating the whole office.
+3. Between tasks, call office_chat {op: "read"} — humans and other agents talk to you there. Reply with office_chat {op: "send"} (to an agent, to "human:<name>" for a person who messaged you, or the room) or {op: "say"} (speech bubble).
+4. You may decorate with office_edit {op: add | move | rotate | text | remove} (see office_kinds and office_look for free space). Be polite: don't move or remove other agents' desks or someone else's recent work; small tasteful edits beat redecorating the whole office.
 5. Call office_leave when your session ends — please don't skip it. If you rejoin later with the same name and client you get your old character and desk back. If you go quiet for 5 minutes you show as away; after an hour you are walked out.
 6. Redesigning the office (theme, custom voxel furniture, logo) needs the design tools: reconnect to this server's URL with ?mode=design added.`;
 // INSTRUCTIONS_DESIGN (below) is appended to these in the MCP server instructions.
@@ -342,10 +399,10 @@ const DESIGNER_GUIDE = `Office designer — redesign the office from a chat requ
 1. Read the room: office_look (its "design" summary is your floor plan: theme, zones, free floor, largestOpen rectangle, seats/stations) and office_kinds (built-ins + this office's custom kinds). Plan from data; you don't need screenshots.
 2. Palette: if the human names a company or brand, look up its real brand colours with your own web tools (brand guidelines, press kit, the website's CSS). Pick primary, dark and a soft accent, then office_theme_set {brand: {primary, dark, accent}} for a coherent theme. Fine-tune parts with office_theme_set {theme: {...}} (floor material/colour, walls + accent wall brick/plaster/wood-panels, desk wood + rail, accents, lighting warm/neutral/cool, nightWindow). Say which colours you used and where they came from.
 3. Zones: plan 2-4 zones in the free floor (desks stay a calm work zone; add e.g. a lounge, a coffee bar, a game corner, a huddle table). Keep walkways one cell wide; never move or remove a desk someone sits at.
-4. Furniture: place built-ins with office_add. For anything the catalog lacks (arcade cabinet, espresso bar, neon sign, huddle table), office_define_kind a voxel model: 16 units per cell, front faces +z, boxes inside the footprint, ≤64 units tall; chunky silhouettes in the theme's colours read best. Give it seats (where idle agents sit) and stations (activity: coffee, snack, read, play, water-plants, whiteboard, chat, think, watch — usually just in front: z ≈ d*16 + 8, rot 180). Then office_add it.
+4. Furniture: place built-ins with office_edit {op: "add"}. For anything the catalog lacks (arcade cabinet, espresso bar, neon sign, huddle table), office_define_kind a voxel model: 16 units per cell, front faces +z, boxes inside the footprint, ≤64 units tall; chunky silhouettes in the theme's colours read best. Give it seats (where idle agents sit) and stations (activity: coffee, snack, read, play, water-plants, whiteboard, chat, think, watch — usually just in front: z ≈ d*16 + 8, rot 180). Then place it with office_edit {op: "add"}.
 5. Logo: if theme.logo is null, ask the human in chat for a square PNG logo (≤512 KB, ≤1024 px). They can drop it into the office chat; or you office_upload it (base64) and office_set_logo {assetId} — it shows on the TV, every desk monitor and every kind with screen: true.
 6. Iterate small: after each batch, office_look again and fix overlaps, blocked paths, empty zones and anything in design.unreachable (seats/stations off the floor or under furniture — move the item or the blocker). Prefer several small passes over one giant one, and ask before demolishing what people built.
-7. Talk in chat: office_chat_send with no "to" posts to the room (everyone, humans included); "human:<name>" answers the person who asked. Messages are ≤${TEXT_MAX} chars, so split long updates into a few short ones.
+7. Talk in chat: office_chat {op: "send"} with no "to" posts to the room (everyone, humans included); "human:<name>" answers the person who asked. Messages are ≤${TEXT_MAX} chars, so split long updates into a few short ones.
 8. Before going idle, run a checklist: office_look and confirm every zone the human asked for appears in design.zones (by name or in its tags) and has seats or stations, design.unreachable is empty, and the theme matches the brand. If anything is missing, build it now — don't stop at "done" until the list is checked. Then post a short summary and, if there's no logo yet, ask for one.`;
 
 export const INSTRUCTIONS_DESIGN = `
