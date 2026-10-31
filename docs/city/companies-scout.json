@@ -1,0 +1,629 @@
+{
+ "companies": [
+  {
+   "name": "Anthropic",
+   "address": "500 Howard St, San Francisco, CA 94105 (Foundry Square IV)",
+   "lat": 37.7885108,
+   "lon": -122.3967378,
+   "category": "ai-lab",
+   "confidence": "high",
+   "source": "Bisnow/CoStar 2026 (direct lease 240k sf at 500 Howard); Nominatim",
+   "note": "Was Slack's old HQ. About 1M sf leased nearby as of Apr 2026; one source says a future HQ at 300 Howard St in 2027 (37.789897,-122.39446), not verified. The older 548 Market St is only a mail address."
+  },
+  {
+   "name": "OpenAI",
+   "address": "1455 3rd St, San Francisco, CA 94158 (Mission Bay)",
+   "lat": 37.7700459,
+   "lon": -122.3887896,
+   "category": "ai-lab",
+   "confidence": "high",
+   "source": "therealdeal 2024/2026, CoStar; Nominatim (former Uber HQ bldg 1)",
+   "note": "The campus also includes 1515 3rd St (37.7693278,-122.3888868), 550 Terry Francois Blvd (37.7694815,-122.3865719) and part of 1800 Owens. The former HQ at 3180 18th St is closed."
+  },
+  {
+   "name": "Uber",
+   "address": "1725 3rd St, San Francisco, CA 94158 (Mission Bay)",
+   "lat": 37.7673882,
+   "lon": -122.388581,
+   "category": "big-tech",
+   "confidence": "medium",
+   "source": "Nominatim (OSM tags it Uber HQ Building 4)",
+   "note": "Subleased 1455 and 1515 3rd St to OpenAI. Its old 1455 Market St office is gone."
+  },
+  {
+   "name": "Salesforce",
+   "address": "415 Mission St, San Francisco, CA 94105 (Salesforce Tower)",
+   "lat": 37.7897744,
+   "lon": -122.3969321,
+   "category": "big-tech",
+   "confidence": "high",
+   "source": "company HQ; Nominatim",
+   "note": "Tallest building in SF at 326 m (1,070 ft)."
+  },
+  {
+   "name": "Slack",
+   "address": "415 Mission St, San Francisco, CA 94105 (Salesforce Tower)",
+   "lat": 37.7897744,
+   "lon": -122.3969321,
+   "category": "big-tech",
+   "confidence": "medium",
+   "source": "Salesforce-owned; Nominatim",
+   "note": "Left 500 Howard St (now Anthropic) after the Salesforce acquisition. Same building as Salesforce."
+  },
+  {
+   "name": "Airbnb",
+   "address": "888 Brannan St, San Francisco, CA 94103",
+   "lat": 37.7719568,
+   "lon": -122.4054484,
+   "category": "big-tech",
+   "confidence": "high",
+   "source": "company HQ; Nominatim (OSM tags it Airbnb)"
+  },
+  {
+   "name": "Stripe (SF office)",
+   "address": "510 Townsend St, San Francisco, CA 94103",
+   "lat": 37.7735091,
+   "lon": -122.4003768,
+   "category": "fintech",
+   "confidence": "high",
+   "source": "Nominatim (OSM tags it Stripe)",
+   "note": "The legal HQ is in South San Francisco at 354 Oyster Point Blvd (37.6617407,-122.3838515), outside SF city limits. 510 Townsend is the SF office."
+  },
+  {
+   "name": "X (Twitter), former HQ",
+   "address": "1355 Market St, San Francisco, CA 94103",
+   "lat": 37.7765419,
+   "lon": -122.4168068,
+   "category": "big-tech",
+   "confidence": "medium",
+   "source": "Nominatim (OSM still tags it X); news 2024",
+   "note": "Closed. X moved its HQ to Texas (Bastrop) in 2024 and left the SF building. Show it as a vacant or former landmark."
+  },
+  {
+   "name": "Dropbox",
+   "address": "1800 Owens St, San Francisco, CA 94158 (The Exchange)",
+   "lat": 37.7656261,
+   "lon": -122.3928771,
+   "category": "big-tech",
+   "confidence": "medium",
+   "source": "Hoodline Jan 2026 (OpenAI taking ~280k sf of the Dropbox space); Nominatim",
+   "note": "Dropbox is remote-first ('virtual first') and keeps only a small part of the building. Much of it is now OpenAI."
+  },
+  {
+   "name": "Pinterest",
+   "address": "505 Brannan St, San Francisco, CA 94107",
+   "lat": 37.7775851,
+   "lon": -122.3967622,
+   "category": "big-tech",
+   "confidence": "high",
+   "source": "company HQ; Nominatim"
+  },
+  {
+   "name": "Figma",
+   "address": "760 Market St, San Francisco, CA 94102 (Phelan Building)",
+   "lat": 37.7863711,
+   "lon": -122.4054895,
+   "category": "startup",
+   "confidence": "high",
+   "source": "company HQ; Nominatim"
+  },
+  {
+   "name": "Discord",
+   "address": "444 De Haro St, San Francisco, CA 94107",
+   "lat": 37.7641587,
+   "lon": -122.4020123,
+   "category": "startup",
+   "confidence": "medium",
+   "source": "company HQ (known); Nominatim (OSM still has an old tenant tag)"
+  },
+  {
+   "name": "GitHub",
+   "address": "88 Colin P Kelly Jr St, San Francisco, CA 94107",
+   "lat": 37.7821769,
+   "lon": -122.391245,
+   "category": "big-tech",
+   "confidence": "low",
+   "source": "Nominatim (OSM tags it GitHub)",
+   "note": "GitHub announced in 2023 that it was closing its offices, including the SF HQ. Treat it as a former or legal address."
+  },
+  {
+   "name": "Cloudflare",
+   "address": "101 Townsend St, San Francisco, CA 94107",
+   "lat": 37.7802552,
+   "lon": -122.3905129,
+   "category": "infra",
+   "confidence": "high",
+   "source": "company HQ; Nominatim"
+  },
+  {
+   "name": "Databricks",
+   "address": "1 Sansome St, San Francisco, CA 94104 (One Sansome)",
+   "lat": 37.7904266,
+   "lon": -122.4011683,
+   "category": "ai-data",
+   "confidence": "medium",
+   "source": "Databricks press release Mar 2025, CoStar Mar 2026; Nominatim",
+   "note": "HQ move from 160 Spear St (37.7914376,-122.3935588) was targeted for H2 2026. Move-in not confirmed."
+  },
+  {
+   "name": "Scale AI",
+   "address": "303 2nd St, South Tower, San Francisco, CA 94107",
+   "lat": 37.7852369,
+   "lon": -122.3952956,
+   "category": "ai",
+   "confidence": "medium",
+   "source": "multiple directories (clay, komo); Nominatim",
+   "note": "Same building as Reddit and DoorDash."
+  },
+  {
+   "name": "Reddit",
+   "address": "303 2nd St, South Tower, San Francisco, CA 94107",
+   "lat": 37.7852369,
+   "lon": -122.3952956,
+   "category": "big-tech",
+   "confidence": "medium",
+   "source": "Reddit S-1/10-K address (from memory); Nominatim"
+  },
+  {
+   "name": "DoorDash",
+   "address": "303 2nd St, Suite 800, San Francisco, CA 94107",
+   "lat": 37.7852369,
+   "lon": -122.3952956,
+   "category": "big-tech",
+   "confidence": "medium",
+   "source": "SEC filing address (from memory); Nominatim"
+  },
+  {
+   "name": "Notion",
+   "address": "2300 Harrison St, San Francisco, CA 94110",
+   "lat": 37.7603744,
+   "lon": -122.4132617,
+   "category": "startup",
+   "confidence": "medium",
+   "source": "company HQ (from memory); Nominatim"
+  },
+  {
+   "name": "Instacart (Maplebear)",
+   "address": "50 Beale St, San Francisco, CA 94105",
+   "lat": 37.7912566,
+   "lon": -122.3964864,
+   "category": "big-tech",
+   "confidence": "medium",
+   "source": "SEC filing address (from memory); Nominatim",
+   "note": "Mostly remote. 50 Beale is the registered HQ."
+  },
+  {
+   "name": "Lyft",
+   "address": "185 Berry St, San Francisco, CA 94107",
+   "lat": 37.7762432,
+   "lon": -122.3917021,
+   "category": "big-tech",
+   "confidence": "high",
+   "source": "company HQ; Nominatim"
+  },
+  {
+   "name": "Square / Block, former SF HQ",
+   "address": "1455 Market St, San Francisco, CA 94103",
+   "lat": 37.7756962,
+   "lon": -122.4180838,
+   "category": "fintech",
+   "confidence": "medium",
+   "source": "Nominatim (OSM shows the shared Uber/Square building)",
+   "note": "Moved. Block's HQ is now 1955 Broadway, Oakland (Uptown Station, 37.8088254,-122.2690908), outside SF. Omit it or show the old building as a landmark."
+  },
+  {
+   "name": "Twilio",
+   "address": "101 Spear St, San Francisco, CA 94105",
+   "lat": 37.7925915,
+   "lon": -122.3930383,
+   "category": "infra",
+   "confidence": "low",
+   "source": "SEC address (from memory); Nominatim",
+   "note": "Twilio is remote-first and has cut back its SF space a lot."
+  },
+  {
+   "name": "Yelp",
+   "address": "350 Mission St, San Francisco, CA 94105",
+   "lat": 37.7908723,
+   "lon": -122.3967203,
+   "category": "big-tech",
+   "confidence": "medium",
+   "source": "company HQ (from memory); Nominatim",
+   "note": "Fully remote since 2022, but this is still listed as HQ."
+  },
+  {
+   "name": "Wells Fargo",
+   "address": "420 Montgomery St, San Francisco, CA 94104",
+   "lat": 37.7933794,
+   "lon": -122.4027,
+   "category": "iconic-finance",
+   "confidence": "medium",
+   "source": "historic HQ; Nominatim",
+   "note": "Corporate HQ is formally SF, but the executive center has largely moved to NYC. The SF building is iconic."
+  },
+  {
+   "name": "Levi Strauss & Co.",
+   "address": "1155 Battery St, San Francisco, CA 94111 (Levi's Plaza)",
+   "lat": 37.8017218,
+   "lon": -122.4022962,
+   "category": "iconic",
+   "confidence": "high",
+   "source": "company HQ; Nominatim"
+  },
+  {
+   "name": "Gap Inc.",
+   "address": "2 Folsom St, San Francisco, CA 94105",
+   "lat": 37.7907938,
+   "lon": -122.3909815,
+   "category": "iconic",
+   "confidence": "high",
+   "source": "company HQ; Nominatim"
+  },
+  {
+   "name": "PG&E, former HQ",
+   "address": "77 Beale St, San Francisco, CA 94105",
+   "lat": 37.79178,
+   "lon": -122.395756,
+   "category": "iconic-utility",
+   "confidence": "high",
+   "source": "Nominatim (OSM tags it PG&E Building)",
+   "note": "Moved. HQ went to 300 Lakeside Dr, Oakland (37.8087787,-122.2640529) in 2022."
+  },
+  {
+   "name": "Autodesk",
+   "address": "1 Market St, Spear Tower, San Francisco, CA 94105",
+   "lat": 37.79382,
+   "lon": -122.3948144,
+   "category": "big-tech",
+   "confidence": "medium",
+   "source": "Autodesk SF office (from memory); Nominatim",
+   "note": "Corporate HQ is San Rafael (formally SF in some filings). The One Market office is its big SF site."
+  },
+  {
+   "name": "Zendesk",
+   "address": "989 Market St, San Francisco, CA 94103",
+   "lat": 37.7822652,
+   "lon": -122.4096993,
+   "category": "saas",
+   "confidence": "medium",
+   "source": "company HQ (from memory); Nominatim"
+  },
+  {
+   "name": "Google (SF office)",
+   "address": "345 Spear St, San Francisco, CA 94105",
+   "lat": 37.7900765,
+   "lon": -122.390521,
+   "category": "big-tech",
+   "confidence": "high",
+   "source": "Google offices page (from memory); Nominatim"
+  },
+  {
+   "name": "Meta (SF office)",
+   "address": "181 Fremont St, San Francisco, CA 94105",
+   "lat": 37.7898002,
+   "lon": -122.3953496,
+   "category": "big-tech",
+   "confidence": "medium",
+   "source": "Meta lease (from memory); Nominatim",
+   "note": "Meta has subleased part of this space."
+  },
+  {
+   "name": "Microsoft (SF office)",
+   "address": "555 California St, San Francisco, CA 94104",
+   "lat": 37.7921219,
+   "lon": -122.4037191,
+   "category": "big-tech",
+   "confidence": "medium",
+   "source": "Microsoft Reactor/office (from memory); Nominatim"
+  },
+  {
+   "name": "LinkedIn (SF office)",
+   "address": "222 2nd St, San Francisco, CA 94105",
+   "lat": 37.7864738,
+   "lon": -122.3982635,
+   "category": "big-tech",
+   "confidence": "high",
+   "source": "Nominatim (OSM tags it LinkedIn)"
+  },
+  {
+   "name": "Okta",
+   "address": "100 1st St, San Francisco, CA 94105",
+   "lat": 37.789207,
+   "lon": -122.397587,
+   "category": "saas",
+   "confidence": "high",
+   "source": "company HQ; Nominatim"
+  },
+  {
+   "name": "Plaid",
+   "address": "1098 Harrison St, San Francisco, CA 94103",
+   "lat": 37.7760407,
+   "lon": -122.4060945,
+   "category": "fintech",
+   "confidence": "high",
+   "source": "Nominatim (OSM tags it Plaid)"
+  },
+  {
+   "name": "Samsara",
+   "address": "1 De Haro St, San Francisco, CA 94107",
+   "lat": 37.7695333,
+   "lon": -122.4017263,
+   "category": "saas",
+   "confidence": "high",
+   "source": "company HQ; Nominatim"
+  },
+  {
+   "name": "Asana",
+   "address": "633 Folsom St, San Francisco, CA 94107",
+   "lat": 37.7845376,
+   "lon": -122.3972187,
+   "category": "saas",
+   "confidence": "high",
+   "source": "company HQ; Nominatim"
+  },
+  {
+   "name": "Wikimedia Foundation",
+   "address": "1 Montgomery St, Suite 1600, San Francisco, CA 94104",
+   "lat": 37.78935,
+   "lon": -122.40235,
+   "category": "nonprofit",
+   "confidence": "medium",
+   "source": "wikimediafoundation.org (from memory); coordinates estimated by hand at Market/Montgomery (Nominatim only returned the street)"
+  },
+  {
+   "name": "Mozilla (SF office)",
+   "address": "2 Harrison St, San Francisco, CA 94105 (Hills Bros Building)",
+   "lat": 37.7893894,
+   "lon": -122.38913,
+   "category": "nonprofit-tech",
+   "confidence": "low",
+   "source": "Nominatim",
+   "note": "Mozilla's SF office may have shrunk or closed. Not verified for 2026."
+  },
+  {
+   "name": "Patreon",
+   "address": "600 Townsend St, San Francisco, CA 94103",
+   "lat": 37.7718544,
+   "lon": -122.402559,
+   "category": "startup",
+   "confidence": "medium",
+   "source": "company HQ (from memory); Nominatim"
+  },
+  {
+   "name": "Gusto",
+   "address": "525 20th St, San Francisco, CA 94107 (Dogpatch)",
+   "lat": 37.7605665,
+   "lon": -122.3859093,
+   "category": "saas",
+   "confidence": "medium",
+   "source": "company HQ (from memory); Nominatim"
+  },
+  {
+   "name": "Chime",
+   "address": "101 California St, San Francisco, CA 94111",
+   "lat": 37.7929054,
+   "lon": -122.3981127,
+   "category": "fintech",
+   "confidence": "medium",
+   "source": "S-1 address 2025 (from memory); Nominatim"
+  },
+  {
+   "name": "Nextdoor",
+   "address": "420 Taylor St, San Francisco, CA 94102",
+   "lat": 37.7863489,
+   "lon": -122.411051,
+   "category": "big-tech",
+   "confidence": "high",
+   "source": "Nominatim (OSM tags it Nextdoor)"
+  },
+  {
+   "name": "Affirm",
+   "address": "650 California St, San Francisco, CA 94108",
+   "lat": 37.792867,
+   "lon": -122.4052192,
+   "category": "fintech",
+   "confidence": "medium",
+   "source": "SEC address (from memory); Nominatim"
+  },
+  {
+   "name": "Webflow",
+   "address": "398 11th St, San Francisco, CA 94103",
+   "lat": 37.77066,
+   "lon": -122.412663,
+   "category": "startup",
+   "confidence": "low",
+   "source": "company HQ (from memory); Nominatim",
+   "note": "Remote-first."
+  },
+  {
+   "name": "Fastly",
+   "address": "475 Brannan St, San Francisco, CA 94107",
+   "lat": 37.7786108,
+   "lon": -122.3950406,
+   "category": "infra",
+   "confidence": "medium",
+   "source": "SEC address (from memory); Nominatim"
+  },
+  {
+   "name": "Unity",
+   "address": "30 3rd St, San Francisco, CA 94103",
+   "lat": 37.7870301,
+   "lon": -122.4033718,
+   "category": "big-tech",
+   "confidence": "medium",
+   "source": "company HQ (from memory); Nominatim"
+  },
+  {
+   "name": "Visa",
+   "address": "300 Toni Stone Crossing, San Francisco, CA 94158 (Mission Rock)",
+   "lat": 37.7757686,
+   "lon": -122.3886743,
+   "category": "fintech",
+   "confidence": "high",
+   "source": "Nominatim (OSM tags it Visa); HQ moved to SF in 2024"
+  },
+  {
+   "name": "Splunk (Cisco)",
+   "address": "270 Brannan St, San Francisco, CA 94107",
+   "lat": 37.7829266,
+   "lon": -122.391561,
+   "category": "infra",
+   "confidence": "medium",
+   "source": "company HQ (from memory); Nominatim",
+   "note": "Acquired by Cisco in 2024."
+  },
+  {
+   "name": "Cruise, former HQ",
+   "address": "1201 Bryant St, San Francisco, CA 94103",
+   "lat": 37.7700194,
+   "lon": -122.4097576,
+   "category": "autonomous-vehicles",
+   "confidence": "high",
+   "source": "Nominatim (OSM tags it Cruise); GM shut down Cruise robotaxi Dec 2024",
+   "note": "Closed or folded into GM. Show as a former site."
+  },
+  {
+   "name": "Ghirardelli",
+   "address": "900 North Point St, San Francisco, CA 94109 (Ghirardelli Square)",
+   "lat": 37.8057888,
+   "lon": -122.4231025,
+   "category": "iconic",
+   "confidence": "high",
+   "source": "landmark; Nominatim",
+   "note": "Corporate HQ is San Leandro. The square is the iconic SF site."
+  },
+  {
+   "name": "Anchor Brewing",
+   "address": "1705 Mariposa St, San Francisco, CA 94107",
+   "lat": 37.7631195,
+   "lon": -122.4008961,
+   "category": "iconic",
+   "confidence": "low",
+   "source": "Nominatim (OSM tags it Anchor Brewing)",
+   "note": "Closed in 2023 and bought by Chobani's founder in 2024 with plans to reopen. 2026 status not verified."
+  },
+  {
+   "name": "Williams-Sonoma",
+   "address": "3250 Van Ness Ave, San Francisco, CA 94109",
+   "lat": 37.8059054,
+   "lon": -122.4247337,
+   "category": "iconic",
+   "confidence": "high",
+   "source": "company HQ; Nominatim"
+  },
+  {
+   "name": "Dolby Laboratories",
+   "address": "1275 Market St, San Francisco, CA 94103",
+   "lat": 37.7775595,
+   "lon": -122.4156499,
+   "category": "iconic-tech",
+   "confidence": "high",
+   "source": "Nominatim (OSM tags it Dolby)"
+  },
+  {
+   "name": "Lucasfilm / ILM",
+   "address": "1 Letterman Dr, San Francisco, CA 94129 (Presidio)",
+   "lat": 37.8003422,
+   "lon": -122.4499797,
+   "category": "iconic",
+   "confidence": "high",
+   "source": "Letterman Digital Arts Center; Nominatim"
+  },
+  {
+   "name": "Atlassian (SF office)",
+   "address": "350 Bush St, San Francisco, CA 94104",
+   "lat": 37.7913454,
+   "lon": -122.4032976,
+   "category": "saas",
+   "confidence": "medium",
+   "source": "Atlassian SF office (from memory); Nominatim"
+  },
+  {
+   "name": "Twitch",
+   "address": "350 Bush St, San Francisco, CA 94104",
+   "lat": 37.7913454,
+   "lon": -122.4032976,
+   "category": "big-tech",
+   "confidence": "medium",
+   "source": "company HQ (from memory); Nominatim",
+   "note": "Same building as Atlassian."
+  },
+  {
+   "name": "Rippling",
+   "address": "55 2nd St, San Francisco, CA 94105",
+   "lat": 37.7888148,
+   "lon": -122.400334,
+   "category": "saas",
+   "confidence": "medium",
+   "source": "company HQ (from memory); Nominatim"
+  },
+  {
+   "name": "Mixpanel",
+   "address": "1 Front St, San Francisco, CA 94111",
+   "lat": 37.7918825,
+   "lon": -122.3988519,
+   "category": "saas",
+   "confidence": "low",
+   "source": "from memory; Nominatim"
+  },
+  {
+   "name": "Amplitude",
+   "address": "201 3rd St, San Francisco, CA 94103",
+   "lat": 37.7850747,
+   "lon": -122.3998734,
+   "category": "saas",
+   "confidence": "medium",
+   "source": "SEC address (from memory); Nominatim"
+  },
+  {
+   "name": "Benchling",
+   "address": "680 Folsom St, San Francisco, CA 94107",
+   "lat": 37.7846082,
+   "lon": -122.3985585,
+   "category": "startup",
+   "confidence": "low",
+   "source": "from memory; Nominatim"
+  },
+  {
+   "name": "Charles Schwab (SF office)",
+   "address": "211 Main St, San Francisco, CA 94105",
+   "lat": 37.7905909,
+   "lon": -122.3928495,
+   "category": "iconic-finance",
+   "confidence": "medium",
+   "source": "Nominatim (OSM tags it Charles Schwab Building)",
+   "note": "HQ moved to Westlake, TX in 2021. The SF building remains."
+  },
+  {
+   "name": "Sierra (AI agents)",
+   "address": "235 2nd St, San Francisco, CA 94105",
+   "lat": 37.7865067,
+   "lon": -122.3970659,
+   "category": "ai",
+   "confidence": "low",
+   "source": "from memory; Nominatim",
+   "note": "Address not verified."
+  },
+  {
+   "name": "Perplexity",
+   "address": "115 Sansome St, San Francisco, CA 94104",
+   "lat": 37.7913203,
+   "lon": -122.4009518,
+   "category": "ai",
+   "confidence": "low",
+   "source": "from memory; Nominatim",
+   "note": "Address not verified. Check before use."
+  },
+  {
+   "name": "Hims & Hers",
+   "address": "2269 Chestnut St, San Francisco, CA 94123",
+   "lat": 37.800173,
+   "lon": -122.440657,
+   "category": "startup",
+   "confidence": "low",
+   "source": "SEC registered address (from memory); Nominatim",
+   "note": "Registered address only (likely a mailbox)."
+  }
+ ],
+ "summary": "The list has 63 SF company sites. Every coordinate came from OpenStreetMap Nominatim (structured street queries, 1.1 s throttle, proper User-Agent) except Wikimedia, which I placed by hand because Nominatim only returned the street centroid. Many OSM results name the tenant (Airbnb, Stripe, Plaid, Nextdoor, Visa, Dolby, Cruise, X, LinkedIn, GitHub), which backs up those addresses.\n\nI checked a few entries against 2026 news. Anthropic is at 500 Howard St (direct lease, about 1M sf nearby; a 300 Howard future HQ is unconfirmed). OpenAI's HQ is 1455 3rd St, and its Mission Bay campus also takes in 1515 3rd St (former Uber), 550 Terry Francois and part of Dropbox's 1800 Owens. Uber's HQ is therefore 1725 3rd St. Databricks planned its HQ move from 160 Spear to One Sansome for H2 2026; the move-in is not confirmed.\n\nEntries flagged as moved or closed:\n- X/Twitter left 1355 Market for Texas in 2024.\n- Block left 1455 Market for Oakland.\n- PG&E left 77 Beale for Oakland in 2022.\n- Schwab's HQ is in Texas; the SF building remains.\n- Cruise shut down in Dec 2024.\n- GitHub closed its offices in 2023.\n- Anchor Brewing closed in 2023 and was sold with plans to reopen; 2026 status not verified.\n- Dropbox, Yelp, Twilio, Instacart and Webflow are remote-first.\n\nStripe's HQ is outside SF in South San Francisco (354 Oyster Point Blvd); the list uses its SF office at 510 Townsend. Low-confidence addresses that need checking before use: Perplexity, Sierra, Mixpanel, Benchling, Mozilla and Hims & Hers. Many addresses beyond the news-checked ones (the 'from memory' sources) come from my own knowledge plus the geocode, not from a 2026 source.\n\nShared buildings: 303 2nd St holds Scale AI, Reddit and DoorDash; 415 Mission holds Salesforce and Slack; 350 Bush holds Atlassian and Twitch. Nearly all sites sit within about 3 km in SoMa, the Financial District and Mission Bay; outliers are the Presidio (ILM), the Marina and Fisherman's Wharf (Ghirardelli, Williams-Sonoma) and Dogpatch. A SoMa/FiDi/Mission Bay box (37.755-37.805 lat, -122.425 to -122.385 lon) covers about 90% of them.\n\nRaw geocode output is in /private/tmp/claude-501/-Users-aleks-Github-caffeinum-agent-office/5ebf74c7-e6d5-456f-a356-c810fb42414e/scratchpad/geo/out.json. No repo files were modified.\n\nSources: https://www.bisnow.com/news/san-francisco/office/anthropic-cements-240k-sf-lease-howard-street-133989, https://therealdeal.com/san-francisco/2026/04/07/anthropic-signs-another-san-francisco-office-lease, https://therealdeal.com/sanfrancisco/2024/09/23/openai-subleases-350k-sf-building-in-sfs-mission-bay, https://hoodline.com/2026/01/openai-poised-to-gobble-up-dropbox-mission-bay-hq-space/, https://www.costar.com/article/715481488/openais-latest-deal-pushes-san-francisco-footprint-past-1-million-square-feet, https://therealdeal.com/san-francisco/2026/03/18/databricks-grows-again-in-downtown-san-francisco, https://clay.com/dossier/scale-ai-headquarters-office-locations"
+}
