@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agent-office",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "OFFICE", "class_name": "Office" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Office"] }],
+  "observability": { "enabled": true }
+  // secrets: ADMIN_KEY (wrangler secret put ADMIN_KEY; locally in .dev.vars)
+}
