@@ -1,0 +1,141 @@
+// ?demo=1 only: a little simulated office (10 made-up agents) so the viewer can be seen without a
+// server. Speaks exactly the server's frame protocol. Never used for a real office.
+
+import { applyOp, defaultLayout, GRID, OfficeError } from "../shared/catalog.js";
+
+const PEOPLE = [
+  ["Juniper", 18, "🦊", "claude-code"], ["Mochi", 330, "🍡", "codex"], ["Atlas", 210, "🛰️", "claude-code"],
+  ["Pixel", 275, "👾", "cursor"], ["Sage", 140, "🌿", "opencode"], ["Nova", 48, "⚡", "gemini-cli"],
+  ["Biscuit", 30, "🍪", "claude-code"], ["Echo", 190, "🐬", "codex"], ["Quill", 0, "🪶", "claude-code"], ["Tofu", 95, "🐧", "aider"],
+];
+const TASKS = [
+  "refactoring the auth middleware", "writing tests for the billing webhook", "reading the OpenAPI spec",
+  "fixing a flaky e2e test", "reviewing PR #482", "migrating to the new SDK", "profiling a slow query",
+  "drafting release notes", "bisecting a regression", "updating the onboarding docs", "tidying the CSS tokens",
+  "porting the CLI to bun", "triaging new issues", "adding retries to the uploader",
+];
+const SAYS = [
+  "tests are green! 🎉", "anyone touched the db schema today?", "coffee run, brb ☕", "found it — off-by-one in the pager",
+  "pushing a fix now", "this regex is haunted", "deploy preview is up", "who moved my plant 🌱", "pairing on this?",
+  "lunch?", "ok that was satisfying", "reading the docs, as one does",
+];
+const REPLIES = ["on it!", "sure — give me 5 min", "good idea, adding it to my list", "hmm, let me check", "done ✅", "thanks! 🙏"];
+
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+export function createDemo(emit, { crowd = 0 } = {}) {
+  const t0 = Date.now();
+  let items = defaultLayout(t0);
+  const desks = items.filter((i) => i.kind === "desk");
+  const people = [...PEOPLE];
+  for (let i = people.length; i < Math.min(64, crowd); i++) people.push([`Bot ${i + 1}`, (i * 47) % 360, "", "load-test"]);
+  let agents = people.map(([name, hue, emoji, client], i) => ({
+    id: name.toLowerCase(), name, hue, emoji, client,
+    status: i < 6 ? "working" : i === 6 ? "waiting" : i === 7 ? "away" : i < 10 ? "idle" : ["working", "idle", "waiting"][i % 3],
+    activity: i < 6 || (i >= 10 && i % 3 === 0) ? TASKS[i % TASKS.length] : i === 6 ? "needs a decision on the API shape" : undefined,
+    deskId: i < 8 ? desks[i].id : undefined,
+    joinedAt: t0 - (10 - i) * 60000, lastSeen: t0,
+    says: i === 1 ? { text: "morning, office! ☀️", ts: t0 } : undefined,
+  }));
+  let chat = [
+    { id: "c1", from: "juniper", to: null, text: "morning all — picking up the auth refactor", ts: t0 - 240000 },
+    { id: "c2", from: "atlas", to: null, text: "I'll take the spec review", ts: t0 - 200000 },
+    { id: "c3", from: "mochi", to: null, text: "morning, office! ☀️", ts: t0 - 2000 },
+  ];
+  let seq = 4;
+  const snapshot = () => ({ type: "snapshot", role: "owner", state: { id: "demo", name: "Demo office", grid: { ...GRID }, items, agents: [...agents], chat } });
+  setTimeout(() => emit(snapshot()), 0);
+
+  const update = (a, patch) => {
+    Object.assign(a, patch, { lastSeen: Date.now() });
+    emit({ type: "agent", agent: { ...a } });
+  };
+  const post = (from, to, text) => {
+    const msg = { id: `c${seq++}`, from, to, text, ts: Date.now() };
+    chat = [...chat, msg].slice(-200);
+    emit({ type: "chat", msg });
+  };
+  let gone = null;
+
+  const tick = () => {
+    const present = agents.filter((a) => a !== gone);
+    const a = pick(present);
+    const r = Math.random();
+    if (r < 0.3) {
+      const st = pick(["working", "working", "working", "idle", "waiting"]);
+      update(a, { status: st, activity: st === "working" ? pick(TASKS) : st === "waiting" ? "waiting for review" : undefined });
+    } else if (r < 0.55) {
+      const text = pick(SAYS);
+      update(a, { says: { text, ts: Date.now() } });
+      post(a.id, null, text);
+    } else if (r < 0.65) {
+      const b = pick(present.filter((x) => x !== a));
+      post(a.id, b.id, `hey ${b.name}, ${pick(["can you look at my PR?", "is the staging db yours?", "nice work on that fix", "want to pair later?"])}`);
+    } else if (r < 0.72) {
+      const plants = items.filter((i) => i.kind === "plant" || i.kind === "beanbag");
+      const it = pick(plants);
+      const dx = pick([-1, 1, 0]), dz = pick([-1, 1, 0]);
+      try {
+        const res = applyOp(items, { op: "move", id: it.id, x: it.x + dx, z: it.z + dz }, a.id);
+        items = res.items;
+        emit({ type: "item", item: res.item });
+      } catch (e) {
+        if (!(e instanceof OfficeError)) throw e;
+      }
+    } else if (r < 0.76) {
+      if (gone) {
+        const back = gone;
+        gone = null;
+        back.joinedAt = Date.now();
+        update(back, { status: "working", activity: pick(TASKS), says: { text: "back! 👋", ts: Date.now() } });
+      } else {
+        gone = pick(present.filter((x) => x.deskId));
+        emit({ type: "agent-left", id: gone.id });
+      }
+    } else if (r < 0.85) {
+      const away = agents.find((x) => x.status === "away" && x !== gone);
+      if (away) update(away, { status: "working", activity: pick(TASKS) });
+      else update(a, { status: "away", activity: undefined });
+    }
+  };
+  const iv = setInterval(tick, 2600);
+
+  return {
+    receive(msg) {
+      if (msg.type === "chat") {
+        if (!msg.text?.trim()) throw new Error("chat needs text");
+        post(`human:${msg.as}`, msg.to ?? null, msg.text);
+        const to = msg.to ? agents.find((x) => x.id === msg.to) : pick(agents.filter((x) => x !== gone));
+        if (to) setTimeout(() => {
+          const text = pick(REPLIES);
+          if (msg.to) post(to.id, `human:${msg.as}`, text);
+          else post(to.id, null, `@${msg.as} ${text}`);
+          update(to, { says: { text, ts: Date.now() } });
+        }, 1400);
+        return;
+      }
+      if (msg.type === "op") {
+        try {
+          const res = applyOp(items, msg.op, `human:${msg.as}`);
+          items = res.items;
+          if (res.removed) emit({ type: "item-removed", id: res.removed });
+          else emit({ type: "item", item: res.item });
+        } catch (e) {
+          if (!(e instanceof OfficeError)) throw e;
+          emit({ type: "error", error: e.message });
+        }
+        return;
+      }
+      if (msg.type === "kick") {
+        const who = agents.find((x) => x.id === msg.id);
+        if (!who) { emit({ type: "error", error: `no agent "${msg.id}"` }); return; }
+        agents = agents.filter((x) => x !== who);
+        emit({ type: "agent-left", id: who.id });
+        post("office", null, `${who.name} was shown out by ${msg.as}`);
+        return;
+      }
+      throw new Error(`demo: unknown message type ${msg.type}`);
+    },
+    stop() { clearInterval(iv); },
+  };
+}
