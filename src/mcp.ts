@@ -11,6 +11,9 @@ import type { CallCtx, ToolHost } from "./office";
 const READ_ONLY = new Set<ToolName>(["office_look", "office_kinds", "office_chat_read", "office_theme_get"]);
 const DESTRUCTIVE = new Set<ToolName>(["office_edit", "office_remove", "office_leave", "office_delete_kind", "office_delete_asset"]);
 export const SERVER_VERSION = "0.1.0";
+/** Claude Code channels (research preview): with this capability, notifications/claude/channel on the GET stream land in the session. */
+export const CHANNEL_CAPABILITY = "claude/channel";
+export const CHANNEL_METHOD = "notifications/claude/channel";
 
 function isInitialize(body: unknown): boolean {
   const msgs = Array.isArray(body) ? body : [body];
@@ -47,7 +50,11 @@ export function buildServer(host: ToolHost, ctx: CallCtx, design: boolean): McpS
     );
   }
   if (design) registerDesignerPrompt(server);
-  server.server.registerCapabilities({ tools: { listChanged: false }, ...(design ? { prompts: { listChanged: false } } : {}) }); // no stream to announce changes on
+  server.server.registerCapabilities({
+    tools: { listChanged: false }, // the GET stream carries chat pushes only, never list changes
+    ...(design ? { prompts: { listChanged: false } } : {}),
+    experimental: { [CHANNEL_CAPABILITY]: {} },
+  });
   return server;
 }
 
@@ -65,7 +72,10 @@ function registerDesignerPrompt(server: McpServer) {
 export async function handleMcp(req: Request, host: ToolHost, base: CallCtx): Promise<Response> {
   const sessionHeader = req.headers.get("mcp-session-id");
   if (req.method === "GET") {
-    return errorResponse(405, "this MCP server has no standalone SSE stream; POST JSON-RPC to /mcp", {});
+    // the standalone server→client stream: chat for this session's agent, as Claude Code channel notifications
+    if (!sessionHeader) return errorResponse(400, "GET /mcp opens the event stream of a session: send the Mcp-Session-Id from initialize");
+    if (!(await host.hasSession(sessionHeader))) return errorResponse(404, "unknown or expired Mcp-Session-Id: initialize a new session");
+    return host.openStream(sessionHeader);
   }
   if (req.method === "DELETE") {
     if (!sessionHeader) return errorResponse(400, "DELETE /mcp needs an Mcp-Session-Id header");

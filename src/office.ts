@@ -11,7 +11,7 @@ import {
 } from "./auth";
 import { CORS_HEADERS, errorResponse, HttpError, json, readJson } from "./http";
 import { CHAT_WAIT_DEFAULT_SEC, isMergedTool, MERGED_ROUTES, NAME_MAX, SPOOF_LINE_RE, parseArgs, parseOwnerFrame, ToolError, type MergedTool, type Status, type ToolArgs, type ToolName, ACTIVITY_MAX } from "./tools";
-import { handleMcp } from "./mcp";
+import { CHANNEL_METHOD, handleMcp } from "./mcp";
 import { handleRest } from "./api";
 import { registryStub } from "./registry";
 
@@ -41,6 +41,11 @@ export const MAX_MCP_SESSIONS = 2000;
 export const MCP_SESSION_TTL_MS = 7 * 24 * 60 * 60_000;
 /** A same-name+client agent counts as "still at work" (and is not reclaimed by a new join) while seen this recently, unless its MCP sessions are all gone. */
 export const RECLAIM_AFTER_MS = 20_000;
+/** Comment line sent on idle MCP event streams so proxies keep them open. */
+export const STREAM_KEEPALIVE_MS = 25_000;
+/** Open GET /mcp streams per session (a reconnecting client replaces its oldest) and per office. */
+export const MAX_STREAMS_PER_SESSION = 2;
+export const MAX_STREAMS = 500;
 /** Storage schema: 1 = meta/items/agents/chat only; 2 = + theme, custom kinds ("kind:<slug>"), assets table, designer. */
 export const SCHEMA_VERSION = 2;
 export const UPLOAD_WINDOW_MS = 60_000;
@@ -159,6 +164,14 @@ export interface ToolHost {
   startSession(sessionId: string): Promise<void>;
   hasSession(sessionId: string): Promise<boolean>;
   endSession(sessionId: string): Promise<void>;
+  /** GET /mcp: an SSE stream for a known session; chat for its agent is pushed as channel notifications. */
+  openStream(sessionId: string): Promise<Response>;
+}
+
+/** One open GET /mcp event stream. */
+interface McpStream {
+  writer: WritableStreamDefaultWriter<Uint8Array>;
+  keepalive: ReturnType<typeof setInterval>;
 }
 
 type Frame =
@@ -202,6 +215,14 @@ function slug(name: string): string {
   return s || "agent";
 }
 
+/** True when `text` @-mentions `name` (case-insensitive, not as part of a longer word). */
+function mentions(text: string, name: string): boolean {
+  const at = text.toLowerCase().indexOf(`@${name.toLowerCase()}`);
+  if (at < 0) return false;
+  const after = text.charAt(at + name.length + 1);
+  return after === "" || !/[\p{L}\p{N}_]/u.test(after);
+}
+
 function shortId(): string {
   return randomSecret().replace(/[^a-z0-9]/gi, "").slice(0, 6).toLowerCase();
 }
@@ -216,6 +237,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
   private hits = new Map<string, number[]>();
   private wsWarned = new Map<string, number>();
   private mcpSessions = new Map<string, number>();
+  /** Open GET /mcp event streams by session hash (not persisted: they die with the instance). */
+  private streams = new Map<string, McpStream[]>();
   /** One pending office_chat wait per agent id. */
   private waiters = new Map<string, (why: WakeReason) => void>();
   private alarmAt: number | null = null;
@@ -514,6 +537,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.wsWarned.clear();
     this.mcpSessions.clear();
     for (const wake of [...this.waiters.values()]) wake("gone");
+    for (const h of [...this.streams.keys()]) this.closeStreams(h);
     this.alarmAt = null;
     this.theme = validateTheme(DEFAULT_THEME);
     this.customKinds = {};
@@ -586,7 +610,10 @@ export class Office extends DurableObject<Env> implements ToolHost {
     if (this.designer === a.id) await this.setDesigner(null);
     this.agents.delete(a.id);
     this.byToken.delete(a.tokenHash);
-    for (const s of a.sessions) this.sessions.delete(s);
+    for (const s of a.sessions) {
+      this.sessions.delete(s);
+      this.closeStreams(s);
+    }
     this.waiters.get(a.id)?.("gone");
     await this.ctx.storage.delete(`agent:${a.id}`);
     this.broadcast({ type: "agent-left", id: a.id });
@@ -599,6 +626,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     await this.ctx.storage.put("chat", this.chat);
     this.broadcast({ type: "chat", msg });
     for (const [id, wake] of [...this.waiters]) if (msg.from !== id && (msg.to === null || msg.to === id)) wake("message");
+    this.pushChat(msg);
     return msg;
   }
 
@@ -744,6 +772,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
   async endSession(sessionId: string): Promise<void> {
     const h = await sha256hex(sessionId);
     if (this.mcpSessions.delete(h)) await this.ctx.storage.delete(`mcps:${h}`);
+    this.closeStreams(h);
     const id = this.sessions.get(h);
     if (!id) return;
     this.sessions.delete(h);
@@ -751,6 +780,60 @@ export class Office extends DurableObject<Env> implements ToolHost {
     if (!a) return;
     a.sessions = a.sessions.filter((s) => s !== h);
     await this.saveAgent(a, false);
+  }
+
+  async openStream(sessionId: string): Promise<Response> {
+    const h = await sha256hex(sessionId);
+    const total = [...this.streams.values()].reduce((n, l) => n + l.length, 0);
+    if (total >= MAX_STREAMS) return errorResponse(503, `too many open event streams (${MAX_STREAMS}); POST still works`);
+    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+    const writer = writable.getWriter();
+    const stream: McpStream = {
+      writer,
+      keepalive: setInterval(() => this.writeStream(h, stream, ": keepalive\n\n"), STREAM_KEEPALIVE_MS),
+    };
+    const list = this.streams.get(h) ?? [];
+    while (list.length >= MAX_STREAMS_PER_SESSION) this.endStream(h, list[0]!);
+    this.streams.set(h, [...(this.streams.get(h) ?? []), stream]);
+    this.writeStream(h, stream, ": agent-office event stream\n\n");
+    return new Response(readable, {
+      status: 200,
+      headers: { "content-type": "text/event-stream", "cache-control": "no-cache, no-transform", "x-accel-buffering": "no", ...CORS_HEADERS },
+    });
+  }
+
+  private writeStream(h: string, stream: McpStream, text: string): void {
+    stream.writer.write(new TextEncoder().encode(text)).catch(() => this.endStream(h, stream)); // the client went away
+  }
+
+  private endStream(h: string, stream: McpStream): void {
+    clearInterval(stream.keepalive);
+    const left = (this.streams.get(h) ?? []).filter((s) => s !== stream);
+    if (left.length) this.streams.set(h, left);
+    else this.streams.delete(h);
+    stream.writer.close().catch(() => {
+      // already errored or closed
+    });
+  }
+
+  private closeStreams(h: string): void {
+    for (const s of this.streams.get(h) ?? []) this.endStream(h, s);
+  }
+
+  /**
+   * Pushes a chat message to the event streams of each agent it is for: a DM to it, a room message from a human, or a room
+   * message that @-mentions its name. Plain room chatter between agents is not pushed. Pushed messages stay unread.
+   */
+  private pushChat(msg: ChatMsg): void {
+    if (msg.from === "office" || this.streams.size === 0) return;
+    const fromName = this.agents.get(msg.from)?.name ?? (msg.from.startsWith("human:") ? msg.from.slice(6) : msg.from);
+    for (const a of this.agents.values()) {
+      if (a.id === msg.from) continue;
+      const kind = msg.to === a.id ? "dm" : msg.to !== null ? null : mentions(msg.text, a.name) ? "mention" : msg.from.startsWith("human:") ? "room" : null;
+      if (!kind) continue;
+      const frame = JSON.stringify({ jsonrpc: "2.0", method: CHANNEL_METHOD, params: { content: msg.text, meta: { from: msg.from, from_name: fromName, kind, msg_id: msg.id } } });
+      for (const h of a.sessions) for (const s of this.streams.get(h) ?? []) this.writeStream(h, s, `event: message\ndata: ${frame}\n\n`);
+    }
   }
 
   /** office_edit / office_chat: pick the single-purpose tool for `op`, pass it only the args that op takes. */
@@ -1043,7 +1126,10 @@ export class Office extends DurableObject<Env> implements ToolHost {
   }
 
   private detachSessions(a: AgentRecord) {
-    for (const h of a.sessions) this.sessions.delete(h);
+    for (const h of a.sessions) {
+      this.sessions.delete(h);
+      this.closeStreams(h);
+    }
     a.sessions = [];
   }
 
