@@ -11,6 +11,7 @@ import { CORS_HEADERS, errorResponse, HttpError, json, readJson } from "./http";
 import { isMergedTool, MERGED_ROUTES, NAME_MAX, parseArgs, parseOwnerFrame, ToolError, type MergedTool, type Status, type ToolArgs, type ToolName, ACTIVITY_MAX } from "./tools";
 import { handleMcp } from "./mcp";
 import { handleRest } from "./api";
+import { registryStub } from "./registry";
 
 export const MAX_CHAT = 200;
 /** The join and view keys in plaintext, so the owner's viewer can share them (connect guide, copy links). */
@@ -37,6 +38,14 @@ export const RECLAIM_AFTER_MS = 90_000;
 export const SCHEMA_VERSION = 2;
 export const UPLOAD_WINDOW_MS = 60_000;
 export const UPLOAD_RATE_MAX = 10;
+/** An office no agent ever joined expires after this long without owner activity. */
+export const UNUSED_EXPIRE_MS = 7 * 24 * 60 * 60_000;
+/** Any office expires after this long without activity (any keyed request or owner socket frame). */
+export const IDLE_EXPIRE_MS = 90 * 24 * 60 * 60_000;
+/** Activity is written to storage and the registry at most this often. */
+export const ACTIVITY_PERSIST_MS = 10 * 60_000;
+/** Close code viewers get when the office is deleted (by its owner, an admin, or expiry). */
+export const WS_CLOSE_DELETED = 4404;
 const ASSETS_DDL =
   "CREATE TABLE IF NOT EXISTS assets (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, w INTEGER NOT NULL, h INTEGER NOT NULL, size INTEGER NOT NULL, by TEXT NOT NULL, at INTEGER NOT NULL, bytes BLOB NOT NULL)";
 
@@ -95,6 +104,18 @@ export interface OfficeState {
   assets: AssetMeta[];
   /** Agent id the owner marked as the office's designer, or null. */
   designer: string | null;
+}
+
+/**
+ * What expiry is judged on. Offices from before this record existed get it inferred on load from what they hold
+ * (agents, chat, item timestamps) with graceUntil = load time + UNUSED_EXPIRE_MS, so none expires on first open.
+ */
+export interface Activity {
+  lastActiveAt: number;
+  lastOwnerAt: number;
+  joined: boolean;
+  /** Expiry never happens before this. */
+  graceUntil: number;
 }
 
 interface Meta {
@@ -178,6 +199,11 @@ export class Office extends DurableObject<Env> implements ToolHost {
   private customKinds: Record<string, CustomKind> = {};
   private assets = new Map<string, AssetMeta>();
   private designer: string | null = null;
+  private activity: Activity | null = null;
+  private activitySavedAt = 0;
+  private registered = false;
+  /** Created with the ADMIN_KEY; null for offices created before this was recorded. */
+  private admin: boolean | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -207,6 +233,26 @@ export class Office extends DurableObject<Env> implements ToolHost {
       "SELECT id, name, type, w, h, size, by, at FROM assets ORDER BY at",
     );
     for (const r of rows) this.assets.set(r.id, { ...r, url: this.assetUrl(r.id) });
+    this.registered = (await ctx.storage.get<boolean>("registered")) ?? false;
+    this.admin = (await ctx.storage.get<boolean>("admin")) ?? null;
+    this.activity = (await ctx.storage.get<Activity>("activity")) ?? null;
+    if (!this.activity) {
+      this.activity = this.inferActivity();
+      await ctx.storage.put("activity", this.activity);
+    }
+    await this.scheduleAlarm();
+  }
+
+  /** Best evidence for an office saved before activity was tracked: its newest agent, chat or item timestamp. */
+  private inferActivity(): Activity {
+    const meta = this.mustMeta();
+    const items = [...this.items.values()];
+    const last = Math.max(meta.createdAt, ...this.chat.map((m) => m.ts), ...[...this.agents.values()].map((a) => a.lastSeen), ...items.map((it) => it.at));
+    const joined =
+      this.agents.size > 0 ||
+      this.chat.some((m) => !m.from.startsWith("human:") && m.from !== "office") ||
+      items.some((it) => it.by !== "default" && !it.by.startsWith("human:"));
+    return { lastActiveAt: last, lastOwnerAt: last, joined, graceUntil: Date.now() + UNUSED_EXPIRE_MS };
   }
 
   /** Brings a stored office up to SCHEMA_VERSION. v1 offices get the default theme and an empty assets table. */
@@ -240,13 +286,22 @@ export class Office extends DurableObject<Env> implements ToolHost {
       const url = new URL(req.url);
       if (url.pathname === "/internal/init") return await this.init(req);
       if (!this.meta) return errorResponse(404, "no such office");
+      if (url.pathname === "/internal/admin/delete") return json(200, await this.wipe("this office was deleted by an admin"));
+      await this.ensureRegistered();
+      if (url.pathname === "/internal/admin/info") return json(200, this.adminInfo());
       const asset = /^\/o\/[^/]+\/assets\/([^/]+)$/.exec(url.pathname);
       if (asset) return this.serveAsset(req, asset[1]!);
       const ip = req.headers.get("cf-connecting-ip") ?? "local";
       this.rateLimit(`ip:${ip}`, IP_RATE_MAX);
       const role = await roleOfKey(keyFromRequest(req), this.meta.keys);
       if (!role) return errorResponse(401, "missing or wrong key for this office (Authorization: Bearer <key> or ?key=)");
+      await this.markActive(role === "owner");
       if (/^\/o\/[^/]+\/ws$/.test(url.pathname)) return this.acceptViewer(req, role);
+      if (/^\/api\/o\/[^/]+$/.test(url.pathname)) {
+        if (req.method !== "DELETE") return errorResponse(405, "DELETE /api/o/:office (ownerKey) deletes the office");
+        if (role !== "owner") return errorResponse(403, "deleting the office needs the ownerKey");
+        return json(200, await this.wipe("this office was deleted by its owner"));
+      }
       const base = { role, token: req.headers.get("x-agent-token"), sessionId: null, ip, origin: url.origin } satisfies CallCtx;
       if (url.pathname === "/mcp") {
         if (role === "view") return errorResponse(403, "a viewKey is read-only; MCP needs the joinKey");
@@ -285,18 +340,135 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   private async init(req: Request): Promise<Response> {
     if (this.meta) return errorResponse(409, "office already exists");
-    const body = (await readJson(req)) as { id: string; name: string; keys: KeyHashes; joinKey: string; viewKey: string };
+    const body = (await readJson(req)) as { id: string; name: string; keys: KeyHashes; joinKey: string; viewKey: string; admin: boolean };
+    if (typeof body.admin !== "boolean") return errorResponse(400, "init needs admin: boolean");
     if (typeof body.joinKey !== "string" || (await sha256hex(body.joinKey)) !== body.keys.join) return errorResponse(400, "init needs the joinKey matching keys.join");
     if (typeof body.viewKey !== "string" || (await sha256hex(body.viewKey)) !== body.keys.view) return errorResponse(400, "init needs the viewKey matching keys.view");
     const meta: Meta = { id: body.id, name: body.name, grid: { ...GRID }, keys: body.keys, createdAt: Date.now() };
     const items = defaultLayout(meta.createdAt);
-    const puts: Record<string, unknown> = { meta, schema: SCHEMA_VERSION, theme: DEFAULT_THEME, [JOIN_KEY_SLOT]: body.joinKey, [VIEW_KEY_SLOT]: body.viewKey };
+    const activity: Activity = { lastActiveAt: meta.createdAt, lastOwnerAt: meta.createdAt, joined: false, graceUntil: meta.createdAt };
+    const puts: Record<string, unknown> = {
+      meta, schema: SCHEMA_VERSION, theme: DEFAULT_THEME, [JOIN_KEY_SLOT]: body.joinKey, [VIEW_KEY_SLOT]: body.viewKey, admin: body.admin, activity,
+    };
     this.ctx.storage.sql.exec(ASSETS_DDL);
     for (const it of items) puts[`item:${it.id}`] = it;
     await this.ctx.storage.put(puts);
     this.meta = meta;
+    this.admin = body.admin;
+    this.activity = activity;
+    this.activitySavedAt = meta.createdAt;
     for (const it of items) this.items.set(it.id, it);
+    await this.ensureRegistered();
+    await this.scheduleAlarm();
     return json(201, { id: meta.id, name: meta.name });
+  }
+
+  // ---------- registry, activity, deletion ----------
+
+  private mustActivity(): Activity {
+    if (!this.activity) throw new Error(`office ${this.meta?.id ?? "?"}: activity not loaded`);
+    return this.activity;
+  }
+
+  private async syncRegistry(): Promise<void> {
+    const meta = this.mustMeta();
+    await registryStub(this.env).upsert({
+      id: meta.id, name: meta.name, createdAt: meta.createdAt, lastActiveAt: this.mustActivity().lastActiveAt, agentCount: this.agents.size, admin: this.admin,
+    });
+  }
+
+  /** First fetch after a cold start: make sure the registry knows this office (backfills offices older than the registry). */
+  private async ensureRegistered(): Promise<void> {
+    if (this.registered) return;
+    try {
+      await this.syncRegistry();
+    } catch (e) {
+      // bookkeeping must not take the office down; it retries on the next fetch
+      console.error(`office ${this.mustMeta().id}: registry upsert failed`, e);
+      return;
+    }
+    this.registered = true;
+    await this.ctx.storage.put("registered", true);
+  }
+
+  private async markActive(owner: boolean): Promise<void> {
+    const a = this.mustActivity();
+    const now = Date.now();
+    a.lastActiveAt = now;
+    if (owner) a.lastOwnerAt = now;
+    if (now - this.activitySavedAt < ACTIVITY_PERSIST_MS) return;
+    await this.saveActivity();
+  }
+
+  private async saveActivity(): Promise<void> {
+    this.activitySavedAt = Date.now();
+    await this.ctx.storage.put("activity", this.mustActivity());
+    try {
+      await this.syncRegistry();
+    } catch (e) {
+      console.error(`office ${this.mustMeta().id}: registry upsert failed`, e);
+    }
+  }
+
+  /** When the office expires by itself, or null if it holds nothing to judge (not created). */
+  private expiresAt(): number | null {
+    if (!this.meta || !this.activity) return null;
+    const a = this.activity;
+    const idle = a.lastActiveAt + IDLE_EXPIRE_MS;
+    const due = a.joined ? idle : Math.min(idle, a.lastOwnerAt + UNUSED_EXPIRE_MS);
+    return Math.max(due, a.graceUntil);
+  }
+
+  private expiryReason(now: number): string | null {
+    const at = this.expiresAt();
+    if (at === null || now < at) return null;
+    return this.mustActivity().joined || now - this.mustActivity().lastActiveAt >= IDLE_EXPIRE_MS
+      ? `this office expired: no activity for ${IDLE_EXPIRE_MS / 86_400_000} days`
+      : `this office expired: no agent ever joined and the owner was away for ${UNUSED_EXPIRE_MS / 86_400_000} days`;
+  }
+
+  private adminInfo() {
+    const meta = this.mustMeta();
+    return {
+      id: meta.id, name: meta.name, createdAt: meta.createdAt, admin: this.admin, agentCount: this.agents.size, itemCount: this.items.size,
+      assetCount: this.assets.size, viewers: this.ctx.getWebSockets().length, ...this.mustActivity(), expiresAt: this.expiresAt(),
+    };
+  }
+
+  /** Deletes the office for good: registry row, viewer sockets, alarm, every stored key and the assets table. */
+  private async wipe(reason: string): Promise<{ ok: true; deleted: string }> {
+    const id = this.mustMeta().id;
+    await registryStub(this.env).remove(id);
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.close(WS_CLOSE_DELETED, reason);
+      } catch {
+        // already closed
+      }
+    }
+    await this.ctx.storage.deleteAlarm();
+    this.ctx.storage.sql.exec("DROP TABLE IF EXISTS assets");
+    await this.ctx.storage.deleteAll();
+    this.meta = null;
+    this.items.clear();
+    this.agents.clear();
+    this.chat = [];
+    this.byToken.clear();
+    this.sessions.clear();
+    this.hits.clear();
+    this.wsWarned.clear();
+    this.mcpSessions.clear();
+    this.alarmAt = null;
+    this.theme = validateTheme(DEFAULT_THEME);
+    this.customKinds = {};
+    this.assets.clear();
+    this.designer = null;
+    this.activity = null;
+    this.activitySavedAt = 0;
+    this.registered = false;
+    this.admin = null;
+    console.log(`office ${id}: deleted (${reason})`);
+    return { ok: true, deleted: id };
   }
 
   private rateLimit(bucket: string, max: number, windowMs = RATE_WINDOW_MS): void {
@@ -414,8 +586,9 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   // ---------- presence ----------
 
+  /** One alarm serves presence (away/remove) and expiry: it is set to whichever is due first. */
   private async scheduleAlarm(): Promise<void> {
-    let next: number | null = null;
+    let next = this.expiresAt();
     for (const a of this.agents.values()) {
       const due = a.status === "away" ? a.lastSeen + REMOVE_MS : a.lastSeen + AWAY_MS;
       if (next === null || due < next) next = due;
@@ -428,7 +601,13 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   override async alarm(): Promise<void> {
     this.alarmAt = null;
+    if (!this.meta) return;
     const now = Date.now();
+    const expired = this.expiryReason(now);
+    if (expired) {
+      await this.wipe(expired);
+      return;
+    }
     for (const a of [...this.agents.values()]) {
       const idle = now - a.lastSeen;
       if (idle >= REMOVE_MS) await this.removeAgent(a);
@@ -724,6 +903,10 @@ export class Office extends DurableObject<Env> implements ToolHost {
     }
     this.agents.set(a.id, a);
     this.byToken.set(tokenHash, a.id);
+    if (!this.mustActivity().joined) {
+      this.mustActivity().joined = true;
+      await this.saveActivity();
+    }
     if (!a.deskId || !this.items.has(a.deskId)) await this.assignDesk(a);
     await this.saveAgent(a);
     await this.scheduleAlarm();
@@ -1070,6 +1253,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       }
       if (frame.type === "ping") return;
       if (role !== "owner") throw new ToolError(403, "read-only view: chat and edits need the ownerKey");
+      await this.markActive(true);
       this.rateLimit("owner-ws", RATE_MAX);
       const f = parseOwnerFrame(frame);
       const as = f.as ?? "owner";

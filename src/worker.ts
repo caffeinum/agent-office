@@ -1,10 +1,11 @@
-// Edge router: admin office creation, /mcp, the REST mirror and the viewer socket go to the office's Durable
+// Edge router: office creation and admin (list, delete), /mcp, the REST mirror and the viewer socket go to the office's Durable
 // Object; everything else is the static viewer (Workers assets, SPA fallback for /o/:office).
 import { keyFromRequest, OFFICE_ID_RE, officeOfKey } from "./auth";
-import { handleCreateOffice } from "./api";
+import { handleAdmin, handleCreateOffice } from "./api";
 import { CORS_HEADERS, errorResponse, HttpError, json, withCors } from "./http";
 
 export { Office } from "./office";
+export { Registry } from "./registry";
 
 function officeStub(env: Env, id: string): DurableObjectStub {
   return env.OFFICE.get(env.OFFICE.idFromName(id));
@@ -18,16 +19,14 @@ async function route(req: Request, env: Env): Promise<Response> {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
   if (path === "/health") return json(200, { ok: true });
-  if (path === "/api/offices") {
-    if (req.method !== "POST") return errorResponse(405, "POST /api/offices {name} to create an office");
-    return handleCreateOffice(req, env);
-  }
+  if (path === "/api/offices" && req.method === "POST") return handleCreateOffice(req, env);
+  if (path === "/api/offices" || path.startsWith("/api/offices/")) return withCors(await handleAdmin(req, env, path.slice("/api/offices/".length)));
   if (path === "/mcp") {
     const office = officeOfKey(keyFromRequest(req));
     if (!office) return errorResponse(401, "MCP needs Authorization: Bearer <joinKey> (or ?key=<joinKey>)");
     return withCors(await officeStub(env, office).fetch(req));
   }
-  const api = /^\/api\/o\/([^/]+)\/[a-z_-]+$/.exec(path);
+  const api = /^\/api\/o\/([^/]+)(?:\/[a-z_-]+)?$/.exec(path);
   if (api) {
     const office = api[1]!;
     if (!OFFICE_ID_RE.test(office)) return errorResponse(404, "no such office");

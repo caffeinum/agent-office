@@ -1,5 +1,6 @@
-// REST: office creation (admin) and the mirror of every MCP tool under /api/o/:office/:tool.
-import { newOfficeId, newOfficeKey, safeEqual, sha256hex } from "./auth";
+// REST: office creation, admin office management and the mirror of every MCP tool under /api/o/:office/:tool.
+import { newOfficeId, newOfficeKey, OFFICE_ID_RE, safeEqual, sha256hex } from "./auth";
+import { registryStub } from "./registry";
 import { BIG_BODY_MAX, errorResponse, json, readBytes, readJson } from "./http";
 import { resolveToolName, TOOL_NAMES, ToolError, type ToolName } from "./tools";
 import { ASSET_BYTES_MAX } from "./images";
@@ -39,24 +40,32 @@ export async function handleRest(req: Request, host: ToolHost, ctx: CallCtx, raw
   return json(200, await host.callTool(name, args, ctx));
 }
 
+/** Checks Authorization: Bearer <ADMIN_KEY>; returns the refusal, or null when the caller is the admin. */
+export async function refuseNonAdmin(req: Request, env: Env, what: string): Promise<Response | null> {
+  if (!env.ADMIN_KEY) return errorResponse(503, `${what} is disabled: the ADMIN_KEY secret is not set`);
+  if (env.ADMIN_KEY.length < ADMIN_KEY_MIN) return errorResponse(503, `${what} is disabled: ADMIN_KEY must be at least ${ADMIN_KEY_MIN} chars`);
+  const given = /^Bearer\s+(\S+)$/i.exec((req.headers.get("authorization") ?? "").trim())?.[1];
+  if (!given || !(await safeEqual(given, env.ADMIN_KEY))) return errorResponse(401, `${what} needs Authorization: Bearer <ADMIN_KEY> (missing or wrong)`);
+  return null;
+}
+
 /** Anyone may create an office (rate-limited per IP); a request that sends an Authorization header must carry the ADMIN_KEY and skips the limit. */
 async function authorizeCreate(req: Request, env: Env): Promise<Response | null> {
-  const auth = req.headers.get("authorization");
-  if (auth === null) {
+  if (req.headers.get("authorization") === null) {
     const ip = req.headers.get("cf-connecting-ip") ?? "local";
     const { success } = await env.CREATE_LIMIT.limit({ key: `create:${ip}` });
     return success ? null : errorResponse(429, "too many offices created from this address — try again in a minute");
   }
-  if (!env.ADMIN_KEY) return errorResponse(503, "admin office creation is disabled: the ADMIN_KEY secret is not set (omit Authorization to create a public office)");
-  if (env.ADMIN_KEY.length < ADMIN_KEY_MIN) return errorResponse(503, `admin office creation is disabled: ADMIN_KEY must be at least ${ADMIN_KEY_MIN} chars`);
-  const given = /^Bearer\s+(\S+)$/i.exec(auth.trim())?.[1];
-  if (!given || !(await safeEqual(given, env.ADMIN_KEY))) return errorResponse(401, "wrong admin key (Authorization: Bearer <ADMIN_KEY>, or omit it to create a public office)");
-  return null;
+  const refused = await refuseNonAdmin(req, env, "admin office creation");
+  if (!refused) return null;
+  const body = (await refused.json()) as { error: string };
+  return errorResponse(refused.status, `${body.error} — or omit Authorization to create a public office`);
 }
 
 export async function handleCreateOffice(req: Request, env: Env): Promise<Response> {
   const denied = await authorizeCreate(req, env);
   if (denied) return denied;
+  const admin = req.headers.get("authorization") !== null;
   const body = ((await readJson(req)) ?? {}) as { name?: unknown };
   const name = body.name === undefined ? "Agent Office" : body.name;
   if (typeof name !== "string" || !name.trim() || name.length > 64) return errorResponse(400, "name must be a non-empty string ≤64 chars");
@@ -69,7 +78,7 @@ export async function handleCreateOffice(req: Request, env: Env): Promise<Respon
   const res = await stub.fetch("https://office/internal/init", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id, name: name.trim(), keys, joinKey, viewKey }),
+    body: JSON.stringify({ id, name: name.trim(), keys, joinKey, viewKey, admin }),
   });
   if (!res.ok) return errorResponse(500, `office init failed: ${res.status} ${await res.text()}`);
   const origin = new URL(req.url).origin;
@@ -84,4 +93,43 @@ export async function handleCreateOffice(req: Request, env: Env): Promise<Respon
     viewUrl: `${origin}/o/${id}#k=${encodeURIComponent(viewKey)}`,
     ownerUrl: `${origin}/o/${id}#k=${encodeURIComponent(ownerKey)}`,
   });
+}
+
+const DO_ID_RE = /^[0-9a-f]{64}$/;
+
+/** Admin office management: GET /api/offices (registry), DELETE /api/offices/:id, GET|DELETE /api/offices/do/:doId. */
+export async function handleAdmin(req: Request, env: Env, rest: string): Promise<Response> {
+  const refused = await refuseNonAdmin(req, env, "office admin");
+  if (refused) return refused;
+  if (rest === "") {
+    if (req.method !== "GET") return errorResponse(405, "GET /api/offices lists offices (POST creates one)");
+    return json(200, { offices: await registryStub(env).list() });
+  }
+  const byDo = /^do\/([^/]*)$/.exec(rest);
+  if (byDo) {
+    const hex = byDo[1]!;
+    if (!DO_ID_RE.test(hex)) return errorResponse(400, "a Durable Object id is 64 lowercase hex chars");
+    let doId: DurableObjectId;
+    try {
+      doId = env.OFFICE.idFromString(hex);
+    } catch (e) {
+      return errorResponse(400, `not an Office Durable Object id: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return adminOffice(req, env.OFFICE.get(doId), `GET|DELETE /api/offices/do/<doId>`);
+  }
+  const id = /^([^/]+)$/.exec(rest)?.[1];
+  if (!id || !OFFICE_ID_RE.test(id)) return errorResponse(404, "no such office");
+  const res = await adminOffice(req, env.OFFICE.get(env.OFFICE.idFromName(id)), `GET|DELETE /api/offices/<id>`);
+  if (res.status === 404 && req.method === "DELETE") {
+    // the office is gone but a stale registry row may remain
+    const removedFromRegistry = await registryStub(env).remove(id);
+    return errorResponse(404, "no such office", { removedFromRegistry });
+  }
+  return res;
+}
+
+async function adminOffice(req: Request, stub: DurableObjectStub, usage: string): Promise<Response> {
+  if (req.method === "GET") return stub.fetch("https://office/internal/admin/info");
+  if (req.method === "DELETE") return stub.fetch("https://office/internal/admin/delete", { method: "POST" });
+  return errorResponse(405, usage);
 }
