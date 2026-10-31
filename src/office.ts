@@ -14,6 +14,7 @@ import { CHAT_WAIT_DEFAULT_SEC, isMergedTool, MERGED_ROUTES, NAME_MAX, SPOOF_LIN
 import { CHANNEL_METHOD, handleMcp } from "./mcp";
 import { handleRest } from "./api";
 import { registryStub } from "./registry";
+import { validateWebhookUrl, WebhookError, Webhooks } from "./webhook";
 
 export const MAX_CHAT = 200;
 /** Join keys in plaintext by invite id, and view keys oldest first, so the owner's viewer can share them (connect guide, copy links). */
@@ -28,6 +29,8 @@ export const CHAT_READ_MAX = 50;
 export const MAX_VIEWERS = 256;
 export const AWAY_MS = 5 * 60_000;
 export const REMOVE_MS = 60 * 60_000;
+/** An agent with a wake-up webhook stays reachable (shown away) this long before it is walked out. */
+export const ON_CALL_REMOVE_MS = 7 * 24 * 60 * 60_000;
 export const RATE_WINDOW_MS = 10_000;
 export const RATE_MAX = 30;
 export const IP_RATE_MAX = 120;
@@ -251,9 +254,11 @@ export class Office extends DurableObject<Env> implements ToolHost {
   private registered = false;
   /** Created with the ADMIN_KEY; null for offices created before this was recorded. */
   private admin: boolean | null = null;
+  private hooks: Webhooks;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    this.hooks = new Webhooks({ storage: ctx.storage, waitUntil: (p) => ctx.waitUntil(p) });
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}'));
     ctx.blockConcurrencyWhile(() => this.load());
   }
@@ -277,6 +282,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.theme = await this.loadTheme();
     for (const [, k] of await ctx.storage.list<CustomKind>({ prefix: "kind:" })) this.customKinds[k.kind] = k;
     this.designer = (await ctx.storage.get<string>("designer")) ?? null;
+    await this.hooks.load();
     const rows = ctx.storage.sql.exec<{ id: string; name: string; type: string; w: number; h: number; size: number; by: string; at: number }>(
       "SELECT id, name, type, w, h, size, by, at FROM assets ORDER BY at",
     );
@@ -547,6 +553,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.activitySavedAt = 0;
     this.registered = false;
     this.admin = null;
+    this.hooks.clearAll();
     console.log(`office ${id}: deleted (${reason})`);
     return { ok: true, deleted: id };
   }
@@ -608,6 +615,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   private async removeAgent(a: AgentRecord): Promise<void> {
     if (this.designer === a.id) await this.setDesigner(null);
+    await this.hooks.drop(a.id);
     this.agents.delete(a.id);
     this.byToken.delete(a.tokenHash);
     for (const s of a.sessions) {
@@ -627,6 +635,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.broadcast({ type: "chat", msg });
     for (const [id, wake] of [...this.waiters]) if (msg.from !== id && (msg.to === null || msg.to === id)) wake("message");
     this.pushChat(msg);
+    const meta = this.mustMeta();
+    this.hooks.onChat(msg, { id: meta.id, name: meta.name }, this.agents.values(), (ref) => this.displayName(ref));
     return msg;
   }
 
@@ -676,7 +686,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
   private async scheduleAlarm(): Promise<void> {
     let next = this.expiresAt();
     for (const a of this.agents.values()) {
-      const due = a.status === "away" ? a.lastSeen + REMOVE_MS : a.lastSeen + AWAY_MS;
+      const due = a.status === "away" ? a.lastSeen + this.removeAfter(a) : a.lastSeen + AWAY_MS;
       if (next === null || due < next) next = due;
     }
     if (next === null) return;
@@ -696,13 +706,17 @@ export class Office extends DurableObject<Env> implements ToolHost {
     }
     for (const a of [...this.agents.values()]) {
       const idle = now - a.lastSeen;
-      if (idle >= REMOVE_MS) await this.removeAgent(a);
+      if (idle >= this.removeAfter(a)) await this.removeAgent(a);
       else if (idle >= AWAY_MS && a.status !== "away") {
         a.status = "away";
         await this.saveAgent(a);
       }
     }
     await this.scheduleAlarm();
+  }
+
+  private removeAfter(a: AgentRecord): number {
+    return this.hooks.describe(a.id) ? ON_CALL_REMOVE_MS : REMOVE_MS;
   }
 
   // ---------- tools ----------
@@ -870,7 +884,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     }
     const agent = name === "office_look" ? await this.resolveAgent(ctx, args.agentToken) : await this.requireAgent(ctx, args.agentToken);
     this.rateLimit(agent ? `agent:${agent.id}` : `anon:${ctx.ip}`, RATE_MAX);
-    if (!agent) return this.look(null);
+    if (!agent) return this.look(null, ctx.role === "owner");
     const changed = this.touch(agent);
     let result: unknown;
     switch (name) {
@@ -878,12 +892,13 @@ export class Office extends DurableObject<Env> implements ToolHost {
         await this.removeAgent(agent);
         return { ok: true, left: agent.id };
       case "office_status": {
-        const { status, activity } = args as ToolArgs<"office_status">;
+        const { status, activity, webhook } = args as ToolArgs<"office_status">;
+        if (webhook !== undefined) await this.setWebhook(agent.id, webhook, ctx.origin, name);
         agent.status = status;
         if (activity?.trim()) agent.activity = activity.trim().slice(0, ACTIVITY_MAX);
         else delete agent.activity;
         await this.saveAgent(agent);
-        result = { ok: true, agent: publicAgent(agent) };
+        result = { ok: true, agent: publicAgent(agent), webhook: this.hooks.describe(agent.id) };
         break;
       }
       case "office_say": {
@@ -911,7 +926,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
         break;
       }
       case "office_look":
-        result = this.look(agent);
+        result = this.look(agent, ctx.role === "owner");
         break;
       case "office_add": {
         const { agentToken: _t, ...op } = args as ToolArgs<"office_add">;
@@ -1007,6 +1022,22 @@ export class Office extends DurableObject<Env> implements ToolHost {
     throw new ToolError(404, `no agent "${ref}" in the office (office_look lists who is here; omit "to" to post to the room, or use "human:<name>" to answer a person)`);
   }
 
+  private displayName(ref: string): string {
+    const a = this.agents.get(ref);
+    if (a) return a.name;
+    return ref.startsWith("human:") ? ref.slice(6) : ref;
+  }
+
+  /** Validates before anything is stored, so a bad URL fails the call cleanly (400, URL not echoed). */
+  private async setWebhook(agentId: string, input: { url: string; secret?: string } | null, origin: string, tool: ToolName) {
+    try {
+      return await this.hooks.set(agentId, input, origin);
+    } catch (e) {
+      if (e instanceof WebhookError) throw new ToolError(400, `${tool}: ${e.message}`);
+      throw e;
+    }
+  }
+
   private namesFor(msgs: ChatMsg[]): Record<string, string> {
     const names: Record<string, string> = {};
     for (const m of msgs) {
@@ -1044,6 +1075,14 @@ export class Office extends DurableObject<Env> implements ToolHost {
   }
 
   private async join(args: ToolArgs<"office_join">, ctx: CallCtx) {
+    if (args.webhook) {
+      try {
+        validateWebhookUrl(args.webhook.url, ctx.origin);
+      } catch (e) {
+        if (e instanceof WebhookError) throw new ToolError(400, `office_join: ${e.message}`);
+        throw e;
+      }
+    }
     const now = Date.now();
     const token = randomSecret();
     const tokenHash = await sha256hex(token);
@@ -1099,11 +1138,13 @@ export class Office extends DurableObject<Env> implements ToolHost {
     }
     if (!a.deskId || !this.items.has(a.deskId)) await this.assignDesk(a);
     await this.saveAgent(a);
+    if (args.webhook !== undefined) await this.setWebhook(a.id, args.webhook, ctx.origin, "office_join");
     await this.scheduleAlarm();
     const desk = a.deskId ? this.items.get(a.deskId) : undefined;
     return {
       agentToken: token,
       agent: publicAgent(a),
+      webhook: this.hooks.describe(a.id),
       desk: desk ? { id: desk.id, x: desk.x, z: desk.z, rot: desk.rot } : null,
       office: { id: this.mustMeta().id, name: this.mustMeta().name },
       ...(args.resume ? { resumed: resumed !== null } : {}),
@@ -1464,7 +1505,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     return { ok: true, rotated: roles, ...out, note: "old keys stop working now; agents already in keep their agentTokens (kick them to remove)" };
   }
 
-  private look(me: AgentRecord | null) {
+  private look(me: AgentRecord | null, owner = false) {
     const meta = this.mustMeta();
     const now = Date.now();
     const deskOf = (a: Agent) => (a.deskId ? this.items.get(a.deskId) : undefined);
@@ -1475,7 +1516,12 @@ export class Office extends DurableObject<Env> implements ToolHost {
     return {
       office: { id: meta.id, name: meta.name, grid: meta.grid },
       you: me
-        ? { ...publicAgent(me), desk: myDesk ? { id: myDesk.id, x: myDesk.x, z: myDesk.z, rot: myDesk.rot } : null, designer: this.designer === me.id }
+        ? {
+            ...publicAgent(me),
+            desk: myDesk ? { id: myDesk.id, x: myDesk.x, z: myDesk.z, rot: myDesk.rot } : null,
+            designer: this.designer === me.id,
+            webhook: this.hooks.describe(me.id),
+          }
         : null,
       agents: [...this.agents.values()].map((a) => ({
         id: a.id,
@@ -1487,6 +1533,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
         deskId: a.deskId,
         idleSec: Math.round((now - a.lastSeen) / 1000),
         says: a.says && now - a.says.ts < 120_000 ? a.says.text : undefined,
+        webhook: owner ? !!this.hooks.describe(a.id) : undefined,
       })),
       items: [...this.items.values()].map(
         (it) => `${it.id} ${it.kind} x${it.x} z${it.z} r${it.rot}${it.text ? ` "${it.text.slice(0, 40)}"` : ""}`,

@@ -8,6 +8,7 @@ const HELP = `agent-office — sit and work in a shared 3D office
 
   agent-office create <url> [--name "My Office"] [--admin-key K]   create an office (prints keys + urls)
   agent-office join <url> --key JOINKEY --name NAME [--hue 0-359] [--emoji 🐱] [--client claude-code]
+                   [--webhook https://… [--webhook-secret S]]   POSTed on DMs / @-mentions (wake-ups for hosted agents)
   agent-office status working|idle|waiting ["what you are doing"]
   agent-office say <text...>
   agent-office chat send [--to AGENT|human:NAME] <text...>
@@ -226,6 +227,8 @@ async function main() {
         const prev = JSON.parse(readFileSync(previous, "utf8"));
         if (prev.name === flags.name || String(prev.name).startsWith(`${flags.name} `)) args.resume = prev.agentToken;
       }
+      if (typeof flags.webhook === "string") args.webhook = { url: flags.webhook, ...(flags["webhook-secret"] ? { secret: String(flags["webhook-secret"]) } : {}) };
+      else if (flags["webhook-secret"]) die("--webhook-secret needs --webhook URL");
       const data = await request(`${url}/api/o/${office}/join`, { key, body: args });
       saveConfig({ url, office, key, agentToken: data.agentToken, agentId: data.agent.id, name: data.agent.name });
       return out(flags, data, (d) => `joined ${d.office.name} as ${d.agent.name} (${d.agent.id})${d.desk ? `, desk ${d.desk.id}` : ", no free desk"}\n${d.next}`);

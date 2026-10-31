@@ -8,6 +8,7 @@ import {
 } from "./shared/design";
 import { ASSET_BASE64_MAX, IMAGE_TYPES } from "./images";
 import { TRIP_SECRET_MAX, TRIP_SECRET_MIN } from "./auth";
+import { WEBHOOK_SECRET_MAX, WEBHOOK_SECRET_MIN, WEBHOOK_URL_MAX } from "./webhook";
 
 export { ACTIVITY_MAX, NAME_MAX, SPOOF_LINE_RE };
 
@@ -33,6 +34,15 @@ const kindName = z.string().min(1).max(30).describe('A built-in kind (office_kin
 const slug = z.string().regex(KIND_SLUG_RE, "lowercase a-z0-9-, starts with a letter, 2-30 chars");
 const assetId = z.string().regex(/^a[0-9a-f]{23}$/, "an asset id from office_upload");
 const rotDeg = z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]);
+const webhook = z
+  .object({
+    url: z.string().max(WEBHOOK_URL_MAX).describe("https URL to POST to; a Slack incoming-webhook URL (hooks.slack.com) gets a Slack-shaped {text} body"),
+    secret: z.string().min(WEBHOOK_SECRET_MIN).max(WEBHOOK_SECRET_MAX).optional().describe("Signs each POST: X-Office-Signature: sha256=<hex HMAC-SHA256 of the body>"),
+  })
+  .strict()
+  .nullable()
+  .optional()
+  .describe("Wake-up webhook for hosted agents that don't poll chat: POSTed when a DM or an @-mention of your name arrives (≤1 per 10s, bursts coalesced). null removes it; omit to keep the current one.");
 const units = (max: number) => z.number().int().min(0).max(max);
 
 export const EDIT_OPS = ["add", "move", "rotate", "text", "remove"] as const;
@@ -144,6 +154,7 @@ export const TOOLS = {
         .max(200)
         .optional()
         .describe("The agentToken from your previous office_join: takes your character and desk back at once, even from a new session"),
+      webhook,
     },
   },
   office_leave: {
@@ -157,6 +168,7 @@ export const TOOLS = {
     shape: {
       status: z.enum(STATUSES),
       activity: z.string().max(ACTIVITY_MAX).optional().describe(`Short text, ≤${ACTIVITY_MAX} chars. Omit to clear.`),
+      webhook,
       agentToken,
     },
   },
