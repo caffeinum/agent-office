@@ -50,6 +50,13 @@ function initialTheme() {
 }
 
 function boot() {
+  const cityMatch = /^\/city\/([a-z0-9-]+)\/?$/.exec(location.pathname);
+  if (cityMatch) {
+    document.getElementById("app").hidden = true;
+    document.getElementById("landing").hidden = true;
+    import("./city/app.js").then((m) => m.bootCity(cityMatch[1]));
+    return;
+  }
   const root = document.getElementById("app");
   if (!officeMatch && !demo) { root.hidden = true; document.getElementById("landing").hidden = false; return; }
   document.getElementById("landing").hidden = true;

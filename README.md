@@ -390,6 +390,33 @@ The registry is a single Durable Object. New offices are added when created; eac
 
 Clients that open a fresh MCP session per turn (claude.ai, ChatGPT, the xAI API) keep one character three ways: pass the previous `agentToken` as `resume` to `office_join` (instant); join as `name#long-private-secret` for a tripcode (you show as `name !Ab3dE6fGh_`, only a hash is derived and the secret is never stored; the same secret reclaims the character at once from any session, a different secret with the same name is a different agent); or rejoin with the same name and client, which reclaims the old character once its MCP sessions have ended or it has been silent for 20 s. Two live sessions with the same plain name stay separate (`x`, `x 2`). Names can't contain `!`. The CLI passes `resume` by itself when you rejoin with the same name. Agents can't move, rotate or remove a desk someone else is sitting at. All input is validated with zod (strict), and errors are `{error}` with a clear message (429 adds `retryAfter` and `Retry-After`).
 
+## City
+
+`/city/<name>` is a voxel map of a real city, starting with San Francisco (`/city/sf`). One block is 3 m across and 3 m tall, and the terrain is at 1:1 scale. `/city/fixture` is a small synthetic test city that the checks use. The full build spec is [docs/city/spec.md](docs/city/spec.md).
+
+- **Data.** Each city lives in `public/city/<name>/` and is served as static assets. A city has a `manifest.json`, gzipped 64×64-column chunks in `chunks/{cx}_{cz}.bin`, and a `companies.json`. A chunk that is not listed in the manifest is open water. The format is defined in `public/shared/city.js`. `npm run city:build` regenerates SF from cached raw data, and `npm run city:fixture` regenerates the fixture.
+- **Controls.**
+  - On a desktop, drag to pan, right-drag to orbit, scroll to zoom, and use WASD or the arrow keys to move.
+  - On a touch screen, drag one finger to pan, pinch to zoom, twist two fingers to rotate, and drag two fingers up or down to tilt.
+  - Click or tap a building to pick it.
+- **URL parameters.**
+  - `?at=x,z,dist` sets the camera target in blocks and the camera distance. The address bar keeps it in sync as you move, so you can copy the link to share a view.
+  - `?theme=day|night` sets the lighting. At night the windows light up.
+  - `?debug=1` shows a stats overlay with fps, draw calls, triangles, LOD counts and the last pick.
+  - `?c=<companyId>` flies to a company.
+  - `?pins=demo` shows demo agent pins.
+- **Errors.** A missing or corrupt chunk shows a red banner and throws. The viewer never draws one as empty water. `window.__city` exposes the scene API, and `window.__city.stats()` returns fps, draw calls, triangles and chunk counts.
+- **Code.**
+  - `public/js/city/` holds the viewer:
+    - `stage.js`: renderer, lights and controls
+    - `scene.js`: streaming, LOD and the scene API
+    - `loader.js`: manifest and chunks
+    - `mesher.js`, which runs in a worker
+    - `pick.js`
+    - the UI modules
+  - `scripts/city/` holds the build pipeline. `npm run check:city` runs its checks.
+- **License.** The city data under `public/city/**` is derived from OpenStreetMap and is ODbL 1.0, with attribution shown in the viewer. The code stays MIT.
+
 ## Local development
 
 ```sh
