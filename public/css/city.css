@@ -46,7 +46,7 @@
 /* ── label chips ─────────────────────────────────────────────────────────────────── */
 
 .cu-labels { position: absolute; inset: 0; pointer-events: none; }
-.cu-chip {
+.cu-ui .cu-chip {
   position: absolute; left: 0; top: 0;
   display: flex; flex-direction: column; align-items: stretch; gap: 1px;
   padding: 3px 8px 3px 6px; border: 0; border-radius: 10px;

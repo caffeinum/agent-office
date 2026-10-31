@@ -28,10 +28,15 @@ export const chunkRing = (tcx, tcz, cx, cz) => Math.max(Math.abs(cx - tcx), Math
  */
 export const withinRing = (ring, dist, R, inside) => (inside ? dist <= R + 0.5 + HYSTERESIS : ring <= R);
 
-/** Vertex colours come from the hex palette, so they are sRGB bytes: linearise them in the shader. */
-function srgbVertexColors(material) {
+/** Region meshes carry a per-vertex `glow` (255 on building walls): the night emissive tint only lights those. */
+function glowEmissive(material) {
   material.onBeforeCompile = (sh) => {
-    sh.vertexShader = sh.vertexShader.replace("#include <color_vertex>", "#include <color_vertex>\n#ifdef USE_COLOR\n  vColor.rgb = pow(vColor.rgb, vec3(2.2));\n#endif");
+    sh.vertexShader = sh.vertexShader
+      .replace("#include <common>", "#include <common>\nattribute float glow;\nvarying float vGlow;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvGlow = glow;");
+    sh.fragmentShader = sh.fragmentShader
+      .replace("#include <common>", "#include <common>\nvarying float vGlow;")
+      .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance *= vGlow;");
   };
   return material;
 }
@@ -54,24 +59,20 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
   /* ── materials ──────────────────────────────────────────────────────────────────────────────── */
   const grain = grainTexture();
   const atlas = createWindowAtlas();
-  for (const t of [atlas.map, atlas.emissiveMap]) {
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.repeat.set(1 / 8, 1 / 8);
-  }
   const mats = {
-    opaque: srgbVertexColors(new THREE.MeshStandardMaterial({ vertexColors: true, map: grain, roughness: 0.9, metalness: 0, flatShading: true })),
-    walls: srgbVertexColors(new THREE.MeshStandardMaterial({
+    opaque: new THREE.MeshStandardMaterial({ vertexColors: true, map: grain, roughness: 0.9, metalness: 0, flatShading: true }),
+    walls: new THREE.MeshStandardMaterial({
       vertexColors: true, map: atlas.map, emissiveMap: atlas.emissiveMap, emissive: new THREE.Color("#ffd9a0"), emissiveIntensity: 0,
       roughness: 0.8, metalness: 0, flatShading: true,
-    })),
-    region: srgbVertexColors(new THREE.MeshStandardMaterial({
+    }),
+    region: glowEmissive(new THREE.MeshStandardMaterial({
       vertexColors: true, roughness: 0.92, metalness: 0, flatShading: true, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
     })),
     water: new THREE.MeshStandardMaterial({ color: SURFACE_COLORS[SURFACE.WATER], roughness: 0.35, metalness: 0, polygonOffset: true, polygonOffsetFactor: 4, polygonOffsetUnits: 8 }),
   };
   stage.onTheme((name, th) => {
     mats.walls.emissiveIntensity = th.windows * 1.6;
-    mats.region.emissive.set(name === "night" ? "#1a1626" : "#000000");
+    mats.region.emissive.set(name === "night" ? "#2e2416" : "#000000");
   });
   stage.setTheme(theme);
 
@@ -114,7 +115,12 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(buf.positions, 3));
     g.setAttribute("color", new THREE.BufferAttribute(buf.colors, 3, true));
+    if (buf.normals) g.setAttribute("normal", new THREE.BufferAttribute(buf.normals, 3, true));
     if (buf.uvs) g.setAttribute("uv", new THREE.BufferAttribute(buf.uvs, 2));
+    if (material === mats.region) {
+      if (!buf.glow) throw new Error(`${what}: region mesh is missing the glow attribute`);
+      g.setAttribute("glow", new THREE.BufferAttribute(buf.glow, 1, true));
+    }
     g.setIndex(new THREE.BufferAttribute(buf.indices, 1));
     g.computeBoundingBox();
     g.computeBoundingSphere();
