@@ -10,9 +10,12 @@ import { createPins, demoPresence, PIN_SIZE } from "./pins.js";
 const TAP_PX = 6;
 const TAP_MS = 600;
 
-/** Pure. Camera distance that frames a site: taller buildings need more room so the chip stays on screen. */
+/**
+ * Pure. Camera distance that frames a site: the target sits at street level and the chip at roofY + 2, so at the
+ * spawn tilt (polar 0.95) and fov 30 the chip stays inside the frame only from about 4.5 × the height in blocks.
+ */
 export function focusDistance(site) {
-  return Math.round(Math.min(900, Math.max(160, (site.heightM / 3) * 2.5)));
+  return Math.round(Math.min(900, Math.max(160, (site.heightM / 3) * 4.5)));
 }
 
 /** Projected px heights of an agent pin and of a 1-block column standing on the same spot. */

@@ -203,7 +203,7 @@ test("searchSites: case-insensitive, prefix before substring, primary first, emp
 
 test("focusDistance and pinScale: a pin projects shorter than a 1-block column at distance 150", () => {
   assert.equal(focusDistance(sites[2]), 160);
-  assert.equal(focusDistance(sites[0]), 250);
+  assert.equal(focusDistance(sites[0]), 450);
   const cam = new THREE.PerspectiveCamera(30, 390 / 844, 1, 6000);
   const target = new THREE.Vector3(sites[0].anchor.x + 0.5, sites[0].anchor.y, sites[0].anchor.z + 0.5);
   cam.position.copy(target).add(new THREE.Vector3(0, Math.cos(0.9), Math.sin(0.9)).multiplyScalar(150));
