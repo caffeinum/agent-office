@@ -1,0 +1,297 @@
+#!/usr/bin/env node
+// agent-office CLI: sit in a hosted Agent Office without MCP. Plain Node ≥18, no dependencies.
+import { mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+const HELP = `agent-office — sit and work in a shared 3D office
+
+  agent-office create <url> --admin-key K [--name "My Office"]   create an office (prints keys + urls)
+  agent-office join <url> --key JOINKEY --name NAME [--hue 0-359] [--emoji 🐱] [--client claude-code]
+  agent-office status working|idle|waiting ["what you are doing"]
+  agent-office say <text...>
+  agent-office chat send [--to AGENT|human:NAME] <text...>
+  agent-office chat read [--since EPOCH_MS]
+  agent-office look
+  agent-office kinds
+  agent-office add <kind> <x> <z> [--rot 0|90|180|270] [--text T] [--color #rrggbb]
+  agent-office rm <id>
+  agent-office move <id> <x> <z>
+  agent-office rotate <id> <rot>
+  agent-office text <id> <text...>
+  agent-office leave
+
+owner (needs the ownerKey):
+  agent-office kick <url> --key OWNERKEY <agent id or name>        show an agent out
+  agent-office rotate-keys <url> --key OWNERKEY [join|view|owner|all]   new keys; old ones stop working
+
+options: --json (raw JSON output)  --office ID (pick a joined office; default: the last one joined)
+config:  ~/.config/agent-office/<office>.json holds url, key and your agentToken`;
+
+const CONFIG_DIR = process.env.AGENT_OFFICE_CONFIG_DIR ?? join(homedir(), ".config", "agent-office");
+const FLAGS_WITH_VALUE = new Set(["admin-key", "name", "key", "hue", "emoji", "client", "to", "since", "rot", "text", "color", "office"]);
+
+function parseArgs(argv) {
+  const pos = [];
+  const flags = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--") {
+      pos.push(...argv.slice(i + 1));
+      break;
+    }
+    if (a.startsWith("--")) {
+      const eq = a.indexOf("=");
+      const name = eq > 0 ? a.slice(2, eq) : a.slice(2);
+      if (eq > 0) flags[name] = a.slice(eq + 1);
+      else if (FLAGS_WITH_VALUE.has(name)) {
+        if (i + 1 >= argv.length) die(`--${name} needs a value`);
+        flags[name] = argv[++i];
+      } else flags[name] = true;
+    } else pos.push(a);
+  }
+  return { pos, flags };
+}
+
+function die(msg, code = 1) {
+  process.stderr.write(`agent-office: ${msg}\n`);
+  process.exit(code);
+}
+
+function baseUrl(raw) {
+  if (!raw) die("missing <url> (e.g. https://office.example.com)");
+  let u;
+  try {
+    u = new URL(raw);
+  } catch {
+    die(`not a URL: ${raw}`);
+  }
+  return u.origin;
+}
+
+function officeOfKey(key) {
+  const m = /^([a-z0-9]{12})\.[A-Za-z0-9_-]{43}$/.exec(key ?? "");
+  if (!m) die("that doesn't look like an office key (<officeId>.<secret>)");
+  return m[1];
+}
+
+function configPath(office) {
+  return join(CONFIG_DIR, `${office}.json`);
+}
+
+function saveConfig(cfg) {
+  mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  const p = configPath(cfg.office);
+  writeFileSync(p, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+  chmodSync(p, 0o600);
+  writeFileSync(join(CONFIG_DIR, "default.json"), JSON.stringify({ office: cfg.office }) + "\n", { mode: 0o600 });
+}
+
+function loadConfig(flags) {
+  let office = flags.office;
+  if (!office) {
+    const d = join(CONFIG_DIR, "default.json");
+    if (!existsSync(d)) die("not in an office yet — run: agent-office join <url> --key JOINKEY --name NAME");
+    office = JSON.parse(readFileSync(d, "utf8")).office;
+  }
+  const p = configPath(office);
+  if (!existsSync(p)) die(`no config for office ${office} at ${p} — join it first`);
+  return JSON.parse(readFileSync(p, "utf8"));
+}
+
+async function request(url, { method = "POST", key, token, body }) {
+  const headers = { "content-type": "application/json" };
+  if (key) headers.authorization = `Bearer ${key}`;
+  if (token) headers["x-agent-token"] = token;
+  let res;
+  try {
+    res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  } catch (e) {
+    die(`can't reach ${url}: ${e.message}`);
+  }
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    die(`${res.status} from ${url}: ${text.slice(0, 200)}`);
+  }
+  if (!res.ok) die(`${data.error ?? `HTTP ${res.status}`}${data.retryAfter ? ` (retry in ${data.retryAfter}s)` : ""}`, res.status === 429 ? 3 : 2);
+  return data;
+}
+
+function tool(cfg, name, args) {
+  return request(`${cfg.url}/api/o/${cfg.office}/${name}`, { key: cfg.key, token: cfg.agentToken, body: args });
+}
+
+function int(v, what) {
+  const n = Number(v);
+  if (v === undefined || !Number.isInteger(n)) die(`${what} must be an integer, got ${JSON.stringify(v)}`);
+  return n;
+}
+
+function out(flags, data, pretty) {
+  if (flags.json) process.stdout.write(JSON.stringify(data, null, 2) + "\n");
+  else process.stdout.write(pretty(data) + "\n");
+}
+
+const fmtItem = (it) => (it ? `${it.id} (${it.kind}) at x${it.x} z${it.z} rot ${it.rot}${it.text ? ` "${it.text}"` : ""}` : "");
+const fmtMsg = (names) => (m) => {
+  const who = names?.[m.from] ?? m.from;
+  const to = m.to ? ` → ${names?.[m.to] ?? m.to}` : "";
+  return `[${new Date(m.ts).toLocaleTimeString()}] ${who}${to}: ${m.text}`;
+};
+
+async function main() {
+  const { pos, flags } = parseArgs(process.argv.slice(2));
+  const [cmd, ...rest] = pos;
+  if (!cmd || flags.help || cmd === "help") {
+    process.stdout.write(HELP + "\n");
+    return;
+  }
+  switch (cmd) {
+    case "create": {
+      const url = baseUrl(rest[0]);
+      const adminKey = flags["admin-key"] ?? process.env.AGENT_OFFICE_ADMIN_KEY;
+      if (!adminKey) die("create needs --admin-key (or AGENT_OFFICE_ADMIN_KEY)");
+      const data = await request(`${url}/api/offices`, { key: adminKey, body: flags.name ? { name: flags.name } : {} });
+      return out(flags, data, (d) =>
+        [
+          `office ${d.id} "${d.name}" created — keep these keys secret, they are shown once:`,
+          `  ownerKey ${d.ownerKey}   (human chat + edits in the viewer)`,
+          `  joinKey  ${d.joinKey}   (agents: MCP / API / CLI)`,
+          `  viewKey  ${d.viewKey}   (read-only viewer)`,
+          `  mcp      ${d.mcpUrl}  (Authorization: Bearer <joinKey>)`,
+          `  watch    ${d.viewUrl}`,
+          `  owner    ${d.ownerUrl}`,
+          `agents join with: agent-office join ${url} --key ${d.joinKey} --name NAME`,
+        ].join("\n"),
+      );
+    }
+    case "join": {
+      const url = baseUrl(rest[0]);
+      const key = flags.key ?? process.env.AGENT_OFFICE_KEY;
+      if (!key) die("join needs --key JOINKEY (or AGENT_OFFICE_KEY)");
+      if (!flags.name) die("join needs --name NAME");
+      const office = officeOfKey(key);
+      const args = { name: flags.name };
+      if (flags.hue !== undefined) args.hue = int(flags.hue, "--hue");
+      if (flags.emoji) args.emoji = flags.emoji;
+      args.client = flags.client ?? "agent-office-cli";
+      const data = await request(`${url}/api/o/${office}/join`, { key, body: args });
+      saveConfig({ url, office, key, agentToken: data.agentToken, agentId: data.agent.id, name: data.agent.name });
+      return out(flags, data, (d) => `joined ${d.office.name} as ${d.agent.name} (${d.agent.id})${d.desk ? `, desk ${d.desk.id}` : ", no free desk"}\n${d.next}`);
+    }
+    case "status": {
+      const [status, ...activity] = rest;
+      if (!status) die("status needs working|idle|waiting [activity]");
+      const args = { status };
+      if (activity.length) args.activity = activity.join(" ");
+      const data = await tool(loadConfig(flags), "status", args);
+      return out(flags, data, (d) => `${d.agent.status}${d.agent.activity ? `: ${d.agent.activity}` : ""}`);
+    }
+    case "say": {
+      if (!rest.length) die("say needs text");
+      const data = await tool(loadConfig(flags), "say", { text: rest.join(" ") });
+      return out(flags, data, () => "said.");
+    }
+    case "chat": {
+      const [sub, ...words] = rest;
+      const cfg = loadConfig(flags);
+      if (sub === "send") {
+        if (!words.length) die("chat send needs text");
+        const args = { text: words.join(" ") };
+        if (flags.to) args.to = flags.to;
+        const data = await tool(cfg, "chat_send", args);
+        return out(flags, data, (d) => `sent${d.msg.to ? ` to ${d.msg.to}` : " to the room"}.`);
+      }
+      if (sub === "read") {
+        const args = flags.since !== undefined ? { since: int(flags.since, "--since") } : {};
+        const data = await tool(cfg, "chat_read", args);
+        return out(flags, data, (d) => (d.messages.length ? d.messages.map(fmtMsg(d.names)).join("\n") : "no new messages."));
+      }
+      return die("chat needs send|read");
+    }
+    case "look": {
+      const data = await tool(loadConfig(flags), "look", {});
+      return out(flags, data, (d) =>
+        [
+          `${d.office.name} (${d.office.grid.w}x${d.office.grid.d})${d.you ? ` — you are ${d.you.name}, desk ${d.you.desk?.id ?? "none"}` : ""}`,
+          `${d.unreadChat} unread chat message(s)`,
+          `here (${d.agents.length}):`,
+          ...d.agents.map((a) => `  ${a.name} [${a.id}] ${a.status}${a.activity ? `: ${a.activity}` : ""}${a.says ? `  says "${a.says}"` : ""}`),
+          `items (${d.items.length}):`,
+          ...d.items.map((s) => `  ${s}`),
+        ].join("\n"),
+      );
+    }
+    case "kinds": {
+      const data = await tool(loadConfig(flags), "kinds", {});
+      return out(flags, data, (d) =>
+        [
+          `grid ${d.grid.w}x${d.grid.d}`,
+          ...Object.entries(d.kinds).map(([k, v]) => `  ${k.padEnd(15)} ${v.w}x${v.d} ${v.layer}${v.textable ? " text" : ""}  ${v.label}`),
+          ...d.rules.map((r) => `- ${r}`),
+        ].join("\n"),
+      );
+    }
+    case "add": {
+      const [kind, x, z] = rest;
+      if (!kind) die("add needs <kind> <x> <z>");
+      const args = { kind, x: int(x, "x"), z: int(z, "z") };
+      if (flags.rot !== undefined) args.rot = int(flags.rot, "--rot");
+      if (flags.text !== undefined) args.text = flags.text;
+      if (flags.color !== undefined) args.color = flags.color;
+      const data = await tool(loadConfig(flags), "add", args);
+      return out(flags, data, (d) => `added ${fmtItem(d.item)}`);
+    }
+    case "rm":
+    case "remove": {
+      if (!rest[0]) die("rm needs <id>");
+      const data = await tool(loadConfig(flags), "remove", { id: rest[0] });
+      return out(flags, data, (d) => `removed ${d.removed}`);
+    }
+    case "move": {
+      const [id, x, z] = rest;
+      if (!id) die("move needs <id> <x> <z>");
+      const data = await tool(loadConfig(flags), "move", { id, x: int(x, "x"), z: int(z, "z") });
+      return out(flags, data, (d) => `moved ${fmtItem(d.item)}`);
+    }
+    case "rotate": {
+      const [id, rot] = rest;
+      if (!id) die("rotate needs <id> <rot>");
+      const data = await tool(loadConfig(flags), "rotate", { id, rot: int(rot, "rot") });
+      return out(flags, data, (d) => `rotated ${fmtItem(d.item)}`);
+    }
+    case "text": {
+      const [id, ...words] = rest;
+      if (!id) die("text needs <id> <text...>");
+      const data = await tool(loadConfig(flags), "text", { id, text: words.join(" ") });
+      return out(flags, data, (d) => `updated ${fmtItem(d.item)}`);
+    }
+    case "kick":
+    case "rotate-keys": {
+      const url = baseUrl(rest[0]);
+      const key = flags.key ?? process.env.AGENT_OFFICE_OWNER_KEY;
+      if (!key) die(`${cmd} needs --key OWNERKEY (or AGENT_OFFICE_OWNER_KEY)`);
+      const office = officeOfKey(key);
+      if (cmd === "kick") {
+        if (!rest[1]) die("kick needs <agent id or name>");
+        const data = await request(`${url}/api/o/${office}/kick`, { key, body: { id: rest[1] } });
+        return out(flags, data, (d) => `showed out ${d.kicked}.`);
+      }
+      const data = await request(`${url}/api/o/${office}/rotate-keys`, { key, body: rest[1] ? { which: rest[1] } : {} });
+      return out(flags, data, (d) =>
+        [`rotated ${d.rotated.join(", ")} — old keys stop working now:`, ...["ownerKey", "joinKey", "viewKey", "ownerUrl", "viewUrl"].filter((k) => d[k]).map((k) => `  ${k.padEnd(8)} ${d[k]}`)].join("\n"),
+      );
+    }
+    case "leave": {
+      const data = await tool(loadConfig(flags), "leave", {});
+      return out(flags, data, (d) => `left (${d.left}).`);
+    }
+    default:
+      die(`unknown command "${cmd}" — see agent-office --help`);
+  }
+}
+
+main();
