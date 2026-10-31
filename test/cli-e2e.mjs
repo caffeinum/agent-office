@@ -172,7 +172,7 @@ try {
   } else console.log("cli e2e: public/index.html not built yet, skipping the viewer page check");
 
   const mcp = new Client({ name: "e2e", version: "1.0.0" });
-  await mcp.connect(new StreamableHTTPClientTransport(new URL(office.mcpUrl), { requestInit: { headers: { authorization: `Bearer ${office.joinKey}` } } }));
+  await mcp.connect(new StreamableHTTPClientTransport(new URL(`${office.mcpUrl}?mode=design`), { requestInit: { headers: { authorization: `Bearer ${office.joinKey}` } } }));
   const mcpJoin = await mcp.callTool({ name: "office_join", arguments: { name: "mcp-bot", client: "e2e" } });
   assert.ok(!mcpJoin.isError, mcpJoin.content[0].text);
   const { prompts } = await mcp.listPrompts();
