@@ -1,6 +1,8 @@
 // Agent pins: blocky figures 0.6 block tall, 0.25 block wide (1 office cell = 1/4 block), all drawn with one
 // InstancedMesh. Placed on the primary site's anchor column, 2×2 per column, filling columns away from the door.
-// v1 runs on demo presence only (?pins=demo); the live feed is phase 2.
+// Fed by the live City DO presence (live.js); badges read "N here / M inside" (M = walkers gone inside the site).
+
+import { badgeText } from "./live.js";
 
 export const PIN_SIZE = Object.freeze({ h: 0.6, w: 0.25 });
 export const PINS_PER_COLUMN = 4;
@@ -67,32 +69,14 @@ function hash32(s) {
   return h;
 }
 
-const DEMO_STATUSES = ["working", "working", "idle", "waiting"];
-
-/** Pure, deterministic. Demo presence for every non-former primary site: 1..16 agents each (some overflow +N). */
-export function demoPresence(sites) {
-  return sites
-    .filter((s) => s.primary && s.status !== "former")
-    .map((s) => {
-      const h = hash32(s.companyId);
-      const n = 1 + (h % 16);
-      const agents = Array.from({ length: n }, (_, i) => ({
-        id: `${s.companyId}-demo-${i + 1}`,
-        name: `agent ${i + 1}`,
-        hue: (hash32(`${s.companyId}:${i}`) % 360),
-        status: DEMO_STATUSES[((h >>> 4) + i) & 3],
-      }));
-      return { companyId: s.companyId, agents };
-    });
-}
-
 function primaryByCompany(sites) {
   const m = new Map();
   for (const s of sites) if (s.primary) m.set(s.companyId, s);
   return m;
 }
 
-function pinGeometry(THREE) {
+/** One merged BufferGeometry of PIN_BOXES (36 vertices per box, in PIN_BOXES order) with color and tint attributes. */
+export function pinGeometry(THREE) {
   const color = new THREE.Color();
   const parts = PIN_BOXES.map((b) => {
     const g = new THREE.BoxGeometry(b.w, b.h, b.d).toNonIndexed();
@@ -122,20 +106,25 @@ function pinGeometry(THREE) {
 
 const INSTANCE_TINT = "vColor.rgb *= instanceColor.rgb;";
 
-/** Lambert with vertex colours where only `tint` parts (torso, arms) take the per-instance hue. */
+/** Shader patch: only `tint` parts (torso, arms) take the per-instance hue. */
+export function tintPatch(THREE, shader) {
+  if (!shader.vertexShader.includes("#include <color_vertex>")) throw new Error("pins: lambert shader has no color_vertex chunk");
+  const chunk = THREE.ShaderChunk.color_vertex;
+  if (!chunk.includes(INSTANCE_TINT)) throw new Error("pins: three's color_vertex chunk changed; update the pin tint patch");
+  shader.vertexShader = "attribute float tint;\n" + shader.vertexShader.replace(
+    "#include <color_vertex>",
+    chunk.replace(INSTANCE_TINT, "vColor.rgb *= mix(vec3(1.0), instanceColor.rgb, tint);"),
+  );
+}
+
 function pinMaterial(THREE) {
   const material = new THREE.MeshLambertMaterial({ vertexColors: true });
-  material.onBeforeCompile = (shader) => {
-    if (!shader.vertexShader.includes("#include <color_vertex>")) throw new Error("pins: lambert shader has no color_vertex chunk");
-    const chunk = THREE.ShaderChunk.color_vertex;
-    if (!chunk.includes(INSTANCE_TINT)) throw new Error("pins: three's color_vertex chunk changed; update the pin tint patch");
-    shader.vertexShader = "attribute float tint;\n" + shader.vertexShader.replace(
-      "#include <color_vertex>",
-      chunk.replace(INSTANCE_TINT, "vColor.rgb *= mix(vec3(1.0), instanceColor.rgb, tint);"),
-    );
-  };
+  material.onBeforeCompile = (shader) => tintPatch(THREE, shader);
   return material;
 }
+
+/** Pin hue → THREE.Color (the same tone for pins, walkers and beacons). */
+export const hueColor = (color, hue) => color.setHSL((((hue % 360) + 360) % 360) / 360, 0.62, 0.56);
 
 /** Walkable step for the anchor: the one pointing away from the door when it is open ground, else the first open one. */
 function chooseStep(city, site) {
@@ -151,8 +140,9 @@ function chooseStep(city, site) {
 
 /**
  * One InstancedMesh for every company's pins. Hidden beyond PINS_MAX_DIST; `onCounts` receives
- * Map<companyId, {agents, overflow, pinsVisible}> whenever presence or pin visibility changes, so labels can badge.
- * → {setPresence(presence), update(), dispose(), mesh}
+ * Map<companyId, {agents, overflow, pinsVisible, here, inside, text}> whenever presence, inside counts or pin
+ * visibility change, so labels can badge (text = "N here / M inside").
+ * → {setPresence(presence), setInside(Map<companyId, n>), update(), dispose(), mesh}
  */
 export function createPins(city, sites, { onCounts = () => {} } = {}) {
   const { THREE } = city;
@@ -172,7 +162,20 @@ export function createPins(city, sites, { onCounts = () => {} } = {}) {
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
   const v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), color = new THREE.Color();
   let counts = new Map();
+  let inside = new Map();
   let near = null;
+
+  function recount() {
+    for (const companyId of inside.keys()) {
+      if (!primaries.has(companyId)) throw new Error(`setInside: no primary site for company ${JSON.stringify(companyId)}`);
+      if (!counts.has(companyId)) counts.set(companyId, { agents: 0, overflow: 0, pinsVisible: near === true });
+    }
+    for (const [companyId, c] of counts) {
+      c.here = c.agents;
+      c.inside = inside.get(companyId) ?? 0;
+      c.text = badgeText(c.here, c.inside);
+    }
+  }
 
   function setPresence(presence) {
     if (!Array.isArray(presence)) throw new Error("setPresence: presence must be an array");
@@ -189,7 +192,7 @@ export function createPins(city, sites, { onCounts = () => {} } = {}) {
         const y = p.column === 0 ? p.y : city.groundAt(p.x, p.z);
         q.setFromAxisAngle(up, ((hash32(String(a.id)) % 8) / 8) * Math.PI * 2);
         mesh.setMatrixAt(n, m.compose(v.set(p.x, y, p.z), q, one));
-        mesh.setColorAt(n, color.setHSL((((a.hue % 360) + 360) % 360) / 360, 0.62, 0.56));
+        mesh.setColorAt(n, hueColor(color, a.hue));
         n++;
       });
       counts.set(entry.companyId, { agents: entry.agents.length, overflow, pinsVisible: false });
@@ -197,6 +200,15 @@ export function createPins(city, sites, { onCounts = () => {} } = {}) {
     mesh.count = n;
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    recount();
+    near = null;
+    update();
+  }
+
+  function setInside(map) {
+    if (!(map instanceof Map)) throw new Error("setInside: expected Map<companyId, count>");
+    inside = new Map(map);
+    recount();
     near = null;
     update();
   }
@@ -217,5 +229,5 @@ export function createPins(city, sites, { onCounts = () => {} } = {}) {
     mesh.dispose();
   }
 
-  return { setPresence, update, dispose, mesh };
+  return { setPresence, setInside, update, dispose, mesh };
 }

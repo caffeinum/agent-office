@@ -1,11 +1,13 @@
-// City entry, called from public/js/app.js boot() on /city/:id. Injects /css/city.css, builds the scene for
-// /city/{id}/manifest.json, loads companies.json and hands both to W6's mountCityUi. Owns the W5 URL state:
-// ?at=x,z,dist (kept in sync with the camera), ?theme=day|night and ?debug=1 (stats HUD).
+// City entry, called from public/js/app.js boot() on /city/:id. Injects /css/city.css, clones the city DOM
+// (#city-template in index.html: the #city-compass container), builds the scene for /city/{id}/manifest.json,
+// loads companies.json, places.json and walk.bin and hands them to mountCityUi with the live feed URL
+// (/city/{id}/ws). URL state: ?cam=x,z,dist,az,polar (kept in sync with the camera; the older ?at=x,z,dist is
+// still read), ?follow=<walkerId> (ui.js), ?theme=day|night, ?live=0 (no feed) and ?debug=1 (stats HUD).
 
-import { validateCompanies } from "../../shared/city.js";
+import { decodeWalk, validateCompanies, validatePlaces } from "../../shared/city.js";
 import { createCityScene } from "./scene.js";
 import { fail } from "./loader.js";
-import { mountCityUi } from "./ui.js";
+import { camState, formatCam, liveUrlFor, mountCityUi, parseCam } from "./ui.js";
 
 /** Pure. "x,z,dist" → {x, z, dist}; null when absent; throws on anything malformed. */
 export function parseAt(value) {
@@ -24,6 +26,14 @@ export function parseTheme(value) {
 }
 
 export const formatAt = (x, z, dist) => `${Math.round(x)},${Math.round(z)},${Math.round(dist)}`;
+
+async function fetchBytes(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status} ${res.statusText}`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes[0] === 0x3c) throw new Error(`${url}: expected binary, got HTML`);
+  return bytes;
+}
 
 function injectCss() {
   if (document.querySelector('link[href="/css/city.css"]')) return;
@@ -45,13 +55,13 @@ async function fetchJson(url) {
   }
 }
 
-/** Mirror the camera into ?at= (replaceState, checked once a second), keeping every other parameter. */
-function syncAt(city) {
+/** Mirror the camera into ?cam= (replaceState, checked once a second; drops the older ?at=), keeping every other parameter. */
+function syncCam(city) {
   let last = location.search;
   setInterval(() => {
-    const t = city.target();
     const params = new URLSearchParams(location.search);
-    params.set("at", formatAt(t.x, t.z, city.cameraDistance()));
+    params.delete("at");
+    params.set("cam", formatCam(camState(city.stage.camera.position, city.target())));
     const next = `?${params.toString().replace(/%2C/g, ",")}`;
     if (next === last) return;
     last = next;
@@ -84,7 +94,10 @@ export async function bootCity(id) {
     injectCss();
     const params = new URLSearchParams(location.search);
     const theme = parseTheme(params.get("theme"));
-    const at = parseAt(params.get("at"));
+    const cam = parseCam(params.get("cam"));
+    const at = cam ? { x: cam.x, z: cam.z, dist: cam.dist } : parseAt(params.get("at"));
+    const liveOff = params.get("live") === "0";
+    if (params.has("live") && !liveOff) throw new Error(`?live=${params.get("live")}: only ?live=0 (feed off) is understood`);
     document.title = `${id} · agent office city`;
     document.documentElement.style.overflow = "hidden";
     document.body.style.overflow = "hidden";
@@ -97,13 +110,26 @@ export async function bootCity(id) {
     stageEl.className = "city-stage";
     stageEl.style.cssText = "position:absolute;inset:0";
     root.appendChild(stageEl);
+    const tpl = document.getElementById("city-template");
+    if (!(tpl instanceof HTMLTemplateElement)) throw new Error('index.html has no <template id="city-template"> (the #city-compass container)');
+    root.appendChild(tpl.content.cloneNode(true));
     document.body.appendChild(root);
 
     const city = await createCityScene(stageEl, { manifestUrl: `/city/${id}/manifest.json`, theme, at });
+    if (cam) {
+      if (typeof city.setCamera !== "function") throw new Error("?cam= needs the scene's setCamera({x,z,dist,az,polar}) (W4, spec-v2 §8)");
+      city.setCamera(cam);
+    }
     document.title = `${city.manifest.name} · agent office`;
-    const companies = validateCompanies(await fetchJson(`/city/${id}/companies.json`), city.manifest);
-    mountCityUi(city, companies, root);
-    syncAt(city);
+    const base = `/city/${id}/`;
+    const [companiesDoc, walkBytes, placesDoc] = await Promise.all([
+      fetchJson(`${base}companies.json`), fetchBytes(`${base}${city.manifest.walk}`), fetchJson(`${base}${city.manifest.places}`),
+    ]);
+    const companies = validateCompanies(companiesDoc, city.manifest);
+    const walk = decodeWalk(walkBytes, city.manifest);
+    validatePlaces(placesDoc, city.manifest, walk);
+    mountCityUi(city, companies, root, { places: placesDoc, walk, liveUrl: liveOff ? null : liveUrlFor(location.href, id) });
+    syncCam(city);
     if (params.get("debug") === "1") debugHud(city, root);
   } catch (e) {
     throw fail(e);

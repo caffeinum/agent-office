@@ -1,4 +1,5 @@
-// Company search box: type a name, pick a result, fly there.
+// Search box over companies, places (places.json: landmarks, intersections, areas) and walking agents: type, pick,
+// fly there (or follow the agent).
 
 export const MAX_RESULTS = 8;
 
@@ -26,6 +27,45 @@ export function searchSites(sites, query) {
   return scored.map((x) => x.s);
 }
 
+const KIND_ORDER = { company: 0, place: 1, agent: 2 };
+
+function rankOf(q, ...names) {
+  let best = null;
+  for (const raw of names) {
+    const n = norm(raw);
+    const r = n.startsWith(q) ? 0 : ` ${n}`.includes(` ${q}`) ? 1 : n.includes(q) ? 2 : null;
+    if (r !== null && (best === null || r < best)) best = r;
+  }
+  return best;
+}
+
+/**
+ * Pure. Companies (searchSites ranking), places other than company places (name or alias) and walkers (name).
+ * Ranked by match (prefix, word prefix, substring), then companies, places, agents. → [{kind, id, name, sub, hue?, color?, item}]
+ */
+export function searchAll({ sites, places, walkers }, query) {
+  if (typeof query !== "string") throw new Error("searchAll: query must be a string");
+  const q = norm(query);
+  if (!q) return [];
+  const out = [];
+  const companyRank = new Map(searchSites(sites, query).map((s, i) => [s, i]));
+  for (const [s, i] of companyRank) {
+    const rank = rankOf(q, s.name, s.companyId);
+    out.push({ kind: "company", id: s.id, name: s.name, sub: s.primary ? s.address : `${s.status} · ${s.address}`, color: s.color, item: s, rank, order: i });
+  }
+  places.forEach((p, i) => {
+    if (p.kind === "company") return;
+    const rank = rankOf(q, p.name, ...p.aliases);
+    if (rank !== null) out.push({ kind: "place", id: p.id, name: p.name, sub: p.kind, item: p, rank, order: i });
+  });
+  walkers.forEach((w, i) => {
+    const rank = rankOf(q, w.name);
+    if (rank !== null) out.push({ kind: "agent", id: w.id, name: w.name, sub: `agent · ${w.status}`, hue: w.hue, item: w, rank, order: i });
+  });
+  out.sort((a, b) => a.rank - b.rank || KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.order - b.order);
+  return out.map(({ rank, order, ...r }) => r);
+}
+
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -33,15 +73,15 @@ function el(tag, cls, text) {
   return e;
 }
 
-/** → {destroy(), input} */
-export function createSearch(root, sites, onPick) {
+/** sources() → {sites, places, walkers}; onPick(result) with a searchAll result. → {destroy(), input} */
+export function createSearch(root, sources, onPick) {
   const box = el("div", "cu-search cu-glass");
   const input = el("input", "cu-search-input");
   input.type = "search";
-  input.placeholder = "search companies";
+  input.placeholder = "search companies, places, agents";
   input.autocomplete = "off";
   input.spellcheck = false;
-  input.setAttribute("aria-label", "search companies");
+  input.setAttribute("aria-label", "search companies, places and agents");
   const list = el("ul", "cu-results");
   list.setAttribute("role", "listbox");
   list.hidden = true;
@@ -51,15 +91,16 @@ export function createSearch(root, sites, onPick) {
   let results = [], active = 0;
 
   function render() {
-    list.replaceChildren(...results.map((s, i) => {
-      const li = el("li", `cu-result${i === active ? " on" : ""}${s.status === "former" ? " former" : ""}`);
+    list.replaceChildren(...results.map((r, i) => {
+      const li = el("li", `cu-result ${r.kind}${i === active ? " on" : ""}${r.item.status === "former" ? " former" : ""}`);
       li.setAttribute("role", "option");
-      li.style.setProperty("--c", s.color);
-      li.append(el("i", "cu-sw"), el("b", "", s.name), el("small", "", s.primary ? s.address : `${s.status} · ${s.address}`));
+      if (r.kind === "company") li.style.setProperty("--c", r.color);
+      if (r.kind === "agent") li.style.setProperty("--h", String(((r.hue % 360) + 360) % 360));
+      li.append(el("i", r.kind === "agent" ? "cu-hue" : "cu-sw"), el("b", "", r.name), el("small", "", r.sub));
       li.addEventListener("pointerdown", (e) => { e.preventDefault(); pick(i); });
       return li;
     }));
-    if (input.value.trim() && !results.length) list.replaceChildren(el("li", "cu-result none", "no company matches"));
+    if (input.value.trim() && !results.length) list.replaceChildren(el("li", "cu-result none", "nothing matches"));
     list.hidden = !input.value.trim();
   }
 
@@ -73,7 +114,7 @@ export function createSearch(root, sites, onPick) {
   }
 
   function onInput() {
-    results = searchSites(sites, input.value).slice(0, MAX_RESULTS);
+    results = searchAll(sources(), input.value).slice(0, MAX_RESULTS);
     active = 0;
     render();
   }
