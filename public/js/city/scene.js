@@ -1,13 +1,18 @@
 // The city scene: loads the manifest, streams chunks nearest-first, keeps LOD0 per-chunk meshes around the
 // target (Chebyshev r ≤ 1) and one mesh per 4×4 region elsewhere (LOD1 within r ≤ 5, else LOD2), meshed in
-// module workers and uploaded at most 2 per frame. Exposes the §3 scene API consumed by W6.
+// module workers and uploaded at most 2 per frame. Format v2 adds chunk props (one small mesh per LOD0 chunk),
+// the unbuilt-land layer from landmask.bin (one mesh), the instanced landmarks.bin layer and a north arrow.
+// Exposes the §3 scene API consumed by W6/W7, plus follow/unfollow and setCamera (spec-v2 §8 W4).
 
-import { CHUNK, REGION, SURFACE, SURFACE_COLORS, chunkKey, chunkOf } from "../../shared/city.js";
+import { CHUNK, REGION, SURFACE, SURFACE_COLORS, chunkKey, chunkOf, pickId } from "../../shared/city.js";
 import { grainTexture } from "../textures.js";
-import { createStage } from "./stage.js";
-import { createChunkStore, fail, loadManifest } from "./loader.js";
+import { CAMERA as CAMERA_LIMITS, createStage } from "./stage.js";
+import { createChunkStore, fail, loadLandmarks, loadLandmask, loadManifest } from "./loader.js";
 import { pickRay } from "./pick.js";
 import { createWindowAtlas } from "./textures.js";
+import { createUnmapped } from "./unmapped.js";
+import { createLandmarkLayer } from "./meshlayer.js";
+import { mountCompass } from "./compass.js";
 
 export const LOD0_R = 1;
 export const LOD1_R = 5;
@@ -19,6 +24,10 @@ export const CAMERA_CLEARANCE = 3;
 /** Zoomed in, the orbit target rides up onto the roof under it: it stays within dist × this of the roof top. */
 export const TARGET_ROOF_REACH = 0.5;
 const WATER_MARGIN = 6000;
+/** Default camera tilt (THREE Spherical phi) for spawn, ?at= and setCamera without polar. */
+export const DEFAULT_POLAR = 0.95;
+/** Follow: the target closes this share of the gap to the followed point per 1/60 s. */
+export const FOLLOW_EASE = 0.2;
 
 /** Chebyshev distance in chunks from a point (in chunk units) to the centre of chunk cx,cz. */
 export const chunkDist = (tx, tz, cx, cz) => Math.max(Math.abs(tx - (cx + 0.5)), Math.abs(tz - (cz + 0.5)));
@@ -66,11 +75,30 @@ float cityWindows(vec3 w) {
   return material;
 }
 
-/** → Promise<city> with the §3 API: manifest, store, setTheme, focus, onFrame, pick, worldToScreen, groundAt, buildingAt, cameraDistance, add, remove, THREE, stats */
+/** Emissive for chunk props: a vertex `glow` (255 on light towers) lights the vertex colour at night. */
+function propGlow(material) {
+  material.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace("#include <common>", "#include <common>\nattribute float glow;\nvarying float vGlow;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvGlow = glow;");
+    sh.fragmentShader = sh.fragmentShader
+      .replace("#include <common>", "#include <common>\nvarying float vGlow;")
+      .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance *= vGlow * vColor.rgb;");
+  };
+  return material;
+}
+
+/**
+ * → Promise<city> with the §3 API: manifest, store, setTheme, focus, onFrame, pick, worldToScreen, groundAt, buildingAt,
+ * cameraDistance, add, remove, THREE, stats; v2: setCamera, getCamera, follow, unfollow, onUnfollow, attachCompass,
+ * unmapped, landmarks, camera. opts.at = {x, z, dist, az?, polar?} overrides the manifest spawn.
+ */
 export async function createCityScene(container, { manifestUrl, theme = "day", at = null } = {}) {
   if (!manifestUrl) throw new Error("createCityScene: manifestUrl is required");
   const manifest = await loadManifest(manifestUrl);
   const baseUrl = new URL(".", new URL(manifestUrl, location.href)).href;
+  const [mask, landmarkBoxes] = await Promise.all([loadLandmask(manifest, baseUrl), loadLandmarks(manifest, baseUrl)]);
+  const unmapped = createUnmapped(manifest, mask);
   const store = createChunkStore(manifest, baseUrl);
   const stage = createStage(container, { theme });
   const { THREE, scene, camera, controls, renderer } = stage;
@@ -79,7 +107,6 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
   const [maxCx, maxCz] = manifest.chunks.max;
   const bbox = { x0: minCx * CHUNK, z0: minCz * CHUNK, x1: (maxCx + 1) * CHUNK, z1: (maxCz + 1) * CHUNK };
   const listed = manifest.chunks.list.map(([cx, cz]) => [cx, cz]);
-  const inBounds = (cx, cz) => cx >= minCx && cx <= maxCx && cz >= minCz && cz <= maxCz;
 
   /* ── materials ──────────────────────────────────────────────────────────────────────────────── */
   const grain = grainTexture();
@@ -94,10 +121,16 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
       vertexColors: true, emissive: new THREE.Color("#ffd9a0"), emissiveIntensity: 0, roughness: 0.92, metalness: 0, flatShading: true, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
     })),
     water: new THREE.MeshStandardMaterial({ color: SURFACE_COLORS[SURFACE.WATER], roughness: 0.35, metalness: 0, polygonOffset: true, polygonOffsetFactor: 4, polygonOffsetUnits: 8 }),
+    props: propGlow(new THREE.MeshStandardMaterial({ vertexColors: true, emissive: new THREE.Color("#ffffff"), emissiveIntensity: 0, roughness: 0.6, metalness: 0.2, flatShading: true })),
+    unbuilt: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, flatShading: true, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }),
   };
+  const landmarks = createLandmarkLayer(THREE, landmarkBoxes);
+  scene.add(landmarks.group);
   stage.onTheme((name, th) => {
     mats.walls.emissiveIntensity = th.windows * 1.6;
     mats.region.emissiveIntensity = th.windows * 1.6 * 0.6;
+    mats.props.emissiveIntensity = th.windows * 1.5;
+    landmarks.setNight(th.windows);
   });
   stage.setTheme(theme);
 
@@ -142,8 +175,8 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     g.setAttribute("color", new THREE.BufferAttribute(buf.colors, 3, true));
     if (buf.normals) g.setAttribute("normal", new THREE.BufferAttribute(buf.normals, 3, true));
     if (buf.uvs) g.setAttribute("uv", new THREE.BufferAttribute(buf.uvs, 2));
-    if (material === mats.region) {
-      if (!buf.glow) throw new Error(`${what}: region mesh is missing the glow attribute`);
+    if (material === mats.region || material === mats.props) {
+      if (!buf.glow) throw new Error(`${what}: mesh is missing the glow attribute`);
       g.setAttribute("glow", new THREE.BufferAttribute(buf.glow, 1, true));
     }
     g.setIndex(new THREE.BufferAttribute(buf.indices, 1));
@@ -170,17 +203,18 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
   }
 
   const ready = (cx, cz) => { const s = store.status(cx, cz); return s === "loaded" || s === "absent"; };
-  const neighbour = (cx, cz) => (inBounds(cx, cz) ? store.get(cx, cz) ?? null : null);
+  /** meshChunk neighbour: a listed chunk, unbuilt land ({unbuilt} edge heights) or null (sea / water chunk). */
+  const neighbour = (cx, cz, side) => (store.status(cx, cz) === "absent" ? unmapped.neighbour(cx, cz, side) : store.get(cx, cz) ?? null);
 
   function requestLod0(e) {
     e.inflight = true;
     const chunk = store.get(e.cx, e.cz);
-    mesh({ kind: "chunk", lod: 0, chunk, n: neighbour(e.cx, e.cz - 1), s: neighbour(e.cx, e.cz + 1), e: neighbour(e.cx + 1, e.cz), w: neighbour(e.cx - 1, e.cz) }, `chunk ${e.cx},${e.cz}`)
+    mesh({ kind: "chunk", lod: 0, chunk, n: neighbour(e.cx, e.cz - 1, "n"), s: neighbour(e.cx, e.cz + 1, "s"), e: neighbour(e.cx + 1, e.cz, "e"), w: neighbour(e.cx - 1, e.cz, "w") }, `chunk ${e.cx},${e.cz}`)
       .then((reply) => uploads.push(() => {
         e.inflight = false;
         if (!e.want) return;
         const what = `chunk ${e.cx},${e.cz}`;
-        const meshes = [buildMesh(reply.opaque, mats.opaque, what), buildMesh(reply.walls, mats.walls, what)].filter(Boolean);
+        const meshes = [buildMesh(reply.opaque, mats.opaque, what), buildMesh(reply.walls, mats.walls, what), buildMesh(reply.props, mats.props, what)].filter(Boolean);
         for (const m of meshes) { m.castShadow = true; m.receiveShadow = true; scene.add(m); }
         e.meshes = meshes;
         dirty = true;
@@ -206,6 +240,16 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
       .then((reply) => done(() => buildMesh(reply.opaque, mats.region, what)))
       .catch((err) => { throw fail(err); });
   }
+
+  // the unbuilt-land layer: one mesh for the whole grid, meshed once
+  let unbuiltMesh = null;
+  mesh({ kind: "unbuilt", mask, listed: manifest.chunks.list.map(([cx, cz]) => [cx, cz]), water: manifest.water }, "unbuilt land")
+    .then((reply) => uploads.push(() => {
+      unbuiltMesh = buildMesh(reply.opaque, mats.unbuilt, "unbuilt land");
+      if (unbuiltMesh) { unbuiltMesh.receiveShadow = true; unbuiltMesh.name = "city-unbuilt"; scene.add(unbuiltMesh); }
+      dirty = true;
+    }))
+    .catch((err) => { throw fail(err); });
 
   let dirty = true;
   let lastTarget = { x: NaN, z: NaN };
@@ -260,17 +304,20 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     if (!chunk) return null;
     return { chunk, i: (bz - cz * CHUNK) * CHUNK + (bx - cx * CHUNK) };
   }
-  /** Ground y under a block position (a building column's ground is its base); 0 on water or unloaded chunks. */
+  /** Ground y under a block position (a building column's ground is its base); unbuilt land's coarse height; 0 on water or unloaded chunks. */
   function groundAt(x, z) {
     const c = column(x, z);
-    return c ? c.chunk.ground[c.i] : 0;
+    if (c) return c.chunk.ground[c.i];
+    return unmapped.heightAt(x, z) ?? 0;
   }
-  /** Highest solid y of the column under a block position: building top, deck slab or ground; 0 on water / unloaded. */
+  /** Highest solid y of the column under a block position: column top, deck slab, prop or ground; 0 on water / unloaded. */
   function surfaceTop(x, z) {
     const c = column(x, z);
-    if (!c) return 0;
-    const b = c.chunk.bldg[c.i];
-    return b ? c.chunk.buildings[b - 1].top : Math.max(c.chunk.ground[c.i], Math.abs(c.chunk.deck[c.i]));
+    if (!c) return unmapped.heightAt(x, z) ?? 0;
+    const k = c.i;
+    let top = c.chunk.bldg[k] ? c.chunk.top[k] : Math.max(c.chunk.ground[k], Math.abs(c.chunk.deck[k]));
+    for (const p of c.chunk.props) if (p.lz * CHUNK + p.lx === k && p.y1 > top) top = p.y1;
+    return top;
   }
   /** Highest surfaceTop over the (2r+1)² columns around a block position. */
   function surfaceTopNear(x, z, r) {
@@ -278,27 +325,71 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) top = Math.max(top, surfaceTop(x + dx, z + dz));
     return top;
   }
+  /** → {id (parent || id: what pick returns), entryId, parent, base, top (entry max), columnTop} | null */
   function buildingAt(x, z) {
     const c = column(x, z);
     if (!c) return null;
     const b = c.chunk.bldg[c.i];
     if (!b) return null;
-    const { id, base, top } = c.chunk.buildings[b - 1];
-    return { id, base, top };
+    const e = c.chunk.buildings[b - 1];
+    return { id: pickId(e), entryId: e.id, parent: e.parent, base: e.base, top: e.top, columnTop: c.chunk.top[c.i] };
   }
 
   /* ── camera ─────────────────────────────────────────────────────────────────────────────────── */
-  const spawn = at ?? manifest.spawn;
   const camAnim = { active: false };
-  const offsetDir = new THREE.Vector3().setFromSphericalCoords(1, 0.95, Math.PI * 0.18);
-  function place(x, z, dist) {
-    const y = groundAt(x, z);
-    controls.target.set(x, y, z);
-    camera.position.copy(controls.target).addScaledVector(offsetDir, dist);
+  const offsetDir = new THREE.Vector3();
+
+  /* ── follow ─────────────────────────────────────────────────────────────────────────────────── */
+  let following = null;
+  const unfollowCbs = [];
+  /** Track getPos() → {x, y, z} every frame (the target eases onto it, the camera keeps its offset). */
+  function follow(getPos) {
+    if (typeof getPos !== "function") throw new Error("city.follow: getPos must be a function → {x, y, z}");
+    camAnim.active = false;
+    following = getPos;
+  }
+  function unfollow(reason) {
+    if (!following) return;
+    following = null;
+    for (const fn of unfollowCbs) fn(reason);
+  }
+  function stepFollow(dt) {
+    if (!following) return;
+    const p = following();
+    if (!p || ![p.x, p.y, p.z].every(Number.isFinite)) throw new Error(`city.follow: getPos returned ${JSON.stringify(p)}, expected {x, y, z}`);
+    const k = 1 - Math.pow(1 - FOLLOW_EASE, dt * 60);
+    const t = controls.target;
+    const dx = (p.x - t.x) * k, dy = (p.y - t.y) * k, dz = (p.z - t.z) * k;
+    t.x += dx; t.y += dy; t.z += dz;
+    camera.position.x += dx; camera.position.y += dy; camera.position.z += dz;
+  }
+
+  /**
+   * Put the camera on (x, z) at distance dist, azimuth az (THREE Spherical theta) and tilt polar (phi). Instant;
+   * cancels a fly-to and follow. dist and polar are clamped to the stage's camera limits.
+   */
+  function setCamera({ x, z, dist, az = manifest.spawn.az, polar = DEFAULT_POLAR }) {
+    for (const [k, v] of Object.entries({ x, z, dist, az, polar })) if (!Number.isFinite(v)) throw new Error(`city.setCamera: ${k} must be a finite number, got ${v}`);
+    if (!(dist > 0)) throw new Error(`city.setCamera: dist must be > 0, got ${dist}`);
+    camAnim.active = false;
+    unfollow("api");
+    const d = THREE.MathUtils.clamp(dist, CAMERA_LIMITS.minDist, CAMERA_LIMITS.maxDist);
+    const phi = THREE.MathUtils.clamp(polar, CAMERA_LIMITS.minPolar, CAMERA_LIMITS.maxPolar);
+    offsetDir.setFromSphericalCoords(1, phi, az);
+    controls.target.set(x, groundAt(x, z), z);
+    camera.position.copy(controls.target).addScaledVector(offsetDir, d);
     camera.lookAt(controls.target);
     controls.update();
   }
-  place(spawn.x, spawn.z, spawn.dist);
+  const sph = new THREE.Spherical();
+  const offsetNow = new THREE.Vector3();
+  /** → {x, z, dist, az, polar} of the orbit camera now (the ?cam= state). */
+  function getCamera() {
+    sph.setFromVector3(offsetNow.copy(camera.position).sub(controls.target));
+    return { x: controls.target.x, z: controls.target.z, dist: sph.radius, az: sph.theta, polar: sph.phi };
+  }
+
+  setCamera(at ?? manifest.spawn);
 
   const easeInOut = (k) => (k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2);
   function focus(x, z, dist) {
@@ -309,10 +400,11 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     const off = camera.position.clone().sub(controls.target).setLength(THREE.MathUtils.clamp(d, controls.minDistance, controls.maxDistance));
     Object.assign(camAnim, { active: true, t0: performance.now(), dur: 900, fromT: controls.target.clone(), toT, fromP: camera.position.clone(), toP: toT.clone().add(off) });
   }
-  controls.addEventListener("start", () => { camAnim.active = false; });
+  controls.addEventListener("start", () => { camAnim.active = false; unfollow("user"); });
 
   function stepCamera(now, dt, keyed) {
-    if (keyed) camAnim.active = false;
+    if (keyed) { camAnim.active = false; unfollow("user"); }
+    stepFollow(dt);
     if (camAnim.active) {
       const k = Math.min(1, (now - camAnim.t0) / camAnim.dur), e = easeInOut(k);
       controls.target.lerpVectors(camAnim.fromT, camAnim.toT, e);
@@ -325,7 +417,7 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     const t = controls.target;
     const cx = THREE.MathUtils.clamp(t.x, bbox.x0, bbox.x1), cz = THREE.MathUtils.clamp(t.z, bbox.z0, bbox.z1);
     const gy = Math.max(groundAt(cx, cz), surfaceTop(cx, cz) - camera.position.distanceTo(t) * TARGET_ROOF_REACH);
-    const cy = camAnim.active ? t.y : t.y + (gy - t.y) * Math.min(1, dt * 4);
+    const cy = camAnim.active || following ? t.y : t.y + (gy - t.y) * Math.min(1, dt * 4);
     if (cx !== t.x || cz !== t.z || cy !== t.y) {
       const dx = cx - t.x, dy = cy - t.y, dz = cz - t.z;
       t.set(cx, cy, cz);
@@ -342,10 +434,22 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     scene.fog.far = Math.min(dist * 4.5, camera.far);
   }
 
+  /* ── compass ────────────────────────────────────────────────────────────────────────────────── */
+  let compass = null;
+  /** Draw the north arrow into `el` (W7's #city-compass); done automatically when it exists and rotDeg ≠ 0. */
+  function attachCompass(el) {
+    if (compass) compass.destroy();
+    compass = mountCompass(el, manifest.proj);
+    return compass;
+  }
+  const compassEl = document.getElementById("city-compass");
+  if (compassEl && manifest.proj.rotDeg !== 0) attachCompass(compassEl);
+
   /* ── frame ──────────────────────────────────────────────────────────────────────────────────── */
   const frameCbs = [];
   stage.onFrame((now, dt, keyed) => {
     stepCamera(now, dt, keyed);
+    if (compass) compass.update(controls.getAzimuthalAngle());
     const t = controls.target;
     if (Math.abs(t.x - lastTarget.x) > 2 || Math.abs(t.z - lastTarget.z) > 2) { dirty = true; lastTarget = { x: t.x, z: t.z }; }
     if (dirty) { dirty = false; updateLod(); }
@@ -361,7 +465,7 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     ndc.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     raycaster.setFromCamera(ndc, camera);
     const { origin, direction } = raycaster.ray;
-    return pickRay(store, { x: origin.x, y: origin.y, z: origin.z }, { x: direction.x, y: direction.y, z: direction.z }, camera.far);
+    return pickRay(store, { x: origin.x, y: origin.y, z: origin.z }, { x: direction.x, y: direction.y, z: direction.z }, camera.far, { unbuiltAt: unmapped.heightAt });
   }
   const proj = new THREE.Vector3();
   function worldToScreen(x, y, z) {
@@ -388,7 +492,7 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     let l0 = 0, r1 = 0, r2 = 0;
     for (const e of lod0.values()) if (e.meshes) l0++;
     for (const r of regions.values()) if (r.mesh) { if (r.shown.lod === 1) r1++; else r2++; }
-    return { lod0: l0, regions1: r1, regions2: r2, pending: store.pending() + waiting.size + uploads.length };
+    return { lod0: l0, regions1: r1, regions2: r2, pending: store.pending() + waiting.size + uploads.length, unbuilt: unbuiltMesh !== null, landmarks: landmarks.count };
   };
 
   const city = {
@@ -400,6 +504,17 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     setTheme: (name) => stage.setTheme(name),
     get theme() { return stage.theme; },
     focus,
+    setCamera,
+    getCamera,
+    follow,
+    unfollow: () => unfollow("api"),
+    /** fn(reason: "user" | "api") when follow ends (a pan, orbit, key or setCamera cancels it). */
+    onUnfollow(fn) { unfollowCbs.push(fn); },
+    get following() { return following !== null; },
+    attachCompass,
+    unmapped,
+    landmarks,
+    camera,
     onFrame(fn) { frameCbs.push(fn); },
     /** fn({clientX, clientY, hit}) on a click / tap that barely moved; hit is pick()'s result. */
     onTap(fn) { tapCbs.push(fn); },

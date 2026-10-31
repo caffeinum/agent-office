@@ -1,10 +1,14 @@
-// W4 picking checks (spec §5 W4): voxel DDA over the decoded fixture store.
+// W4 picking checks (spec §5 W4, spec-v2 §8 W4): voxel DDA over the decoded fixture store; v2: per-column top,
+// parent resolution (stands → ballpark, ferry tower + shed → one parent), props pick as their building, unbuilt land.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
-import { CHUNK, COLUMNS, SURFACE, chunkKey, chunkOf, decodeChunk, validateChunk, validateCompanies, validateManifest } from "../../../public/shared/city.js";
+import {
+  CAP, CHUNK, COLUMNS, FACADE, SURFACE, chunkKey, chunkOf, decodeChunk, decodeLandmask, pickId, validateChunk, validateCompanies, validateManifest,
+} from "../../../public/shared/city.js";
+import { createUnmapped } from "../../../public/js/city/unmapped.js";
 import { pickRay } from "../../../public/js/city/pick.js";
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "../../../public/city/fixture");
@@ -80,7 +84,7 @@ test("oblique rays agree with the column they report", () => {
     }
     const { c, k, b } = column(hit.x, hit.z);
     n++;
-    if (hit.kind === "building") assert.equal(hit.buildingId, b.id);
+    if (hit.kind === "building") assert.deepEqual([hit.buildingId, hit.entryId], [pickId(b), b.id]);
     if (hit.kind === "water") assert.equal(c.ground[k], 0);
     if (hit.kind === "ground") assert.ok(c.ground[k] >= 1 && hit.point.y <= c.ground[k] + 1e-9);
     assert.ok(hit.point.x >= hit.x - 1e-9 && hit.point.x <= hit.x + 1 + 1e-9);
@@ -103,6 +107,71 @@ test("decks: slab and pillar pick as deck; a ray under a positive deck reaches t
   assert.deepEqual([under.kind, under.x], ["deck", 11], "passes under the slab at x=10, hits the pillar at x=11");
   const ground = pickRay(s, { x: 10.5, y: 5, z: 10.5 }, DOWN, 30);
   assert.deepEqual([ground.kind, ground.y], ["ground", 2]);
+});
+
+/** World column of the first column in chunk (cx, cz) whose entry satisfies `want`. */
+function columnOf(cx, cz, want) {
+  const c = store.get(cx, cz);
+  for (let k = 0; k < COLUMNS; k++) {
+    if (c.bldg[k] && want(c.buildings[c.bldg[k] - 1], k, c)) return { x: cx * CHUNK + (k % CHUNK), z: cz * CHUNK + Math.floor(k / CHUNK), c, k, B: c.buildings[c.bldg[k] - 1] };
+  }
+  throw new Error(`no matching column in ${cx},${cz}`);
+}
+const down = (x, z, y = 500) => pickRay(store, { x: x + 0.5, y, z: z + 0.5 }, DOWN, 1000);
+
+test("a stand column picks as the ballpark parent, at its own column top", () => {
+  const { x, z, c, k, B } = columnOf(56, 27, (b) => b.cap === CAP.SEATS);
+  const hit = down(x, z);
+  assert.deepEqual([hit.kind, hit.buildingId, hit.entryId], ["building", 1002, B.id]);
+  assert.equal(hit.y, c.top[k]);
+  assert.equal(manifest.parents[hit.buildingId], "Fixture Park");
+  const board = columnOf(56, 27, (b) => b.facade === FACADE.BLANK);
+  assert.equal(down(board.x, board.z).buildingId, 1002, "the scoreboard is the same ballpark");
+});
+
+test("the ferry clock tower and the shed resolve to the same parent", () => {
+  const tower = columnOf(58, 25, (b) => b.cap === CAP.DOME);
+  const shed = columnOf(58, 25, (b) => b.facade === FACADE.ARCADE);
+  const a = down(tower.x, tower.z), b = down(shed.x, shed.z);
+  assert.notEqual(a.entryId, b.entryId);
+  assert.equal(a.buildingId, 1001);
+  assert.equal(b.buildingId, 1001);
+  assert.equal(a.y, tower.c.top[tower.k]);
+});
+
+test("a prop picks as the building it stands on (spire on the taper, light tower on the stands)", () => {
+  const spireChunk = store.get(58, 25);
+  const [spire] = spireChunk.props;
+  const sx = 58 * CHUNK + spire.lx, sz = 25 * CHUNK + spire.lz;
+  const onTop = down(sx, sz, spire.y1 + 50);
+  assert.equal(onTop.y, spire.y1, "the ray stops on the spire top");
+  const B = spireChunk.buildings[spireChunk.bldg[spire.lz * CHUNK + spire.lx] - 1];
+  assert.deepEqual([onTop.kind, onTop.buildingId], ["building", B.id]);
+  const side = pickRay(store, { x: sx + 0.5, y: (spire.y0 + spire.y1) / 2, z: sz - 10.5 }, { x: 0, y: 0, z: 1 }, 50);
+  assert.deepEqual([side.kind, side.buildingId, side.x, side.z], ["building", B.id, sx, sz], "a horizontal ray hits the spire");
+  const lights = store.get(56, 27).props.filter((p) => p.flags === 1);
+  assert.equal(lights.length, 6);
+  for (const p of lights) {
+    const hit = down(56 * CHUNK + p.lx, 27 * CHUNK + p.lz, p.y1 + 20);
+    assert.deepEqual([hit.y, hit.buildingId], [p.y1, 1002]);
+  }
+});
+
+test("the taper picks at each column's own top, not the entry max", () => {
+  const ring = columnOf(58, 25, (b, k, c) => b.top === 81 && c.top[k] < b.top);
+  const hit = down(ring.x, ring.z);
+  assert.equal(hit.y, ring.c.top[ring.k]);
+  assert.ok(hit.y < ring.B.top);
+});
+
+test("unbuilt land picks as unbuilt at its coarse height; sea stays water", () => {
+  const mask = decodeLandmask(new Uint8Array(gunzipSync(readFileSync(join(FIXTURE, manifest.landmask)))), manifest.chunks.grid);
+  const u = createUnmapped(manifest, mask);
+  const hit = pickRay(store, { x: 55 * CHUNK + 20.5, y: 80, z: 25 * CHUNK + 20.5 }, DOWN, 200, { unbuiltAt: u.heightAt });
+  assert.deepEqual([hit.kind, hit.y, hit.cx], ["unbuilt", 2, 55]);
+  const sea = pickRay(store, { x: 60 * CHUNK + 20.5, y: 80, z: 25 * CHUNK + 20.5 }, DOWN, 200, { unbuiltAt: u.heightAt });
+  assert.equal(sea.kind, "water");
+  assert.throws(() => pickRay(store, { x: 0, y: 0, z: 0 }, DOWN, 10, { unbuiltAt: 3 }), /unbuiltAt must be a function/);
 });
 
 test("misses and bad input", () => {
