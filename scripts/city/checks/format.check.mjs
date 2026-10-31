@@ -460,7 +460,7 @@ test("build ctx: createBuildCtx freezes the ctx and the ctx.osm / ctx.datasf rec
   assert.deepEqual(STRUCTURE_KINDS.length, 9);
 });
 
-test("hook signatures: W3 hooks keep the frozen signatures and fail loudly without their OSM records; W5 stubs fail loudly", () => {
+test("hook signatures: W3 hooks keep the frozen signatures and fail loudly without their OSM records; buildWalk fails loudly on bad input", () => {
   const r = createRaster([0, 0], [0, 0]);
   const ctx = createBuildCtx({ proj: { ...SF_PROJ }, groundAt: () => 1, osm: [], datasf: [], report: {} });
   assert.equal(applyStructures(r, ctx), r);
@@ -470,7 +470,7 @@ test("hook signatures: W3 hooks keep the frozen signatures and fail loudly witho
   assert.equal(applyStructures.length, 2);
   assert.equal(applyLandmarks.length, 2);
   assert.equal(buildLandmarkMesh.length, 1);
-  assert.throws(() => buildWalk({}), /not implemented yet \(W5/);
+  assert.throws(() => buildWalk({}), /buildWalk: roads must be an array/);
 });
 
 // ---------- fixture ----------
