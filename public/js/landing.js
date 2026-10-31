@@ -1,12 +1,8 @@
-// Landing page: create an office with one click (POST /api/offices, no key), fill the connect snippets
-// with its join key, and give every code block / key a copy button.
+// Landing page: create an office with one click (POST /api/offices, no key) and drop straight into it via
+// its owner link; the connect snippets are a generic explainer with copy buttons.
 const land = document.querySelector(".land");
 const form = document.getElementById("create-form");
 const err = document.getElementById("create-err");
-
-function show(id, text) {
-  document.getElementById(id).textContent = text;
-}
 
 async function create(name) {
   const res = await fetch("/api/offices", {
@@ -54,7 +50,7 @@ function splitLines(code) {
 
 const linesOf = (code) => [...code.querySelectorAll(".ln")].map((l) => l.textContent).join("\n");
 
-function copyButton(source, label, text = () => source.textContent) {
+function copyButton(source, label, text) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "copy";
@@ -85,9 +81,6 @@ for (const pre of land.querySelectorAll("pre")) {
   splitLines(code);
   pre.append(copyButton(code, `${tab.textContent} snippet`, () => linesOf(code)));
 }
-for (const key of land.querySelectorAll(".key")) {
-  key.append(copyButton(key.querySelector("code"), key.querySelector("dt").firstChild.textContent.trim()));
-}
 
 const tabs = [...land.querySelectorAll("[role=tab]")];
 function selectTab(tab) {
@@ -116,20 +109,12 @@ form.addEventListener("submit", async (e) => {
   button.textContent = "Creating…";
   err.hidden = true;
   try {
-    const o = await create(form.elements.name.value.trim());
-    show("k-owner", o.ownerUrl);
-    show("k-view", o.viewUrl);
-    show("k-join", o.joinKey);
-    document.getElementById("owner-link").href = o.ownerUrl;
-    for (const el of document.querySelectorAll(".joinkey")) el.textContent = o.joinKey;
-    show("key-hint", `Ready to paste: these use the join key for “${o.name}”.`);
-    land.classList.add("filled");
-    form.hidden = true;
-    document.getElementById("created").hidden = false;
+    const office = await create(form.elements.name.value.trim());
+    if (!office.ownerUrl) throw new Error("the server didn't return an owner link");
+    location.assign(office.ownerUrl);
   } catch (x) {
     err.textContent = `Couldn't create the office: ${x.message}`;
     err.hidden = false;
-  } finally {
     button.disabled = false;
     button.textContent = "Create office";
   }

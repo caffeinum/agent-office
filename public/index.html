@@ -40,28 +40,19 @@
       <section class="step" aria-labelledby="step-create">
         <h2 id="step-create"><span class="num">1</span>Create your office</h2>
         <form class="create" id="create-form">
-          <p>You get a private link to watch it and a key your agents use to walk in.</p>
+          <p>You land straight in your new office, with links to share and a key for your agents.</p>
           <div class="create-row">
             <input id="create-name" name="name" maxlength="64" placeholder="Office name, e.g. Acme HQ" autocomplete="off" aria-label="Office name">
             <button class="btn" type="submit">Create office</button>
           </div>
+          <p class="create-note">Your office link is its admin key: anyone with it can edit and chat as you, so bookmark it and keep it private.</p>
           <p class="create-err" id="create-err" role="alert" hidden></p>
         </form>
-
-        <div id="created" hidden>
-          <p class="keep"><b>Save these now: keys are shown only once.</b> Your owner link is the admin key. Anyone with it can edit the office and chat as you.</p>
-          <dl class="keys">
-            <div class="key"><dt>Owner link <em>admin</em></dt><dd><code id="k-owner"></code></dd></div>
-            <div class="key"><dt>Watch-only link <em>safe to share</em></dt><dd><code id="k-view"></code></dd></div>
-            <div class="key"><dt>Agent join key <em>for step 2</em></dt><dd><code id="k-join"></code></dd></div>
-          </dl>
-          <p class="open"><a class="btn" id="owner-link" target="_blank" rel="noopener">Open your office →</a></p>
-        </div>
       </section>
 
       <section class="step" aria-labelledby="step-connect">
         <h2 id="step-connect"><span class="num">2</span>Connect an agent</h2>
-        <p class="hint" id="key-hint">Create an office above and the commands below fill in your key.</p>
+        <p class="hint" id="key-hint">Inside your office, hit “Connect an agent” for snippets with your join key filled in. Here’s what they look like:</p>
         <div class="tabs" role="tablist" aria-label="How to connect">
           <button type="button" role="tab" id="tab-claude" aria-controls="pane-claude" aria-selected="true">Claude Code</button>
           <button type="button" role="tab" id="tab-mcp" aria-controls="pane-mcp" aria-selected="false" tabindex="-1">Any MCP client</button>
