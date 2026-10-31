@@ -35,6 +35,8 @@ export declare const PALETTE_GROUPS: Readonly<{
   glass: PaletteGroup;
   landmark: Readonly<{ salesforce: number; transamerica: number }>;
 }>;
+export declare const TERRAIN_SIDE_COLORS: Readonly<Record<Surface, string>>;
+export declare const DECK_COLORS: Readonly<{ top: string; edge: string; pillar: string; under: string }>;
 export declare function hashId(id: number): number;
 export declare function paletteFor(heightBlocks: number, id: number): number;
 

@@ -84,6 +84,32 @@ export const PALETTE_GROUPS = Object.freeze({
 
 export const ROOF_DARKEN = 0.12;
 
+const DIRT = "#8a6b4e";
+/** Colour of a column's exposed terrain side (cliffs, terraces, the land under a building). */
+export const TERRAIN_SIDE_COLORS = Object.freeze({
+  [SURFACE.WATER]: "#2f6a99",
+  [SURFACE.SHALLOW]: "#2f6a99",
+  [SURFACE.SAND]: "#d4c08c",
+  [SURFACE.GRASS]: DIRT,
+  [SURFACE.PARK]: DIRT,
+  [SURFACE.FOREST]: DIRT,
+  [SURFACE.ROAD]: "#7d7870",
+  [SURFACE.SIDEWALK]: "#a9a398",
+  [SURFACE.RAIL]: "#5a5149",
+  [SURFACE.PLAZA]: "#b3a998",
+  [SURFACE.PIER]: "#6e5338",
+  [SURFACE.HILL]: DIRT,
+  [SURFACE.PARKING]: "#7d7870",
+});
+
+/** Elevated road decks: asphalt slab top, concrete edges and pillars, a shaded underside. */
+export const DECK_COLORS = Object.freeze({
+  top: "#4a4d52",
+  edge: "#b5afa5",
+  pillar: "#9f9a92",
+  under: "#6e6a64",
+});
+
 /** FNV-1a over the decimal id: the deterministic "hash(id)" that picks a variant inside a palette group. */
 export function hashId(id) {
   if (!Number.isInteger(id) || id < 0) throw new Error(`hashId: id must be a non-negative integer, got ${id}`);

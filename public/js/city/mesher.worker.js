@@ -1,5 +1,5 @@
-// STUB (W1) — owner W4. Stateless module worker around handleMeshRequest.
-// Final exported signatures; bodies are TODO. Spec: docs/city/spec.md.
+// Stateless module worker around handleMeshRequest. Spawn with `new Worker(url, {type: "module"})`.
+// Request/reply shapes: see handleMeshRequest in mesher.js. Errors come back as {id, error}.
 import { handleMeshRequest } from "./mesher.js";
 
 self.onmessage = (e) => {
