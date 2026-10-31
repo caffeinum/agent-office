@@ -60,12 +60,21 @@ export function createOverlay(layer, { onClick }) {
       if (!p.visible || p.scale < 0.2) { n.el.style.display = "none"; continue; }
       n.el.style.display = "";
       if (!n.size) n.size = { w: n.el.offsetWidth, h: n.el.offsetHeight };
-      rects.push({ id: p.id, x: p.x - n.size.w / 2, y: p.y - n.size.h, w: n.size.w, h: n.size.h, depth: p.depth, priority: labelPriority({ selected: selected === p.id, status: a?.status, speaking: n.el.classList.contains("speaking") }) });
-      n.el.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) translate(-50%, -100%)`;
-      n.el.style.zIndex = String(1000 - Math.round(p.depth * 10));
+      // Sub-pixel noise from camera damping and pose blending made labels shimmer: ignore moves under
+      // a pixel, ease small ones, follow big ones (orbit, zoom) at once.
+      const dx = p.x - (n.sx ?? p.x), dy = p.y - (n.sy ?? p.y), d = Math.hypot(dx, dy);
+      if (n.sx === undefined || d > 24) { n.sx = p.x; n.sy = p.y; }
+      else if (d > 0.75) { n.sx += dx * 0.5; n.sy += dy * 0.5; }
+      const x = n.sx - n.size.w / 2, y = n.sy - n.size.h;
+      // Hysteresis: a label already shown outranks an equal-priority neighbour, so overlaps don't flip every frame.
+      const priority = labelPriority({ selected: selected === p.id, status: a?.status, speaking: n.el.classList.contains("speaking") }) + (n.kept ? 5 : 0);
+      rects.push({ id: p.id, x, y, w: n.size.w, h: n.size.h, depth: p.depth, priority });
+      n.el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
+      const z = String(1000 - Math.round(p.depth * 10));
+      if (n.el.style.zIndex !== z) n.el.style.zIndex = z;
     }
     const keep = cullLabels(rects);
-    for (const r of rects) nodes.get(r.id).el.classList.toggle("culled", !keep.has(r.id));
+    for (const r of rects) { const n = nodes.get(r.id); n.kept = keep.has(r.id); n.el.classList.toggle("culled", !n.kept); }
     for (const [id, n] of nodes) {
       if (!live.has(id)) { n.el.remove(); nodes.delete(id); }
     }
