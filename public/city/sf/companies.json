@@ -1,7 +1,7 @@
 {
- "version": 1,
+ "version": 2,
  "city": "sf",
- "builtAt": "2026-10-31T11:23:39Z",
+ "builtAt": "2026-10-31T22:14:53Z",
  "sites": [
   {
    "id": "anthropic-500-howard",
@@ -33,19 +33,19 @@
     "parcel": "3721011"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=500+Howard+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 21065,
+   "buildingId": 40948,
    "block": {
-    "x": 3616,
-    "z": 1716
+    "x": 4766,
+    "z": 4131
    },
    "chunk": [
-    56,
-    26
+    74,
+    64
    ],
    "anchor": {
-    "x": 3622,
+    "x": 4766,
     "y": 2,
-    "z": 1721
+    "z": 4138
    },
    "roofY": 17,
    "heightM": 45,
@@ -82,24 +82,24 @@
     "parcel": "3736001"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=505+Howard+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 18125,
+   "buildingId": 35189,
    "block": {
-    "x": 3634,
-    "z": 1722
+    "x": 4775,
+    "z": 4148
    },
    "chunk": [
-    56,
-    26
+    74,
+    64
    ],
    "anchor": {
-    "x": 3630,
+    "x": 4773,
     "y": 2,
-    "z": 1722
+    "z": 4144
    },
    "roofY": 18,
    "heightM": 48,
-   "placement": "contains",
-   "placementDistM": 0
+   "placement": "nearest",
+   "placementDistM": 3
   },
   {
    "id": "anthropic-400-howard",
@@ -126,22 +126,22 @@
     "parcel": "3720006"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=400+Howard+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 16082,
+   "buildingId": 30965,
    "block": {
-    "x": 3643,
-    "z": 1690
+    "x": 4803,
+    "z": 4130
    },
    "chunk": [
-    56,
-    26
+    75,
+    64
    ],
    "anchor": {
-    "x": 3648,
+    "x": 4803,
     "y": 2,
-    "z": 1695
+    "z": 4138
    },
-   "roofY": 18,
-   "heightM": 48,
+   "roofY": 19,
+   "heightM": 51,
    "placement": "contains",
    "placementDistM": 0
   },
@@ -175,19 +175,19 @@
     "parcel": "8721033"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1455+3rd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 23190,
+   "buildingId": 44914,
    "block": {
-    "x": 3849,
-    "z": 2393
+    "x": 4455,
+    "z": 4775
    },
    "chunk": [
-    60,
-    37
+    69,
+    74
    ],
    "anchor": {
-    "x": 3850,
+    "x": 4449,
     "y": 1,
-    "z": 2401
+    "z": 4781
    },
    "roofY": 19,
    "heightM": 54,
@@ -218,19 +218,19 @@
     "parcel": "8721012"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1515+3rd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 23191,
+   "buildingId": 44915,
    "block": {
-    "x": 3840,
-    "z": 2429
+    "x": 4424,
+    "z": 4794
    },
    "chunk": [
-    60,
-    37
+    69,
+    74
    ],
    "anchor": {
-    "x": 3840,
+    "x": 4419,
     "y": 1,
-    "z": 2435
+    "z": 4799
    },
    "roofY": 12,
    "heightM": 33,
@@ -267,19 +267,19 @@
     "parcel": "8721011"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=550+Terry+A+Francois+Blvd%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 11403,
+   "buildingId": 21003,
    "block": {
-    "x": 3914,
-    "z": 2414
+    "x": 4487,
+    "z": 4836
    },
    "chunk": [
-    61,
-    37
+    70,
+    75
    ],
    "anchor": {
-    "x": 3917,
+    "x": 4489,
     "y": 1,
-    "z": 2414
+    "z": 4837
    },
    "roofY": 10,
    "heightM": 27,
@@ -310,19 +310,19 @@
     "parcel": "8722024"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1725+3rd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 23391,
+   "buildingId": 45258,
    "block": {
-    "x": 3854,
-    "z": 2494
+    "x": 4388,
+    "z": 4851
    },
    "chunk": [
-    60,
-    38
+    68,
+    75
    ],
    "anchor": {
-    "x": 3845,
+    "x": 4378,
     "y": 1,
-    "z": 2499
+    "z": 4848
    },
    "roofY": 14,
    "heightM": 39,
@@ -354,22 +354,22 @@
     "parcel": "3720009"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=415+Mission+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 17146,
+   "buildingId": 4000000001,
    "block": {
-    "x": 3604,
-    "z": 1661
+    "x": 4797,
+    "z": 4083
    },
    "chunk": [
-    56,
-    25
+    74,
+    63
    ],
    "anchor": {
-    "x": 3600,
+    "x": 4794,
     "y": 2,
-    "z": 1660
+    "z": 4079
    },
    "roofY": 111,
-   "heightM": 330,
+   "heightM": 327,
    "placement": "contains",
    "placementDistM": 0
   },
@@ -403,22 +403,22 @@
     "parcel": "3720009"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=415+Mission+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 17146,
+   "buildingId": 4000000001,
    "block": {
-    "x": 3604,
-    "z": 1661
+    "x": 4797,
+    "z": 4083
    },
    "chunk": [
-    56,
-    25
+    74,
+    63
    ],
    "anchor": {
-    "x": 3600,
+    "x": 4794,
     "y": 2,
-    "z": 1660
+    "z": 4079
    },
    "roofY": 111,
-   "heightM": 330,
+   "heightM": 327,
    "placement": "contains",
    "placementDistM": 0
   },
@@ -446,19 +446,19 @@
     "parcel": "3780006"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=888+Brannan+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 10220,
+   "buildingId": 18531,
    "block": {
-    "x": 3367,
-    "z": 2321
+    "x": 4163,
+    "z": 4385
    },
    "chunk": [
-    52,
-    36
+    65,
+    68
    ],
    "anchor": {
-    "x": 3374,
+    "x": 4163,
     "y": 1,
-    "z": 2328
+    "z": 4396
    },
    "roofY": 8,
    "heightM": 21,
@@ -495,19 +495,19 @@
     "parcel": "3785009"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=651+Brannan+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 18203,
+   "buildingId": 35362,
    "block": {
-    "x": 3530,
-    "z": 2203
+    "x": 4363,
+    "z": 4416
    },
    "chunk": [
-    55,
-    34
+    68,
+    69
    ],
    "anchor": {
-    "x": 3535,
+    "x": 4370,
     "y": 1,
-    "z": 2197
+    "z": 4416
    },
    "roofY": 7,
    "heightM": 18,
@@ -538,19 +538,19 @@
     "parcel": "3794015"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=101+Townsend+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 11587,
+   "buildingId": 21375,
    "block": {
-    "x": 3799,
-    "z": 2018
+    "x": 4683,
+    "z": 4474
    },
    "chunk": [
-    59,
-    31
+    73,
+    69
    ],
    "anchor": {
-    "x": 3803,
+    "x": 4689,
     "y": 2,
-    "z": 2014
+    "z": 4473
    },
    "roofY": 7,
    "heightM": 15,
@@ -581,19 +581,19 @@
     "parcel": "3803005"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=185+Berry+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 1701,
+   "buildingId": 3187,
    "block": {
-    "x": 3750,
-    "z": 2153
+    "x": 4554,
+    "z": 4535
    },
    "chunk": [
-    58,
-    33
+    71,
+    70
    ],
    "anchor": {
-    "x": 3749,
+    "x": 4554,
     "y": 1,
-    "z": 2152
+    "z": 4533
    },
    "roofY": 10,
    "heightM": 27,
@@ -625,19 +625,19 @@
     "parcel": "3710018"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=50+Beale+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 20697,
+   "buildingId": 45518,
    "block": {
-    "x": 3623,
-    "z": 1612
+    "x": 4844,
+    "z": 4062
    },
    "chunk": [
-    56,
-    25
+    75,
+    63
    ],
    "anchor": {
-    "x": 3618,
+    "x": 4837,
     "y": 1,
-    "z": 1616
+    "z": 4061
    },
    "roofY": 37,
    "heightM": 108,
@@ -668,24 +668,24 @@
     "parcel": "3749062"
    },
    "hintFrom": "https://www.openstreetmap.org/node/3894036010",
-   "buildingId": 12173,
+   "buildingId": 44970,
    "block": {
-    "x": 3649,
-    "z": 1832
+    "x": 4708,
+    "z": 4236
    },
    "chunk": [
-    57,
-    28
+    73,
+    66
    ],
    "anchor": {
-    "x": 3650,
+    "x": 4709,
     "y": 6,
-    "z": 1832
+    "z": 4236
    },
-   "roofY": 29,
-   "heightM": 69,
+   "roofY": 23,
+   "heightM": 54,
    "placement": "nearest",
-   "placementDistM": 9
+   "placementDistM": 4.2
   },
   {
    "id": "reddit-303-2nd",
@@ -711,24 +711,24 @@
     "parcel": "3749062"
    },
    "hintFrom": "https://www.openstreetmap.org/node/3894036010",
-   "buildingId": 12173,
+   "buildingId": 44970,
    "block": {
-    "x": 3649,
-    "z": 1832
+    "x": 4708,
+    "z": 4236
    },
    "chunk": [
-    57,
-    28
+    73,
+    66
    ],
    "anchor": {
-    "x": 3650,
+    "x": 4709,
     "y": 6,
-    "z": 1832
+    "z": 4236
    },
-   "roofY": 29,
-   "heightM": 69,
+   "roofY": 23,
+   "heightM": 54,
    "placement": "nearest",
-   "placementDistM": 9
+   "placementDistM": 4.2
   },
   {
    "id": "okta-100-1st",
@@ -754,22 +754,22 @@
     "parcel": "3721001"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=100+1st+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 1844,
+   "buildingId": 46640,
    "block": {
-    "x": 3590,
-    "z": 1677
+    "x": 4775,
+    "z": 4084
    },
    "chunk": [
-    56,
-    26
+    74,
+    63
    ],
    "anchor": {
-    "x": 3587,
+    "x": 4775,
     "y": 2,
-    "z": 1673
+    "z": 4079
    },
-   "roofY": 36,
-   "heightM": 102,
+   "roofY": 47,
+   "heightM": 135,
    "placement": "contains",
    "placementDistM": 0
   },
@@ -797,19 +797,19 @@
     "parcel": "3800004"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1+De+Haro+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 16874,
+   "buildingId": 32634,
    "block": {
-    "x": 3465,
-    "z": 2406
+    "x": 4173,
+    "z": 4515
    },
    "chunk": [
-    54,
-    37
+    65,
+    70
    ],
    "anchor": {
-    "x": 3460,
+    "x": 4170,
     "y": 1,
-    "z": 2406
+    "z": 4511
    },
    "roofY": 4,
    "heightM": 9,
@@ -840,19 +840,19 @@
     "parcel": "3750079"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=633+Folsom+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 21661,
+   "buildingId": 42118,
    "block": {
-    "x": 3593,
-    "z": 1852
+    "x": 4654,
+    "z": 4211
    },
    "chunk": [
-    56,
-    28
+    72,
+    65
    ],
    "anchor": {
-    "x": 3591,
+    "x": 4654,
     "y": 5,
-    "z": 1849
+    "z": 4207
    },
    "roofY": 21,
    "heightM": 51,
@@ -883,19 +883,19 @@
     "parcel": "3710017"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=350+Mission+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 4390,
+   "buildingId": 45472,
    "block": {
-    "x": 3617,
-    "z": 1625
+    "x": 4830,
+    "z": 4066
    },
    "chunk": [
-    56,
-    25
+    75,
+    63
    ],
    "anchor": {
-    "x": 3623,
+    "x": 4836,
     "y": 1,
-    "z": 1630
+    "z": 4064
    },
    "roofY": 45,
    "heightM": 132,
@@ -932,22 +932,22 @@
     "parcel": "3710020"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=333+Market+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 4221,
+   "buildingId": 46282,
    "block": {
-    "x": 3588,
-    "z": 1589
+    "x": 4835,
+    "z": 4020
    },
    "chunk": [
-    56,
-    24
+    75,
+    62
    ],
    "anchor": {
-    "x": 3586,
+    "x": 4835,
     "y": 1,
-    "z": 1587
+    "z": 4017
    },
-   "roofY": 51,
-   "heightM": 150,
+   "roofY": 49,
+   "heightM": 144,
    "placement": "contains",
    "placementDistM": 0
   },
@@ -976,19 +976,19 @@
     "parcel": "0107007"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1155+Battery+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 10695,
+   "buildingId": 19506,
    "block": {
-    "x": 3452,
-    "z": 1223
+    "x": 4995,
+    "z": 3665
    },
    "chunk": [
-    53,
-    19
+    78,
+    57
    ],
    "anchor": {
-    "x": 3450,
+    "x": 5001,
     "y": 2,
-    "z": 1216
+    "z": 3659
    },
    "roofY": 12,
    "heightM": 30,
@@ -1019,22 +1019,22 @@
     "parcel": "3741035"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=2+Folsom+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 9084,
+   "buildingId": 46662,
    "block": {
-    "x": 3791,
-    "z": 1634
+    "x": 4948,
+    "z": 4195
    },
    "chunk": [
-    59,
-    25
+    77,
+    65
    ],
    "anchor": {
-    "x": 3796,
+    "x": 4948,
     "y": 1,
-    "z": 1638
+    "z": 4202
    },
-   "roofY": 31,
-   "heightM": 90,
+   "roofY": 17,
+   "heightM": 48,
    "placement": "contains",
    "placementDistM": 0
   },
@@ -1063,19 +1063,19 @@
     "parcel": "3713006"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1+Market+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 15265,
+   "buildingId": 45179,
    "block": {
-    "x": 3666,
-    "z": 1511
+    "x": 4946,
+    "z": 4020
    },
    "chunk": [
-    57,
-    23
+    77,
+    62
    ],
    "anchor": {
-    "x": 3663,
+    "x": 4946,
     "y": 1,
-    "z": 1508
+    "z": 4015
    },
    "roofY": 21,
    "heightM": 60,
@@ -1106,22 +1106,22 @@
     "parcel": "0316010"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=420+Taylor+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 4709,
+   "buildingId": 46591,
    "block": {
-    "x": 3196,
-    "z": 1793
+    "x": 4413,
+    "z": 3890
    },
    "chunk": [
-    49,
-    28
+    68,
+    60
    ],
    "anchor": {
-    "x": 3196,
+    "x": 4410,
     "y": 8,
-    "z": 1800
+    "z": 3896
    },
-   "roofY": 15,
-   "heightM": 21,
+   "roofY": 14,
+   "heightM": 18,
    "placement": "contains",
    "placementDistM": 0
   },
@@ -1150,19 +1150,19 @@
     "parcel": "3740034"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=221+Main+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 18188,
+   "buildingId": 46345,
    "block": {
-    "x": 3748,
-    "z": 1645
+    "x": 4909,
+    "z": 4173
    },
    "chunk": [
-    58,
-    25
+    76,
+    65
    ],
    "anchor": {
-    "x": 3741,
-    "y": 2,
-    "z": 1638
+    "x": 4909,
+    "y": 1,
+    "z": 4162
    },
    "roofY": 27,
    "heightM": 78,
@@ -1193,19 +1193,19 @@
     "parcel": "3787031"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=475+Brannan+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 11037,
+   "buildingId": 20212,
    "block": {
-    "x": 3658,
-    "z": 2078
+    "x": 4541,
+    "z": 4417
    },
    "chunk": [
-    57,
-    32
+    70,
+    69
    ],
    "anchor": {
-    "x": 3657,
+    "x": 4541,
     "y": 2,
-    "z": 2079
+    "z": 4429
    },
    "roofY": 8,
    "heightM": 21,
@@ -1242,19 +1242,19 @@
     "parcel": "3722071"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=116+New+Montgomery+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 9526,
+   "buildingId": 17261,
    "block": {
-    "x": 3507,
-    "z": 1767
+    "x": 4652,
+    "z": 4090
    },
    "chunk": [
-    54,
-    27
+    72,
+    63
    ],
    "anchor": {
-    "x": 3511,
+    "x": 4658,
     "y": 2,
-    "z": 1763
+    "z": 4090
    },
    "roofY": 14,
    "heightM": 36,
@@ -1285,19 +1285,19 @@
     "parcel": "0451004"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=3250+Van+Ness+Ave%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 18697,
+   "buildingId": 36364,
    "block": {
-    "x": 2784,
-    "z": 1076
+    "x": 4625,
+    "z": 3090
    },
    "chunk": [
-    43,
-    16
+    72,
+    48
    ],
    "anchor": {
-    "x": 2778,
-    "y": 5,
-    "z": 1068
+    "x": 4626,
+    "y": 4,
+    "z": 3080
    },
    "roofY": 10,
    "heightM": 21,
@@ -1329,19 +1329,19 @@
     "parcel": "3701064"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1275+Market+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 19279,
+   "buildingId": 46421,
    "block": {
-    "x": 3067,
-    "z": 2118
+    "x": 4093,
+    "z": 4030
    },
    "chunk": [
-    47,
-    33
+    63,
+    62
    ],
    "anchor": {
-    "x": 3075,
+    "x": 4104,
     "y": 6,
-    "z": 2110
+    "z": 4030
    },
    "roofY": 38,
    "heightM": 96,
@@ -1372,24 +1372,24 @@
     "parcel": "0269003"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=350+Bush+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 23436,
+   "buildingId": 27473,
    "block": {
-    "x": 3420,
-    "z": 1621
+    "x": 4693,
+    "z": 3925
    },
    "chunk": [
-    53,
-    25
+    73,
+    61
    ],
    "anchor": {
-    "x": 3421,
+    "x": 4691,
     "y": 4,
-    "z": 1623
+    "z": 3926
    },
    "roofY": 26,
    "heightM": 69,
-   "placement": "nearest",
-   "placementDistM": 6
+   "placement": "contains",
+   "placementDistM": 0
   },
   {
    "id": "amplitude-201-3rd",
@@ -1415,24 +1415,24 @@
     "parcel": "3735059"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=201+3rd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 21170,
+   "buildingId": 41145,
    "block": {
-    "x": 3518,
-    "z": 1847
+    "x": 4603,
+    "z": 4155
    },
    "chunk": [
-    54,
-    28
+    71,
+    64
    ],
    "anchor": {
-    "x": 3516,
+    "x": 4602,
     "y": 3,
-    "z": 1848
+    "z": 4155
    },
    "roofY": 18,
    "heightM": 45,
-   "placement": "contains",
-   "placementDistM": 0
+   "placement": "nearest",
+   "placementDistM": 3
   },
   {
    "id": "chime-101-california",
@@ -1458,19 +1458,19 @@
     "parcel": "0263011"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=101+California+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 14540,
+   "buildingId": 4000002562,
    "block": {
-    "x": 3577,
-    "z": 1546
+    "x": 4858,
+    "z": 3982
    },
    "chunk": [
-    55,
-    24
+    75,
+    62
    ],
    "anchor": {
-    "x": 3589,
+    "x": 4867,
     "y": 1,
-    "z": 1546
+    "z": 3989
    },
    "roofY": 62,
    "heightM": 183,
@@ -1506,19 +1506,19 @@
     "parcel": "0328001"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=760+Market+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 12781,
+   "buildingId": 23881,
    "block": {
-    "x": 3361,
-    "z": 1793
+    "x": 4530,
+    "z": 4005
    },
    "chunk": [
-    52,
-    28
+    70,
+    62
    ],
    "anchor": {
-    "x": 3362,
+    "x": 4530,
     "y": 4,
-    "z": 1793
+    "z": 4006
    },
    "roofY": 21,
    "heightM": 51,
@@ -1550,19 +1550,19 @@
     "parcel": "3716021"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=101+Spear+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 2373,
+   "buildingId": 4443,
    "block": {
-    "x": 3715,
-    "z": 1573
+    "x": 4937,
+    "z": 4099
    },
    "chunk": [
-    58,
-    24
+    77,
+    64
    ],
    "anchor": {
-    "x": 3710,
+    "x": 4930,
     "y": 1,
-    "z": 1577
+    "z": 4099
    },
    "roofY": 12,
    "heightM": 33,
@@ -1600,24 +1600,24 @@
     "parcel": "3717005"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=160+Spear+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 9558,
+   "buildingId": 45436,
    "block": {
-    "x": 3713,
-    "z": 1600
+    "x": 4916,
+    "z": 4116
    },
    "chunk": [
-    58,
-    25
+    76,
+    64
    ],
    "anchor": {
-    "x": 3713,
+    "x": 4916,
     "y": 1,
-    "z": 1600
+    "z": 4116
    },
    "roofY": 28,
    "heightM": 81,
    "placement": "nearest",
-   "placementDistM": 10.8
+   "placementDistM": 12
   },
   {
    "id": "databricks-1-sansome",
@@ -1645,22 +1645,22 @@
     "parcel": "0289003"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1+Sansome+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 10819,
+   "buildingId": 46393,
    "block": {
-    "x": 3492,
-    "z": 1640
+    "x": 4731,
+    "z": 3989
    },
    "chunk": [
-    54,
-    25
+    73,
+    62
    ],
    "anchor": {
-    "x": 3498,
+    "x": 4736,
     "y": 2,
-    "z": 1639
+    "z": 3992
    },
-   "roofY": 60,
-   "heightM": 174,
+   "roofY": 58,
+   "heightM": 168,
    "placement": "contains",
    "placementDistM": 0
   },
@@ -1689,22 +1689,22 @@
     "parcel": "0289003"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1+Sansome+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 10819,
+   "buildingId": 46393,
    "block": {
-    "x": 3492,
-    "z": 1640
+    "x": 4731,
+    "z": 3989
    },
    "chunk": [
-    54,
-    25
+    73,
+    62
    ],
    "anchor": {
-    "x": 3498,
+    "x": 4736,
     "y": 2,
-    "z": 1639
+    "z": 3992
    },
-   "roofY": 60,
-   "heightM": 174,
+   "roofY": 58,
+   "heightM": 168,
    "placement": "contains",
    "placementDistM": 0
   },
@@ -1733,24 +1733,24 @@
     "parcel": "3979001"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=444+De+Haro+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 9692,
+   "buildingId": 17573,
    "block": {
-    "x": 3470,
-    "z": 2609
+    "x": 4033,
+    "z": 4662
    },
    "chunk": [
-    54,
-    40
+    63,
+    72
    ],
    "anchor": {
-    "x": 3471,
+    "x": 4035,
     "y": 3,
-    "z": 2609
+    "z": 4663
    },
    "roofY": 9,
    "heightM": 21,
-   "placement": "nearest",
-   "placementDistM": 3
+   "placement": "contains",
+   "placementDistM": 0
   },
   {
    "id": "visa-mission-rock",
@@ -1781,19 +1781,19 @@
     "parcel": "8719A008"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=300+Toni+Stone+Crossing%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 23279,
+   "buildingId": 45049,
    "block": {
-    "x": 3849,
-    "z": 2191
+    "x": 4597,
+    "z": 4632
    },
    "chunk": [
-    60,
-    34
+    71,
+    72
    ],
    "anchor": {
-    "x": 3850,
+    "x": 4597,
     "y": 1,
-    "z": 2192
+    "z": 4633
    },
    "roofY": 22,
    "heightM": 63,
@@ -1830,19 +1830,19 @@
     "parcel": "3735063"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=222+2nd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 1920,
+   "buildingId": 46623,
    "block": {
-    "x": 3571,
-    "z": 1794
+    "x": 4679,
+    "z": 4154
    },
    "chunk": [
-    55,
-    28
+    73,
+    64
    ],
    "anchor": {
-    "x": 3576,
+    "x": 4679,
     "y": 3,
-    "z": 1799
+    "z": 4145
    },
    "roofY": 38,
    "heightM": 105,
@@ -1874,22 +1874,22 @@
     "parcel": "3744003"
    },
    "hintFrom": "https://www.openstreetmap.org/node/9093309161",
-   "buildingId": 7057,
+   "buildingId": 12663,
    "block": {
-    "x": 3810,
-    "z": 1675
+    "x": 4933,
+    "z": 4238
    },
    "chunk": [
-    59,
-    26
+    77,
+    66
    ],
    "anchor": {
-    "x": 3808,
+    "x": 4930,
     "y": 1,
-    "z": 1676
+    "z": 4238
    },
-   "roofY": 11,
-   "heightM": 30,
+   "roofY": 20,
+   "heightM": 57,
    "placement": "nearest",
    "placementDistM": 3
   },
@@ -1918,19 +1918,19 @@
     "parcel": "3508001"
    },
    "hintFrom": "https://www.openstreetmap.org/way/35111960",
-   "buildingId": 2835,
+   "buildingId": 5298,
    "block": {
-    "x": 3036,
-    "z": 2133
+    "x": 4061,
+    "z": 4019
    },
    "chunk": [
-    47,
-    33
+    63,
+    62
    ],
    "anchor": {
-    "x": 3036,
+    "x": 4061,
     "y": 6,
-    "z": 2132
+    "z": 4018
    },
    "roofY": 20,
    "heightM": 45,
@@ -1967,22 +1967,22 @@
     "parcel": "3507040"
    },
    "hintFrom": "https://www.openstreetmap.org/node/8410287828",
-   "buildingId": 14286,
+   "buildingId": 44904,
    "block": {
-    "x": 2990,
-    "z": 2179
+    "x": 3995,
+    "z": 4019
    },
    "chunk": [
-    46,
-    34
+    62,
+    62
    ],
    "anchor": {
-    "x": 2984,
+    "x": 3995,
     "y": 5,
-    "z": 2184
+    "z": 4018
    },
-   "roofY": 16,
-   "heightM": 36,
+   "roofY": 42,
+   "heightM": 114,
    "placement": "contains",
    "placementDistM": 0
   },
@@ -2025,24 +2025,186 @@
     "parcel": "3711013"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=77+Beale+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 22261,
+   "buildingId": 45696,
    "block": {
-    "x": 3634,
-    "z": 1592
+    "x": 4866,
+    "z": 4055
    },
    "chunk": [
-    56,
-    24
+    76,
+    63
    ],
    "anchor": {
-    "x": 3628,
+    "x": 4857,
     "y": 1,
-    "z": 1598
+    "z": 4055
    },
    "roofY": 52,
    "heightM": 153,
    "placement": "override",
-   "placementDistM": 27
+   "placementDistM": 27.7
+  },
+  {
+   "id": "dropbox-50-hawthorne",
+   "companyId": "dropbox",
+   "name": "Dropbox",
+   "primary": true,
+   "address": "50 Hawthorne St",
+   "status": "hq",
+   "category": "software",
+   "color": "#0061ff",
+   "sources": [
+    {
+     "url": "https://www.sec.gov/Archives/edgar/data/0001467623/000146762326000049/dbx-20260630.htm",
+     "kind": "occupancy",
+     "accessed": "2026-10-31"
+    },
+    {
+     "url": "https://therealdeal.com/san-francisco/2026/02/23/dropbox-to-vacate-mission-bay-headquarters",
+     "kind": "news",
+     "date": "2026-02-23",
+     "accessed": "2026-10-31"
+    }
+   ],
+   "verifiedAt": "2026-10-31",
+   "note": "Retried in v2: the 10-Q for the quarter ended 2026-06-30 gives the principal executive offices as 50 Hawthorne Street, San Francisco 94105; Dropbox left 1800 Owens St (The Real Deal, 2026-02-23).",
+   "lat": 37.7851825,
+   "lon": -122.3986901,
+   "eas": {
+    "id": 485276,
+    "parcel": "3735017"
+   },
+   "hintFrom": "https://nominatim.openstreetmap.org/search?q=50+Hawthorne+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
+   "buildingId": 7370,
+   "block": {
+    "x": 4640,
+    "z": 4174
+   },
+   "chunk": [
+    72,
+    65
+   ],
+   "anchor": {
+    "x": 4642,
+    "y": 4,
+    "z": 4174
+   },
+   "roofY": 10,
+   "heightM": 21,
+   "placement": "contains",
+   "placementDistM": 0
+  },
+  {
+   "id": "notion-685-market",
+   "companyId": "notion",
+   "name": "Notion",
+   "primary": true,
+   "address": "685 Market St",
+   "status": "hq",
+   "category": "software",
+   "color": "#000000",
+   "sources": [
+    {
+     "url": "https://sfstandard.com/2025/06/08/notion-san-francisco-headquarters-market-street/",
+     "kind": "occupancy",
+     "date": "2025-06-08",
+     "accessed": "2026-10-31"
+    },
+    {
+     "url": "https://therealdeal.com/sanfrancisco/2024/11/05/notion-signs-lease-for-headquarters-in-san-francisco",
+     "kind": "news",
+     "date": "2024-11-05",
+     "accessed": "2026-10-31"
+    },
+    {
+     "url": "https://data.sf.gov/resource/g8m3-pdis.json?$where=ownership_name='Notion Labs Inc'",
+     "kind": "registry",
+     "accessed": "2026-10-31"
+    }
+   ],
+   "verifiedAt": "2026-10-31",
+   "note": "Retried in v2: HQ moved in May 2025 from 2300 Harrison St to the Monadnock Building, 685 Market St (~105k sf lease, SF Standard 2025-06-08); DataSF registry location since 2025-05-05.",
+   "lat": 37.787792,
+   "lon": -122.4029419,
+   "eas": {
+    "id": 364821,
+    "parcel": "3707051"
+   },
+   "hintFrom": "https://data.sf.gov/resource/g8m3-pdis.json?$where=ownership_name='Notion Labs Inc'",
+   "buildingId": 8026,
+   "block": {
+    "x": 4619,
+    "z": 4018
+   },
+   "chunk": [
+    72,
+    62
+   ],
+   "anchor": {
+    "x": 4619,
+    "y": 4,
+    "z": 4016
+   },
+   "roofY": 18,
+   "heightM": 42,
+   "placement": "contains",
+   "placementDistM": 0
+  },
+  {
+   "id": "y-combinator-560-20th",
+   "companyId": "y-combinator",
+   "name": "Y Combinator",
+   "primary": true,
+   "address": "560 20th St",
+   "status": "hq",
+   "category": "investor",
+   "color": "#f26522",
+   "sources": [
+    {
+     "url": "https://fortune.com/2024/01/12/garry-tan-founders-y-combinator-headquarters/",
+     "kind": "occupancy",
+     "date": "2024-01-12",
+     "accessed": "2026-10-31"
+    },
+    {
+     "url": "https://sfist.com/2025/03/06/new-plans-announced-for-steph-currys-splashy-new-offices-in-dogpatch/",
+     "kind": "occupancy",
+     "date": "2025-03-06",
+     "accessed": "2026-10-31"
+    },
+    {
+     "url": "https://data.sf.gov/resource/g8m3-pdis.json?$where=ownership_name='Y Combinator Management, LLC'",
+     "kind": "registry",
+     "accessed": "2026-10-31"
+    }
+   ],
+   "verifiedAt": "2026-10-31",
+   "note": "Pier 70 campus in Dogpatch: Fortune (city records, confirmed by YC) reports the move from Mountain View; SFist places YC's SF headquarters two doors from 600 20th St. Y Combinator Management, LLC is registered at 560 20th St since 2024-01-01 (and 580 20th St since 2023-06-01); 560 is the newer registry location.",
+   "lat": 37.7608178,
+   "lon": -122.3860411,
+   "eas": {
+    "id": 489656,
+    "parcel": "4046001"
+   },
+   "hintFrom": "https://data.sf.gov/resource/g8m3-pdis.json?$where=ownership_name='Y Combinator Management, LLC'",
+   "buildingId": 21754,
+   "block": {
+    "x": 4272,
+    "z": 5074
+   },
+   "chunk": [
+    66,
+    79
+   ],
+   "anchor": {
+    "x": 4270,
+    "y": 1,
+    "z": 5076
+   },
+   "roofY": 7,
+   "heightM": 18,
+   "placement": "contains",
+   "placementDistM": 0
   },
   {
    "id": "firegoat-501-2nd",
@@ -2074,19 +2236,19 @@
     "parcel": "3774067"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=501+2nd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 18467,
+   "buildingId": 35898,
    "block": {
-    "x": 3719,
-    "z": 1919
+    "x": 4696,
+    "z": 4347
    },
    "chunk": [
-    58,
-    29
+    73,
+    67
    ],
    "anchor": {
-    "x": 3718,
+    "x": 4695,
     "y": 5,
-    "z": 1920
+    "z": 4347
    },
    "roofY": 17,
    "heightM": 36,
