@@ -135,6 +135,7 @@ function boot() {
     ui.setDm(id);
     fitInsets();
     if (id) scene.focusAgent(id);
+    else scene.unfollow();
   }
 
   function onFrame(frame) {

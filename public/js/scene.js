@@ -57,6 +57,9 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
   controls.screenSpacePanning = false;
   controls.zoomSpeed = 0.9;
   controls.rotateSpeed = 0.6;
+  // map-style: drag moves the camera, right-drag (or shift/ctrl/⌘ + drag) orbits; touch: one finger moves, two zoom + orbit
+  controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+  controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
 
   const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
   composer.addPass(new RenderPass(scene, camera));
@@ -128,7 +131,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
   const S = {
     theme: "day", grid: null, items: [], agents: [], seating: new Map(), spots: [], blocked: null, entry: { x: 0, z: 0 },
     room: null, walls: {}, furniture: new THREE.Group(), batches: new Map(), texts: new Map(), itemAnim: new Map(), leavingItems: new Map(),
-    chars: new Map(), lampLights: [], glowMats: new Map(), selectedItem: null, ghost: null, hidden: new Set(),
+    chars: new Map(), lampLights: [], glowMats: new Map(), selectedItem: null, ghost: null, hidden: new Set(), follow: null, drag: null,
     camAnim: null, insets: { left: 0, right: 0 }, clock: 0, last: performance.now(), size: { w: 1, h: 1 }, frameCbs: [], raf: 0, raycaster: new THREE.Raycaster(),
     custom: {}, look: themeLook(DEFAULT_THEME), palette: null, fade: null, kindColor: new Map(), assign: new Map(),
     logo: { id: null, img: null, tex: null }, assets: [], themeObj: null, fetchAsset, onError,
@@ -910,6 +913,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
 
   function resetView(animate = true) {
     if (!S.grid) return;
+    S.follow = null;
     const v = homeView();
     if (animate) animateTo(v.target, v.pos);
     else { controls.target.copy(v.target); camera.position.copy(v.pos); controls.update(); }
@@ -921,9 +925,11 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     animateTo(controls.target.clone(), controls.target.clone().add(off.setLength(len)), 350);
   }
 
+  /** Fly to an agent and keep it centred while it walks; orbit and zoom still work, a pan or unfollow() stops it. */
   function focusAgent(id) {
     const c = S.chars.get(id);
     if (!c) return;
+    S.follow = id;
     const t = new THREE.Vector3(c.pos.x, 0.8, c.pos.z);
     const off = camera.position.clone().sub(controls.target);
     off.setLength(Math.max(12, Math.min(off.length(), 19)));
@@ -948,7 +954,53 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
       t.add(d); camera.position.add(d);
     }
   }
-  controls.addEventListener("start", () => { S.camAnim = null; });
+  function unfollow() { S.follow = null; }
+
+  // arrow keys / WASD move the camera along the floor, relative to where it looks
+  const PAN_KEYS = { ArrowUp: [0, 1], KeyW: [0, 1], ArrowDown: [0, -1], KeyS: [0, -1], ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0] };
+  const held = new Set();
+  const typing = (e) => e.target?.closest?.("input, textarea, [contenteditable]") || e.metaKey || e.ctrlKey || e.altKey;
+  const onKeyDown = (e) => { if (PAN_KEYS[e.code] && !typing(e)) { held.add(e.code); e.preventDefault(); } };
+  const onKeyUp = (e) => held.delete(e.code);
+  const onBlur = () => held.clear();
+  window.addEventListener("keydown", onKeyDown);
+  window.addEventListener("keyup", onKeyUp);
+  window.addEventListener("blur", onBlur);
+  const keyFwd = new THREE.Vector3(), keyRight = new THREE.Vector3(), keyMove = new THREE.Vector3();
+  function stepKeys(dt) {
+    if (!held.size) return;
+    let x = 0, z = 0;
+    for (const k of held) { x += PAN_KEYS[k][0]; z += PAN_KEYS[k][1]; }
+    if (!x && !z) return;
+    camera.getWorldDirection(keyFwd);
+    keyFwd.y = 0;
+    keyFwd.normalize();
+    keyRight.crossVectors(keyFwd, camera.up).normalize();
+    const speed = camera.position.distanceTo(controls.target) * 0.9 * dt;
+    keyMove.copy(keyFwd).multiplyScalar(z).addScaledVector(keyRight, x).setLength(speed);
+    S.camAnim = null;
+    S.follow = null;
+    controls.target.add(keyMove);
+    camera.position.add(keyMove);
+  }
+
+  const followDelta = new THREE.Vector3();
+  function stepFollow(dt) {
+    if (!S.follow || S.camAnim || S.drag) return;
+    const c = S.chars.get(S.follow);
+    if (!c || c.leaving) { S.follow = null; return; }
+    followDelta.set(c.pos.x - controls.target.x, 0.8 - controls.target.y, c.pos.z - controls.target.z);
+    if (followDelta.lengthSq() < 1e-6) return;
+    followDelta.multiplyScalar(Math.min(1, dt * 6));
+    controls.target.add(followDelta);
+    camera.position.add(followDelta);
+  }
+
+  controls.addEventListener("start", () => { S.camAnim = null; S.drag = controls.target.clone(); });
+  controls.addEventListener("end", () => {
+    if (S.drag && S.drag.distanceTo(controls.target) > 0.05) S.follow = null; // the user panned away
+    S.drag = null;
+  });
 
   /* ── picking ───────────────────────────────────────────────────────────────────────────────── */
 
@@ -1126,6 +1178,8 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     S.last = now;
     S.clock += dt;
     stepCam(now);
+    stepKeys(dt);
+    stepFollow(dt);
     controls.update();
     clampTarget();
     updateCutaway();
@@ -1165,7 +1219,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
 
   return {
     setInsets(left, right) { S.insets = { left, right }; applyInsets(); },
-    setState, setTheme, resetView, zoom, focusAgent, anchors, pickAt, floorAt, setGhost, selectItem, hideItems, thumbnail,
+    setState, setTheme, resetView, zoom, focusAgent, unfollow, anchors, pickAt, floorAt, setGhost, selectItem, hideItems, thumbnail,
     /** Where everyone is and what they're doing (for ?debug and tests in the browser). */
     debug() {
       return [...S.chars.values()].map((c) => ({ id: c.id, pose: c.pose, spot: c.spotId, walking: c.path.length > 0, x: +c.pos.x.toFixed(2), z: +c.pos.z.toFixed(2) }));
@@ -1197,6 +1251,9 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     dispose() {
       cancelAnimationFrame(S.raf);
       ro.disconnect();
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
       controls.dispose();
       renderer.dispose();
       renderer.domElement.remove();
