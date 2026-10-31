@@ -40,13 +40,14 @@ test("rasterToChunks: drops all-water chunks, builds per-chunk building tables, 
     }
     r.surface[z * r.w + 80] = SURFACE.SHALLOW;
   }
-  const buildings = [{ id: 42, base: 2, top: 9, palette: 7, roof: 0 }];
-  for (let z = 10; z < 14; z++) for (let x = 60; x < 68; x++) r.owner[z * r.w + x] = 0;
-  const { chunks, allWater } = rasterToChunks(r, buildings);
-  assert.equal(allWater, 1);
+  r.addEntry({ id: 42, base: 2, top: 9, palette: 7 });
+  for (let z = 10; z < 14; z++) for (let x = 60; x < 68; x++) r.setColumn(x, z, { bldg: 42, base: 2, top: 9 });
+  const { chunks, water } = rasterToChunks(r);
+  assert.deepEqual(water, [[2, 0]]);
   assert.deepEqual(chunks.map((c) => [c.cx, c.cz]), [[0, 0], [1, 0]]);
-  assert.deepEqual(chunks[0].buildings, [buildings[0]]);
-  assert.deepEqual(chunks[1].buildings, [buildings[0]]);
+  const want = { id: 42, parent: 0, base: 2, top: 9, accentFrom: 0x7fff, palette: 7, cap: 0, facade: 0, accent: 7 };
+  assert.deepEqual(chunks[0].buildings, [want]);
+  assert.deepEqual(chunks[1].buildings, [want]);
   assert.equal(chunks[0].bldg[10 * CHUNK + 60], 1);
   assert.equal(chunks[1].bldg[10 * CHUNK + 3], 1);
   assert.equal(chunks[1].bldg[10 * CHUNK + 4], 0);
@@ -58,9 +59,12 @@ test("rasterToChunks fails loudly on invalid data", () => {
   const r = createRaster([0, 0], [0, 0]);
   r.ground[0] = 3;
   r.surface[0] = SURFACE.GRASS;
+  r.addEntry({ id: 1, base: 1, top: 4, palette: 0 });
   r.owner[0] = 0;
-  assert.throws(() => rasterToChunks(r, [{ id: 1, base: 1, top: 4, palette: 0, roof: 0 }]), /must equal its base/);
-  assert.throws(() => rasterToChunks(r, []), /no building/);
+  r.top[0] = 4;
+  assert.throws(() => rasterToChunks(r), /must equal its base/);
+  r.owner[0] = 5;
+  assert.throws(() => rasterToChunks(r), /no entry/);
 });
 
 test("baseTop: base is the lowest ground, top the highest plus the height", () => {

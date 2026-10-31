@@ -22,7 +22,7 @@ export function loadCity(dir) {
     const gz = readFileSync(p);
     if (gz.length !== bytes) throw new Error(`${p}: ${gz.length} bytes, manifest says ${bytes}`);
     assertGzip(gz, p);
-    const c = decodeChunk(new Uint8Array(gunzipSync(gz)));
+    const c = decodeChunk(new Uint8Array(gunzipSync(gz)), manifest.parents);
     if (c.cx !== cx || c.cz !== cz) throw new Error(`${p}: header says chunk ${c.cx},${c.cz}`);
     chunks.set(chunkKey(cx, cz), c);
   }

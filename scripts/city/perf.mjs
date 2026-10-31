@@ -20,7 +20,7 @@ function load(city) {
   const manifest = validateManifest(JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")));
   const chunks = new Map();
   for (const [cx, cz] of manifest.chunks.list) {
-    chunks.set(chunkKey(cx, cz), decodeChunk(new Uint8Array(gunzipSync(readFileSync(join(dir, "chunks", `${chunkKey(cx, cz)}.bin`))))));
+    chunks.set(chunkKey(cx, cz), decodeChunk(new Uint8Array(gunzipSync(readFileSync(join(dir, "chunks", `${chunkKey(cx, cz)}.bin`)))), manifest.parents));
   }
   return { manifest, get: (cx, cz) => chunks.get(chunkKey(cx, cz)) ?? null };
 }

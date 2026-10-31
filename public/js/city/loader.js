@@ -42,8 +42,8 @@ async function gunzip(bytes) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-/** Fetch, assertGzip, inflate, decodeChunk. → Promise<Chunk> */
-export async function fetchChunk(url) {
+/** Fetch, assertGzip, inflate, decodeChunk with manifest.parents. → Promise<Chunk> */
+export async function fetchChunk(url, parents) {
   const res = await fetchOk(url);
   const bytes = new Uint8Array(await res.arrayBuffer());
   assertGzip(bytes, url);
@@ -54,7 +54,7 @@ export async function fetchChunk(url) {
     throw new Error(`${url}: gzip stream is corrupt (${e.message})`);
   }
   try {
-    return decodeChunk(raw);
+    return decodeChunk(raw, parents);
   } catch (e) {
     throw new Error(`${url}: ${e.message}`);
   }
@@ -88,7 +88,7 @@ export function createChunkStore(manifest, baseUrl) {
   async function load(key, cx, cz) {
     const url = `${base}chunks/${key}.bin`;
     try {
-      const chunk = await fetchChunk(url);
+      const chunk = await fetchChunk(url, manifest.parents);
       if (chunk.cx !== cx || chunk.cz !== cz) throw new Error(`${url}: holds chunk ${chunk.cx},${chunk.cz}, expected ${cx},${cz}`);
       chunks.set(key, chunk);
       for (const fn of listeners) fn(chunk);

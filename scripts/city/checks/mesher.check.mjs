@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
-import { CHUNK, COLUMNS, SURFACE, chunkKey, decodeChunk, regionOf, validateChunk, validateManifest } from "../../../public/shared/city.js";
+import { ACCENT_NONE, CHUNK, CITY_VERSION, COLUMNS, SURFACE, chunkKey, decodeChunk, regionOf, validateChunk, validateManifest } from "../../../public/shared/city.js";
 import { handleMeshRequest, meshChunk, meshRegion } from "../../../public/js/city/mesher.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -16,12 +16,14 @@ const test = (name, fn) => {
 
 function flatChunk(cx, cz, ground = 3, surface = SURFACE.GRASS) {
   return validateChunk({
-    cx, cz,
+    cx, cz, frame: 0,
     ground: new Int16Array(COLUMNS).fill(ground),
     surface: new Uint8Array(COLUMNS).fill(surface),
     bldg: new Uint16Array(COLUMNS),
     deck: new Int16Array(COLUMNS),
+    top: new Int16Array(COLUMNS),
     buildings: [],
+    props: [],
   });
 }
 const NONE = { n: null, s: null, e: null, w: null };
@@ -78,7 +80,8 @@ function towerChunk(h, ground = 3) {
   const c = flatChunk(20, 20, ground);
   const k = 30 * CHUNK + 30;
   c.bldg[k] = 1;
-  c.buildings.push({ id: 42, base: ground, top: ground + h, palette: 15, roof: 0 });
+  c.top[k] = ground + h;
+  c.buildings.push({ id: 42, parent: 0, base: ground, top: ground + h, accentFrom: ACCENT_NONE, palette: 15, cap: 0, facade: 0, accent: 15 });
   return validateChunk(c);
 }
 
@@ -193,7 +196,7 @@ function loadCity(dir) {
   const manifest = validateManifest(JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")));
   const store = new Map();
   for (const [cx, cz] of manifest.chunks.list) {
-    store.set(chunkKey(cx, cz), decodeChunk(new Uint8Array(gunzipSync(readFileSync(join(dir, "chunks", `${chunkKey(cx, cz)}.bin`))))));
+    store.set(chunkKey(cx, cz), decodeChunk(new Uint8Array(gunzipSync(readFileSync(join(dir, "chunks", `${chunkKey(cx, cz)}.bin`)))), manifest.parents));
   }
   return { manifest, store, get: (cx, cz) => store.get(chunkKey(cx, cz)) ?? null };
 }
@@ -260,6 +263,11 @@ test("[post-int] real downtown chunk 56,26 ≤ 25k triangles at LOD0", () => {
   const dir = join(ROOT, "public/city/sf");
   if (!existsSync(join(dir, "manifest.json"))) {
     console.log("  skip: public/city/sf not built yet (post-int gate)");
+    return;
+  }
+  const version = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")).version;
+  if (version !== CITY_VERSION) {
+    console.log(`  skip: public/city/sf is a v${version} build; this check reads v${CITY_VERSION} (waits for the v2 rebuild, post-int gate)`);
     return;
   }
   const city = loadCity(dir);

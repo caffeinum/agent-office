@@ -1,0 +1,98 @@
+{
+ "builtAt": "2026-10-31T00:00:00Z",
+ "places": [
+  {
+   "id": "site:fixture-labs",
+   "kind": "company",
+   "name": "Fixture Labs",
+   "aliases": [
+    "1 Fixture Tower"
+   ],
+   "lat": 37.815363,
+   "lon": -122.4814601,
+   "x": 3697.499,
+   "z": 1676.499,
+   "node": 37,
+   "siteId": "fixture-labs",
+   "door": [
+    3697,
+    1668
+   ]
+  },
+  {
+   "id": "site:example-robotics",
+   "kind": "company",
+   "name": "Example Robotics",
+   "aliases": [
+    "1 Fixture Tower"
+   ],
+   "lat": 37.8154202,
+   "lon": -122.4813874,
+   "x": 3700.498,
+   "z": 1676.5,
+   "node": 38,
+   "siteId": "example-robotics",
+   "door": [
+    3700,
+    1668
+   ]
+  },
+  {
+   "id": "site:sample-bakery",
+   "kind": "company",
+   "name": "Sample Bakery Co",
+   "aliases": [
+    "7 Slope Lane"
+   ],
+   "lat": 37.8138939,
+   "lon": -122.4834224,
+   "x": 3618.5,
+   "z": 1674.501,
+   "node": 39,
+   "siteId": "sample-bakery",
+   "door": [
+    3618,
+    1668
+   ]
+  },
+  {
+   "id": "lm:fixture-ferry",
+   "kind": "landmark",
+   "name": "Fixture Ferry",
+   "aliases": [
+    "the ferry"
+   ],
+   "lat": 37.8175303,
+   "lon": -122.4813253,
+   "x": 3756.499,
+   "z": 1622.5,
+   "node": 36
+  },
+  {
+   "id": "x:fixture-ave&test-st",
+   "kind": "intersection",
+   "name": "Fixture Ave & Test St",
+   "aliases": [
+    "Test St & Fixture Ave"
+   ],
+   "lat": 37.8153461,
+   "lon": -122.4820146,
+   "x": 3685.5,
+   "z": 1665.501,
+   "node": 5
+  },
+  {
+   "id": "area:fixture-park",
+   "kind": "area",
+   "name": "Fixture Park",
+   "aliases": [
+    "the park"
+   ],
+   "lat": 37.812352,
+   "lon": -122.4816968,
+   "x": 3614.502,
+   "z": 1750.499,
+   "node": 35
+  }
+ ]
+}

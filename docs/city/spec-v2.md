@@ -5,7 +5,7 @@
 > **Status (2026-10-31): planned, revision 2.** This spec extends `docs/city/spec.md` (v1.1). Every v1 rule stays in force unless a section below replaces it by number. Nothing in the repo changed while this was written.
 >
 > - **Day 0 (blocks W1):** the operator picks the grid option (§1.3). W1 does not freeze anchors until that pick is recorded here.
-> - **Start:** v2 work starts only after the concurrent v1 polish lands on `main`. W1 rebases on that commit and records its sha here.
+> - **Start:** v2 work starts only after the concurrent v1 polish lands on `main`. W1 rebases on that commit and records its sha here. **W1 landed on `main` on top of dde9b2c.**
 >
 > **Revision 2 changes:**
 > - Grid decision moved to day 0, with the SoMa tradeoff stated and c1 costed.
@@ -45,13 +45,20 @@ z = s·(xe−pivotX) + c·(ze−pivotZ) + z0                 // c,s = cos,sin(ro
 - The inverse is exact. 1 block = 3 m still holds, because the map is rigid.
 - The pivot is the city centre (−122.4385, 37.7715). In v1 equirect that is pivotX 2390.6, pivotZ 2340.5.
 - `x0` and `z0` are chosen so that the rotated full-city box (lon −122.52..−122.3569, lat 37.708..37.845) plus a 64-block margin on each side lands in positive coordinates, rounded up to a multiple of 64. The reserved grid is `ceil((extent + 128) / 64)` chunks per axis.
-- **All numbers below are provisional. Do not copy them into code.** W1 computes them from the formulas, freezes them in `format.check.mjs`, and replaces this table. The first draft got them wrong; the values below are the review's recomputation.
+- **Frozen by W1 (option a)** in `public/shared/city.js` and asserted in `scripts/city/checks/format.check.mjs`: `ROT_DEG = 44.7`, pivotX 2390.553, pivotZ 2340.483, x0 3456, z0 3712, reserved grid `SF_GRID` 112×112 chunks. `fitProjection()` reproduces them. The grid is `ceil((x0 + maxX + 64) / 64)` per axis (the shifted box plus the far margin); the earlier "ceil((extent + 128) / 64)" undercounts by the x0 round-up (111 vs 112). Positive rotDeg in the formula above is the SoMa rotation (checked on cached roads: 83% of Transbay road length within ±1.5° of an axis).
 
-  | option | rotDeg | reserved grid (chunks) | Salesforce | Fort Point |
-  |---|---|---|---|---|
-  | d | 9.2 | 89×93 | (4128.9, 2661.6) | (1928.8, 1532.4) |
-  | a | 44.7 | 112×112 | W1 computes | W1 computes |
-  | b | 0 | 76×74 (v1 values unchanged; pivot 0, x0 0, z0 0) | v1 | v1 |
+  | anchor | x | z | chunk |
+  |---|---|---|---|
+  | Salesforce Tower | 4796.4 | 4090.9 | 74,63 |
+  | Ferry Building | 5012.3 | 4007.5 | 78,62 |
+  | Transamerica | 4814.8 | 3827.7 | 75,59 |
+  | Grace Cathedral | 4508.2 | 3695.4 | 70,57 |
+  | Coit Tower | 4938.9 | 3577.1 | 77,55 |
+  | Pier 39 | 5018.8 | 3329.5 | 78,52 |
+  | Ghirardelli | 4673.1 | 3132.6 | 73,48 |
+  | OpenAI (1455 3rd St, EAS 489890) | 4455.5 | 4775.7 | 69,74 |
+  | Firegoat (501 2nd St, EAS 366241) | 4696.7 | 4347.0 | 73,67 |
+  | Fort Point (Wikipedia 37.81056, −122.47722) | 3661.4 | 1889.8 | 57,29 |
 
 - The manifest carries `proj`. The viewer, the build, the City DO and every check go only through `lonLatToBlock` and `blockToLonLat`. Any other projection math is a bug.
 - §1 no longer promises a "fixed projection forever". The new rule: the projection is fixed per `CITY_VERSION`, and durable data stores lat/lon or ids, never block coordinates (§7.7).
@@ -257,6 +264,15 @@ sites:  in places.json (node index per site)
 
 - Intersections are generated for every node where two distinct street names meet, keyed like "2nd St & Howard St". Both orders are aliases.
 - Company places carry `siteId` and, for doors, `door: [x, z]`.
+
+**W1 contract details (frozen in `public/shared/city.js` / `city.d.ts`):**
+
+- Manifest keys, exactly: `version, city, name, blockM, chunk, proj, terrainExaggeration, chunks {grid, min, max, list}, water, areas [{id, west, south, east, north}], landmask, landmarks, walk, places, parents, yRange, spawn {x, z, dist, az}, attribution, sources, builtAt`. `chunks.grid` is the reserved grid; `min`/`max` the shipped range inside it. `terrainExaggeration` (1..3, default 1) records the build knob.
+- `landmask.bin` and `landmarks.bin` are stored gzipped (like chunks); `walk.bin` is raw so the City DO views it without a parse.
+- `SFL1` header is 12 bytes: magic, version u16, reserved u16, count u32. `SFM1` header is 10 bytes as above.
+- `SFW1` header: magic (0), version u16 (4), reserved u16 (6), nodeCount u32 (8), edgeCount u32 (12), nameCount u32 (16), reserved u32 (20), builtAt u64 ms (24). nameIdx −1 = unnamed.
+- `decodeChunk(bytes, manifest.parents)` / `validateChunk(chunk, parents)`: a parent outside the chunk table must be a key of `manifest.parents`; no parent chains. Entry ids are ≥ 1. Props are a palette index colour.
+- `ctx` is built by `createBuildCtx` in `scripts/city/lib/ctx.mjs`, which also freezes the `ctx.osm` / `ctx.datasf` record shapes (§3.3).
 
 ## 5. landmarks and structures (W3)
 

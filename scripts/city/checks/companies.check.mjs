@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SURFACE, validateCompanies, validateManifest } from "../../../public/shared/city.js";
+import { CITY_VERSION, SURFACE, validateCompanies, validateManifest } from "../../../public/shared/city.js";
 import { easQueryUrl, normalizeAddress, pickEasHit, resolveEas } from "../lib/eas.mjs";
 import { ANCHOR_RADIUS, PLACE_RADIUS, buildCompanies, checkSource, createColumnReader } from "../companies-sf.mjs";
 
@@ -308,6 +308,11 @@ await test("sf: companies.json against the real chunks [post-int]", () => {
   const companiesPath = join(ROOT, "public/city/sf/companies.json");
   if (!existsSync(manifestPath) || !existsSync(companiesPath)) {
     console.log("     skipped: public/city/sf not built yet (W2 + npm run city:build)");
+    return;
+  }
+  const version = JSON.parse(readFileSync(manifestPath, "utf8")).version;
+  if (version !== CITY_VERSION) {
+    console.log(`     skipped: public/city/sf is a v${version} build; this check reads v${CITY_VERSION} (waits for the v2 rebuild)`);
     return;
   }
   const manifest = validateManifest(JSON.parse(readFileSync(manifestPath, "utf8")));

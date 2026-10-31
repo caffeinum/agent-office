@@ -17,7 +17,7 @@ const manifest = validateManifest(JSON.parse(readFileSync(join(FIXTURE, "manifes
 const companies = validateCompanies(JSON.parse(readFileSync(join(FIXTURE, "companies.json"), "utf8")), manifest);
 const chunks = new Map();
 for (const [cx, cz] of manifest.chunks.list) {
-  chunks.set(chunkKey(cx, cz), decodeChunk(new Uint8Array(gunzipSync(readFileSync(join(FIXTURE, "chunks", `${chunkKey(cx, cz)}.bin`))))));
+  chunks.set(chunkKey(cx, cz), decodeChunk(new Uint8Array(gunzipSync(readFileSync(join(FIXTURE, "chunks", `${chunkKey(cx, cz)}.bin`)))), manifest.parents));
 }
 const store = { get: (cx, cz) => chunks.get(chunkKey(cx, cz)) };
 const column = (x, z) => {
@@ -91,8 +91,8 @@ test("oblique rays agree with the column they report", () => {
 
 test("decks: slab and pillar pick as deck; a ray under a positive deck reaches the ground", () => {
   const c = validateChunk({
-    cx: 0, cz: 0, ground: new Int16Array(COLUMNS).fill(2), surface: new Uint8Array(COLUMNS).fill(SURFACE.ROAD),
-    bldg: new Uint16Array(COLUMNS), deck: new Int16Array(COLUMNS), buildings: [],
+    cx: 0, cz: 0, frame: 0, ground: new Int16Array(COLUMNS).fill(2), surface: new Uint8Array(COLUMNS).fill(SURFACE.ROAD),
+    bldg: new Uint16Array(COLUMNS), deck: new Int16Array(COLUMNS), top: new Int16Array(COLUMNS), buildings: [], props: [],
   });
   c.deck[10 * CHUNK + 10] = 8;
   c.deck[10 * CHUNK + 11] = -8;

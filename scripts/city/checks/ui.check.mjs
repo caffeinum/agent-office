@@ -24,7 +24,7 @@ const companies = validateCompanies(JSON.parse(readFileSync(join(FIXTURE_DIR, "c
 const { sites } = companies;
 const chunks = new Map();
 for (const [cx, cz] of manifest.chunks.list) {
-  chunks.set(chunkKey(cx, cz), decodeChunk(gunzipSync(readFileSync(join(FIXTURE_DIR, "chunks", `${cx}_${cz}.bin`)))));
+  chunks.set(chunkKey(cx, cz), decodeChunk(gunzipSync(readFileSync(join(FIXTURE_DIR, "chunks", `${cx}_${cz}.bin`))), manifest.parents));
 }
 function column(x, z) {
   const c = chunks.get(chunkKey(Math.floor(x / CHUNK), Math.floor(z / CHUNK)));

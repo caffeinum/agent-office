@@ -18,7 +18,8 @@
     "check": "npm run typecheck && npm test && npm run check:viewer && npm run check:city",
     "city:fixture": "node scripts/city/fixture.mjs",
     "city:fetch": "node scripts/city/fetch-sf.mjs",
-    "city:build": "node --max-old-space-size=4096 scripts/city/build-sf.mjs && node scripts/city/companies-sf.mjs && node scripts/city/verify-sf.mjs",
+    "city:build": "node --max-old-space-size=4096 scripts/city/build-sf.mjs && node scripts/city/companies-sf.mjs && node scripts/city/walk-sf.mjs && node scripts/city/verify-sf.mjs",
+    "city:walk": "node scripts/city/walk-sf.mjs",
     "city:perf": "node scripts/city/perf.mjs",
     "check:city": "node scripts/city/check.mjs"
   },

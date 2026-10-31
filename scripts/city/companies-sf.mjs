@@ -139,7 +139,7 @@ export function createColumnReader(manifest, chunksDir) {
         const file = join(chunksDir, `${key}.bin`);
         const gz = readFileSync(file);
         assertGzip(gz, file);
-        const chunk = decodeChunk(gunzipSync(gz));
+        const chunk = decodeChunk(gunzipSync(gz), manifest.parents);
         if (chunk.cx !== cx || chunk.cz !== cz) fail(`${file} holds chunk ${chunk.cx},${chunk.cz}`);
         cache.set(key, chunk);
       }

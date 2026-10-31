@@ -1,5 +1,5 @@
 {
- "version": 1,
+ "version": 2,
  "city": "fixture",
  "builtAt": "2026-10-31T00:00:00Z",
  "sites": [
@@ -21,8 +21,8 @@
    ],
    "verifiedAt": "2026-10-31",
    "note": "synthetic fixture company",
-   "lat": 37.7895146,
-   "lon": -122.3939428,
+   "lat": 37.815363,
+   "lon": -122.4814601,
    "eas": {
     "id": 900001,
     "parcel": "FIXTURE-900001"
@@ -65,8 +65,8 @@
    ],
    "verifiedAt": "2026-10-31",
    "note": "synthetic fixture company",
-   "lat": 37.7895146,
-   "lon": -122.3938406,
+   "lat": 37.8154202,
+   "lon": -122.4813874,
    "eas": {
     "id": 900002,
     "parcel": "FIXTURE-900002"
@@ -109,8 +109,8 @@
    ],
    "verifiedAt": "2026-10-31",
    "note": "synthetic fixture company",
-   "lat": 37.7895689,
-   "lon": -122.3966362,
+   "lat": 37.8138939,
+   "lon": -122.4834224,
    "eas": {
     "id": 900003,
     "parcel": "FIXTURE-900003"

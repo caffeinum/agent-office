@@ -1,14 +1,23 @@
-// The working raster over the whole chunk range, and its split into shared/city.js chunks.
-import { CHUNK, COLUMNS, SURFACE, validateChunk } from "../../../public/shared/city.js";
+// The working raster over a chunk range, the v2 raster API the hooks write through (spec-v2 §3.10), and its
+// split into shared/city.js v2 chunks.
+import { ACCENT_NONE, CHUNK, COLUMNS, SURFACE, validateChunk } from "../../../public/shared/city.js";
 
-/** → {x0, z0, w, h, ground: Int16Array, surface: Uint8Array, owner: Int32Array (building index or -1), deck: Int16Array} */
+const ENTRY_DEFAULTS = Object.freeze({ parent: 0, accentFrom: ACCENT_NONE, cap: 0, facade: 0 });
+const ENTRY_KEYS = new Set(["id", "parent", "base", "top", "accentFrom", "palette", "cap", "facade", "accent"]);
+
+/**
+ * → raster {x0, z0, w, h, ground: Int16Array, surface: Uint8Array, owner: Int32Array (entry index or -1),
+ *   deck: Int16Array, top: Int16Array (per-column building top, 0 = none), entries: Entry[], props: GlobalProp[],
+ *   setColumn, setSurface, clearBuilding, addEntry, addProp, entryIndex}
+ * Starts all open water.
+ */
 export function createRaster(minChunk, maxChunk) {
   const [cx0, cz0] = minChunk;
   const [cx1, cz1] = maxChunk;
   if (cx1 < cx0 || cz1 < cz0) throw new Error(`createRaster: max ${maxChunk} is before min ${minChunk}`);
   const w = (cx1 - cx0 + 1) * CHUNK;
   const h = (cz1 - cz0 + 1) * CHUNK;
-  return {
+  const raster = {
     x0: cx0 * CHUNK,
     z0: cz0 * CHUNK,
     w,
@@ -17,7 +26,62 @@ export function createRaster(minChunk, maxChunk) {
     surface: new Uint8Array(w * h).fill(SURFACE.WATER),
     owner: new Int32Array(w * h).fill(-1),
     deck: new Int16Array(w * h),
+    top: new Int16Array(w * h),
+    entries: [],
+    props: [],
   };
+  const byId = new Map();
+  const at = (x, z, what) => {
+    const i = rasterIndex(raster, x, z);
+    if (i < 0) throw new Error(`${what}: block ${x},${z} is outside the raster`);
+    return i;
+  };
+
+  /**
+   * Register a building entry {id, base, top, palette, accent?, parent?, accentFrom?, cap?, facade?}; accent
+   * defaults to palette, parent to 0, accentFrom to ACCENT_NONE, cap/facade to 0. → id
+   */
+  raster.addEntry = (entry) => {
+    for (const k of Object.keys(entry)) if (!ENTRY_KEYS.has(k)) throw new Error(`addEntry: unknown field "${k}"`);
+    if (!Number.isInteger(entry.id) || entry.id < 1) throw new Error(`addEntry: id must be a positive integer, got ${entry.id}`);
+    if (byId.has(entry.id)) throw new Error(`addEntry: duplicate id ${entry.id}`);
+    for (const k of ["base", "top", "palette"]) if (!Number.isInteger(entry[k])) throw new Error(`addEntry ${entry.id}: ${k} must be an integer, got ${entry[k]}`);
+    const e = { ...ENTRY_DEFAULTS, accent: entry.palette, ...entry };
+    byId.set(e.id, raster.entries.length);
+    raster.entries.push(e);
+    return e.id;
+  };
+  /** Index of entry `id` in raster.entries (the owner value). */
+  raster.entryIndex = (id) => {
+    const k = byId.get(id);
+    if (k === undefined) throw new Error(`raster: no entry with id ${id} (addEntry first)`);
+    return k;
+  };
+  /** Make (x, z) a column of building `bldg` (an entry id): ground = base, column top = top. */
+  raster.setColumn = (x, z, { bldg, base, top }) => {
+    const i = at(x, z, "setColumn");
+    const k = raster.entryIndex(bldg);
+    if (!Number.isInteger(base) || base < 1) throw new Error(`setColumn ${x},${z}: base must be an integer ≥ 1, got ${base}`);
+    if (!Number.isInteger(top) || top <= base) throw new Error(`setColumn ${x},${z}: top ${top} must be an integer above base ${base}`);
+    raster.owner[i] = k;
+    raster.ground[i] = base;
+    raster.top[i] = top;
+  };
+  raster.setSurface = (x, z, id) => {
+    raster.surface[at(x, z, "setSurface")] = id;
+  };
+  /** Remove any building from (x, z); ground and surface stay. */
+  raster.clearBuilding = (x, z) => {
+    const i = at(x, z, "clearBuilding");
+    raster.owner[i] = -1;
+    raster.top[i] = 0;
+  };
+  /** A chunk prop at global block (x, z): {y0, y1, color, flags}. */
+  raster.addProp = (x, z, { y0, y1, color, flags }) => {
+    at(x, z, "addProp");
+    raster.props.push({ x, z, y0, y1, color, flags });
+  };
+  return raster;
 }
 
 /** Raster index of global block (x, z), or -1 when outside. */
@@ -29,28 +93,37 @@ export function rasterIndex(raster, x, z) {
 const isOpenWater = (raster, i) => raster.surface[i] === SURFACE.WATER && raster.deck[i] === 0 && raster.owner[i] === -1;
 
 /**
- * Split into shared/city.js Chunk objects (validated). buildings[owner] = {id, base, top, palette, roof}.
- * Chunks that are entirely open WATER (no shallow, deck or building) are dropped and counted.
- * → {chunks: Chunk[] (row-major by cz, cx), allWater: number}
+ * Split into shared/city.js v2 Chunk objects, validated with `parents` (manifest.parents). Each chunk's entry
+ * `top` is the max column top of that entry inside the chunk. Chunks that are entirely open WATER (no shallow,
+ * deck, building or prop) are dropped and returned as `water` [cx, cz] pairs.
+ * → {chunks: Chunk[] (row-major by cz, cx), water: [cx, cz][]}
  */
-export function rasterToChunks(raster, buildings) {
+export function rasterToChunks(raster, parents = {}) {
   const nx = raster.w / CHUNK, nz = raster.h / CHUNK;
   const cx0 = raster.x0 / CHUNK, cz0 = raster.z0 / CHUNK;
+  const propsByChunk = new Map();
+  for (const p of raster.props) {
+    const key = `${Math.floor(p.x / CHUNK)},${Math.floor(p.z / CHUNK)}`;
+    if (!propsByChunk.has(key)) propsByChunk.set(key, []);
+    propsByChunk.get(key).push(p);
+  }
   const chunks = [];
-  let allWater = 0;
+  const water = [];
   for (let j = 0; j < nz; j++) {
     for (let i = 0; i < nx; i++) {
+      const cx = cx0 + i, cz = cz0 + j;
       const chunk = {
-        cx: cx0 + i,
-        cz: cz0 + j,
+        cx, cz, frame: 0,
         ground: new Int16Array(COLUMNS),
         surface: new Uint8Array(COLUMNS),
         bldg: new Uint16Array(COLUMNS),
         deck: new Int16Array(COLUMNS),
+        top: new Int16Array(COLUMNS),
         buildings: [],
+        props: [],
       };
-      const owners = new Set();
-      let water = true;
+      const tops = new Map();
+      let open = true;
       for (let lz = 0; lz < CHUNK; lz++) {
         const row = (j * CHUNK + lz) * raster.w + i * CHUNK;
         for (let lx = 0; lx < CHUNK; lx++) {
@@ -58,18 +131,24 @@ export function rasterToChunks(raster, buildings) {
           chunk.ground[ci] = raster.ground[ri];
           chunk.surface[ci] = raster.surface[ri];
           chunk.deck[ci] = raster.deck[ri];
-          if (raster.owner[ri] >= 0) owners.add(raster.owner[ri]);
-          if (water && !isOpenWater(raster, ri)) water = false;
+          const o = raster.owner[ri];
+          if (o >= 0) {
+            if (raster.top[ri] === 0) throw new Error(`rasterToChunks: column ${raster.x0 + i * CHUNK + lx},${raster.z0 + j * CHUNK + lz} has owner ${o} but no top; write it with setColumn`);
+            chunk.top[ci] = raster.top[ri];
+            tops.set(o, Math.max(tops.get(o) ?? -Infinity, raster.top[ri]));
+          }
+          if (open && !isOpenWater(raster, ri)) open = false;
         }
       }
-      if (water) {
-        allWater++;
+      const props = propsByChunk.get(`${cx},${cz}`) ?? [];
+      if (open && props.length === 0) {
+        water.push([cx, cz]);
         continue;
       }
-      const table = [...owners].map((o) => {
-        const b = buildings[o];
-        if (!b) throw new Error(`rasterToChunks: owner ${o} has no building`);
-        return { o, entry: { id: b.id, base: b.base, top: b.top, palette: b.palette, roof: b.roof } };
+      const table = [...tops.keys()].map((o) => {
+        const e = raster.entries[o];
+        if (!e) throw new Error(`rasterToChunks: owner ${o} has no entry`);
+        return { o, entry: { id: e.id, parent: e.parent, base: e.base, top: tops.get(o), accentFrom: e.accentFrom, palette: e.palette, cap: e.cap, facade: e.facade, accent: e.accent } };
       }).sort((a, b) => a.entry.id - b.entry.id);
       const slot = new Map(table.map((t, k) => [t.o, k + 1]));
       chunk.buildings = table.map((t) => t.entry);
@@ -80,8 +159,9 @@ export function rasterToChunks(raster, buildings) {
           if (o >= 0) chunk.bldg[lz * CHUNK + lx] = slot.get(o);
         }
       }
-      chunks.push(validateChunk(chunk));
+      chunk.props = props.map((p) => ({ lx: p.x - cx * CHUNK, lz: p.z - cz * CHUNK, y0: p.y0, y1: p.y1, color: p.color, flags: p.flags }));
+      chunks.push(validateChunk(chunk, parents));
     }
   }
-  return { chunks, allWater };
+  return { chunks, water };
 }
