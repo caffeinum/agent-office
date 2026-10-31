@@ -10,7 +10,7 @@ From `wrangler.jsonc`:
 | --- | --- |
 | Worker name | `agent-office` (→ `https://agent-office.<account-subdomain>.workers.dev`) |
 | entry | `src/worker.ts` |
-| static assets | `./public`, bound as `ASSETS`, SPA fallback, `run_worker_first: true` |
+| static assets | `./public`, bound as `ASSETS`, SPA fallback, `run_worker_first` on every path except the static city data (`/city/*/chunks/*`, `manifest.json`, `companies.json`, `LICENSE.txt`), which the asset server answers directly with headers from `public/_headers` |
 | Durable Object binding | `OFFICE` → class `Office` |
 | DO migration | tag `v1`, `new_sqlite_classes: ["Office"]` (SQLite-backed DO; available on the Workers Free and Paid plans) |
 | compatibility | `compatibility_date: 2026-08-15`, `nodejs_compat` |

@@ -1,0 +1,4 @@
+# static city data skips the Worker (wrangler.jsonc run_worker_first), so it gets the Worker's headers here
+/city/*
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff

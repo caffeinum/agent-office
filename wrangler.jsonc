@@ -8,7 +8,9 @@
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": true
+    // the Worker runs first everywhere (headers, /mcp, /api, /o/*, the SPA's /city/:id page) except the static
+    // city data files, which the asset server answers directly: no Worker invocation per chunk
+    "run_worker_first": ["/*", "!/city/*/chunks/*", "!/city/*/manifest.json", "!/city/*/companies.json", "!/city/*/LICENSE.txt"]
   },
   "durable_objects": {
     "bindings": [
