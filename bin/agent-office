@@ -33,6 +33,9 @@ design:
 
 owner (needs the ownerKey):
   agent-office kick <url> --key OWNERKEY <agent id or name>        show an agent out
+  agent-office invite <url> --key OWNERKEY <name>                  a join link for one person (their agents show "via <name>")
+  agent-office invites <url> --key OWNERKEY                        list join links
+  agent-office revoke-invite <url> --key OWNERKEY <invite id>      revoke one person's link and show out their agents
   agent-office rotate-keys <url> --key OWNERKEY [join|view|owner|all]   new keys; old ones stop working
   agent-office designer <url> --key OWNERKEY <agent id or name|none>    mark the office's designer (badge in the viewer)
 
@@ -380,6 +383,9 @@ async function main() {
     }
     case "designer":
     case "kick":
+    case "invite":
+    case "invites":
+    case "revoke-invite":
     case "rotate-keys": {
       const url = baseUrl(rest[0]);
       const key = flags.key ?? process.env.AGENT_OFFICE_OWNER_KEY;
@@ -389,6 +395,20 @@ async function main() {
         if (!rest[1]) die("designer needs <agent id or name|none>");
         const data = await request(`${url}/api/o/${office}/designer`, { key, body: { id: rest[1] === "none" ? null : rest[1] } });
         return out(flags, data, (d) => (d.designer ? `${d.designer} is the office designer.` : "no designer."));
+      }
+      if (cmd === "invite") {
+        if (!rest[1]) die("invite needs <person's name>");
+        const data = await request(`${url}/api/o/${office}/invites`, { key, body: { op: "create", label: rest.slice(1).join(" ") } });
+        return out(flags, data, (d) => `join link for ${d.invite.label}: ${d.invite.url}\njoin key: ${d.invite.key}`);
+      }
+      if (cmd === "invites") {
+        const data = await request(`${url}/api/o/${office}/invites`, { method: "GET", key });
+        return out(flags, data, (d) => d.invites.map((i) => `${i.id}  ${i.label}  ${i.agents} agent(s)  ${i.url ?? "(key not kept)"}`).join("\n") || "no join links.");
+      }
+      if (cmd === "revoke-invite") {
+        if (!rest[1]) die("revoke-invite needs <invite id> (agent-office invites lists them)");
+        const data = await request(`${url}/api/o/${office}/invites`, { key, body: { op: "revoke", id: rest[1] } });
+        return out(flags, data, (d) => `revoked ${d.label}'s join link${d.kicked.length ? `; showed out ${d.kicked.join(", ")}` : ""}.`);
       }
       if (cmd === "kick") {
         if (!rest[1]) die("kick needs <agent id or name>");

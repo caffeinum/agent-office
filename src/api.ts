@@ -1,5 +1,5 @@
 // REST: office creation, admin office management and the mirror of every MCP tool under /api/o/:office/:tool.
-import { newOfficeId, newOfficeKey, OFFICE_ID_RE, safeEqual, sha256hex } from "./auth";
+import { DEFAULT_INVITE, newOfficeId, newOfficeKey, OFFICE_ID_RE, safeEqual, sha256hex, type KeyHashes } from "./auth";
 import { registryStub } from "./registry";
 import { BIG_BODY_MAX, errorResponse, json, readBytes, readJson } from "./http";
 import { resolveToolName, TOOL_NAMES, ToolError, type ToolName } from "./tools";
@@ -73,7 +73,11 @@ export async function handleCreateOffice(req: Request, env: Env): Promise<Respon
   const ownerKey = newOfficeKey(id);
   const joinKey = newOfficeKey(id);
   const viewKey = newOfficeKey(id);
-  const keys = { owner: await sha256hex(ownerKey), join: await sha256hex(joinKey), view: await sha256hex(viewKey) };
+  const keys: KeyHashes = {
+    owner: await sha256hex(ownerKey),
+    join: [{ id: DEFAULT_INVITE, hash: await sha256hex(joinKey), label: DEFAULT_INVITE, createdAt: Date.now() }],
+    view: [await sha256hex(viewKey)],
+  };
   const stub = env.OFFICE.get(env.OFFICE.idFromName(id));
   const res = await stub.fetch("https://office/internal/init", {
     method: "POST",

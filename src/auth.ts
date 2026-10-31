@@ -88,16 +88,46 @@ function hexEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-export interface KeyHashes {
-  owner: string;
-  join: string;
-  view: string;
+/** A join key handed to one person ("Bob"): agents that join through it show as "via Bob", and revoking it shows them out. */
+export interface Invite {
+  id: string;
+  hash: string;
+  label: string;
+  createdAt: number;
 }
 
-export async function roleOfKey(key: string | null, hashes: KeyHashes): Promise<Role | null> {
+/** One owner key, any number of named join keys (invites) and any number of view keys, so a new link never revokes the old ones. */
+export interface KeyHashes {
+  owner: string;
+  join: Invite[];
+  view: string[];
+}
+
+/** Id and label of the join key every office starts with (and that offices saved with a single join key get). */
+export const DEFAULT_INVITE = "everyone";
+
+/** Offices saved before invites hold one join hash and one view hash. */
+export function normalizeKeyHashes(raw: { owner: string; join: string | Invite[]; view: string | string[] }, createdAt: number): KeyHashes {
+  return {
+    owner: raw.owner,
+    join: typeof raw.join === "string" ? [{ id: DEFAULT_INVITE, hash: raw.join, label: DEFAULT_INVITE, createdAt }] : raw.join,
+    view: typeof raw.view === "string" ? [raw.view] : raw.view,
+  };
+}
+
+export interface KeyMatch {
+  role: Role;
+  hash: string;
+  /** The invite a join key belongs to. */
+  invite: Invite | null;
+}
+
+export async function roleOfKey(key: string | null, hashes: KeyHashes): Promise<KeyMatch | null> {
   if (!key) return null;
-  const h = await sha256hex(key);
-  let found: Role | null = null;
-  for (const role of ["owner", "join", "view"] as const) if (hexEqual(h, hashes[role])) found = role;
+  const hash = await sha256hex(key);
+  let found: KeyMatch | null = null;
+  if (hexEqual(hash, hashes.owner)) found = { role: "owner", hash, invite: null };
+  for (const inv of hashes.join) if (hexEqual(hash, inv.hash)) found = { role: "join", hash, invite: inv };
+  for (const h of hashes.view) if (hexEqual(hash, h)) found = { role: "view", hash, invite: null };
   return found;
 }

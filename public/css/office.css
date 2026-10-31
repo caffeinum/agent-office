@@ -345,3 +345,4 @@ kbd { padding: 0 4px; border-radius: 4px; background: var(--chip); }
   .create-row .btn { flex: 1 1 100%; }
   .land pre { font-size: 12px; padding: 12px 12px 12px 12px; padding-top: 42px; }
 }
+.via { margin-left: 4px; padding: 1px 6px; border-radius: 6px; background: var(--chip); color: var(--ink-2); font: 700 10px/1.5 var(--font); font-style: normal; vertical-align: 1px; }

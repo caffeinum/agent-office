@@ -64,7 +64,9 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
   `);
   const $ = (s) => root.querySelector(s);
   const side = $(".side"), dm = $(".dm");
-  let state = null, role = null, canWrite = false, dmAgent = null, tab = "agents", roomSeen = 0;
+  let state = null, role = null, canWrite = false, chatAs = null, dmAgent = null, tab = "agents", roomSeen = 0;
+  const canChat = () => canWrite || chatAs !== null;
+  const viaTag = (a) => (a.via && a.via !== "everyone" ? ` <em class="via" title="came in through ${esc(a.via)}'s join link">via ${esc(a.via)}</em>` : "");
 
   const asInput = $(".as-input");
   try { asInput.value = localStorage.getItem("office.as") ?? ""; } catch { /* storage blocked: ask each time */ }
@@ -131,11 +133,11 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
       e.preventDefault();
       const text = ta.value.trim();
       if (!text) return;
-      const as = asInput.value.trim();
+      const as = chatAs ?? asInput.value.trim();
       if (!as) { asInput.focus(); toast("Pick a name to chat as first (bottom of the sidebar)."); return; }
       const to = form.dataset.to === "dm" ? dmAgent : null;
       try {
-        onSend({ type: "chat", to, text, as });
+        onSend(chatAs === null ? { type: "chat", to, text, as } : { type: "chat", to, text });
         ta.value = "";
         ta.style.height = "auto";
       } catch (err) {
@@ -151,7 +153,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
     const designer = state.designer === a.id;
     return `<button class="agent ${a.status} ${dmAgent === a.id ? "sel" : ""} ${designer ? "designer" : ""}" data-id="${esc(a.id)}">
       <span class="av" style="--hue:${col.css}">${a.emoji ? esc(a.emoji) : esc(a.name.slice(0, 1).toUpperCase())}</span>
-      <span class="who"><b>${esc(a.name)}${designer ? ` <em class="badge" title="this office's designer">Designer</em>` : ""}</b><small>${esc(clip(line, 64))}</small></span>
+      <span class="who"><b>${esc(a.name)}${viaTag(a)}${designer ? ` <em class="badge" title="this office's designer">Designer</em>` : ""}</b><small>${esc(clip(line, 64))}</small></span>
       <span class="st"><i class="dot ${a.status}"></i>${esc(statusLabel(a.status))}</span>
     </button>`;
   }
@@ -248,7 +250,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
       const col = hueColors(a.hue ?? 0);
       dm.querySelector(".dm-head").innerHTML = `
         <span class="av" style="--hue:${col.css}">${a.emoji ? esc(a.emoji) : esc(a.name.slice(0, 1).toUpperCase())}</span>
-        <div class="who"><b>${esc(a.name)}${state.designer === a.id ? ` <em class="badge">Designer</em>` : ""}</b><small><i class="dot ${a.status}"></i>${esc(statusLabel(a.status))}${a.client ? ` · ${esc(a.client)}` : ""}${a.activity ? ` · ${esc(clip(a.activity, 60))}` : ""}</small></div>
+        <div class="who"><b>${esc(a.name)}${viaTag(a)}${state.designer === a.id ? ` <em class="badge">Designer</em>` : ""}</b><small><i class="dot ${a.status}"></i>${esc(statusLabel(a.status))}${a.client ? ` · ${esc(a.client)}` : ""}${a.activity ? ` · ${esc(clip(a.activity, 60))}` : ""}</small></div>
         <button class="x" title="close">×</button>
         ${canWrite ? `<div class="dm-acts"><button class="mkdes ${state.designer === a.id ? "on" : ""}" title="${state.designer === a.id ? "stop treating this agent as the office designer" : "make this agent the office designer: it restyles the office from your chat"}">${state.designer === a.id ? "★ designer" : "☆ make designer"}</button><button class="kick" title="show ${esc(a.name)} out of the office">show out</button></div>` : ""}`;
       const mk = dm.querySelector(".mkdes");
@@ -264,7 +266,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
     dm.hidden = false;
     const ta = dm.querySelector("textarea");
     ta.placeholder = a ? (state.designer === a.id ? `Ask ${a.name} for a redesign · drop a logo` : `Message ${a.name}…`) : "This agent left";
-    dm.querySelector(".composer").hidden = !canWrite || !a;
+    dm.querySelector(".composer").hidden = !canChat() || !a;
   }
 
   function render() {
@@ -295,11 +297,14 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
 
   return {
     setState(s) { state = s; render(); },
-    setWrite(w) {
+    setWrite(w, as = null) {
       canWrite = w;
-      root.querySelector(".side .composer").hidden = !w;
-      $(".as").hidden = !w;
-      $(".ro").hidden = w;
+      chatAs = w ? null : as;
+      root.querySelector(".side .composer").hidden = !canChat();
+      $(".as").hidden = !canChat();
+      asInput.disabled = chatAs !== null;
+      if (chatAs !== null) asInput.value = chatAs;
+      $(".ro").hidden = canChat();
       $('[data-act="edit"]').hidden = !w;
       if (state) renderDm();
     },
@@ -310,7 +315,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
       if (watchOnly && tab === "room") setTab("agents");
       $(".ro").textContent = r === "view"
         ? "Watch-only link: you can see the office but not chat, edit or bring agents in. The owner can share a join key."
-        : r === "join" ? "Join link: you can connect agents. Open the owner link to chat and edit."
+        : r === "join" ? "Join link: you can connect agents. Open the admin link to edit."
         : "Read-only view. Open the owner link to chat and edit.";
       if (state) render();
     },

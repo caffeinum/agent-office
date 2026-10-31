@@ -1,5 +1,7 @@
 // "Connect an agent": the in-office guide for bringing agents in, scoped to the viewer's own key.
 // owner → the office's join key (or a way to mint one), join → its own key, view → watch-only, no key.
+// Owners invite people by name: each gets their own join link, their agents show "via <name>", and revoking one
+// link touches only that person. New links never revoke old ones; revoking is always its own explicit action.
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const CLI_URL = "https://github.com/caffeinum/agent-office/releases/latest/download/agent-office";
@@ -69,7 +71,10 @@ export function createConnect(root, { office, key, toast }) {
     if (!t) return;
     if (t.dataset.copy !== undefined) copy(t);
     else if (t.classList.contains("cx-x")) close();
-    else if (t.dataset.rotate) rotate(t.dataset.rotate);
+    else if (t.dataset.invite !== undefined) invite();
+    else if (t.dataset.revoke) revoke(t.dataset.revoke);
+    else if (t.dataset.addView !== undefined) addView();
+    else if (t.dataset.revokeViews !== undefined) revokeOtherViews();
   });
 
   card.addEventListener("change", (e) => {
@@ -138,58 +143,111 @@ export function createConnect(root, { office, key, toast }) {
           <p class="cx-p">Use <code>${esc(design)}</code> as the MCP URL instead (same key). It adds the design tools (theme, custom furniture, logo) and the office-designer prompt. Claude Code:</p>
           ${codeBlock(`claude mcp add --transport http office-design "${design}" --header "Authorization: Bearer ${info.joinKey}"`, "design-mode command")}
         </details>
-        <p class="cx-fine">Anyone with the join key can bring agents in. Leaked it? <button class="cx-link" data-rotate="join">Make a new join key</button></p>` : `
+        <p class="cx-fine">Anyone with a join key can bring agents in. Give each person their own link above, so you can revoke just theirs.</p>` : `
         <p class="cx-fine">This is your join key: share it only with agents you want in the office.</p>`}
       </section>`;
   }
 
-  function linkRow(label, grants, url, which) {
-    const action = url
-      ? `<button data-copy="${esc(url)}" aria-label="copy ${esc(label.toLowerCase())}">Copy ${esc(label.toLowerCase())}</button>`
-      : role === "owner" ? `<button class="cx-gen" data-rotate="${which}">Generate</button>` : "";
-    return `<div class="cx-linkrow"><div><b>${label}</b><small>${grants}${url ? "" : role === "owner" ? " · none kept for this office yet" : " · ask the owner for one"}</small></div>${action}</div>`;
+  const linkOf = (k) => `${location.origin}/o/${encodeURIComponent(office)}#k=${encodeURIComponent(k)}`;
+  const copyBtn = (url, what) => `<button data-copy="${esc(url)}" aria-label="copy ${esc(what)}">Copy</button>`;
+
+  function linkRow(label, grants, action) {
+    return `<div class="cx-linkrow"><div><b>${label}</b><small>${grants}</small></div>${action}</div>`;
+  }
+
+  function inviteRow(inv) {
+    const who = inv.label === "everyone" ? "Everyone (shared join key)" : esc(inv.label);
+    const n = inv.agents ? ` · ${inv.agents} agent${inv.agents === 1 ? "" : "s"} in` : "";
+    const action = `${inv.url ? copyBtn(inv.url, `${inv.label}'s join link`) : ""}<button class="cx-gen cx-revoke" data-revoke="${esc(inv.id)}" aria-label="revoke ${esc(inv.label)}'s join link">Revoke</button>`;
+    return linkRow(who, `${inv.url ? "join link" : "link not kept: revoke and invite again to share"}${n}`, action);
   }
 
   function links() {
-    if (role !== "owner" && !info.viewUrl) return "";
-    const ownerUrl = `${location.origin}/o/${encodeURIComponent(office)}#k=${encodeURIComponent(key)}`;
+    if (role !== "owner") {
+      return info.viewUrl ? `<section class="cx-links"><h3>Share the office</h3>${linkRow("Public link", "watch only, no agents or chat", copyBtn(info.viewUrl, "public link"))}</section>` : "";
+    }
+    const invites = info.invites ?? [];
+    const view = info.viewUrl
+      ? copyBtn(info.viewUrl, "public link")
+      : `<button class="cx-gen" data-add-view title="adds a public link; nothing is revoked">Generate</button>`;
+    const revokeViews = info.viewUrl && info.viewKeys > 1
+      ? `<p class="cx-fine">${info.viewKeys} public links work right now. <button class="cx-link" data-revoke-views>Revoke all but the one above</button></p>` : "";
     return `<section class="cx-links"><h3>Share the office</h3>
-      ${role === "owner" ? linkRow("Owner link", "admin: chat, edit, show agents out. Keep it private", ownerUrl, "owner") : ""}
-      ${role === "owner" ? linkRow("Join link", "watch the office and connect their own agents", info.joinUrl, "join") : ""}
-      ${linkRow("Watch link", "watch only: can't chat, edit or bring agents in", info.viewUrl, "view")}
-      ${role === "owner" ? `<p class="cx-fine">This browser remembers your key; copy the owner link to open the office elsewhere.</p>` : ""}
+      ${linkRow("Admin link (bookmark this)", "you: chat, edit, show agents out, delete. Keep it private", copyBtn(linkOf(key), "admin link"))}
+      <h3 class="cx-sub">Join links <small>for friends: watch + connect their agents</small></h3>
+      ${invites.map(inviteRow).join("") || `<p class="cx-fine">No join links yet.</p>`}
+      <button class="cx-link cx-invite" data-invite>+ invite someone</button>
+      <h3 class="cx-sub">Public link <small>watch only, no agents or chat</small></h3>
+      ${linkRow("Public link", info.viewUrl ? "anyone with it can watch" : "none kept for this office yet", view)}
+      ${revokeViews}
+      <p class="cx-fine">This browser remembers your key; copy the admin link to open the office elsewhere.</p>
     </section>`;
   }
 
   function noKey() {
-    return `<p class="cx-p">This office was created before join keys were kept, so the viewer can't show it. Make a new join key to get ready-to-paste setup for your agents.</p>
-      <p class="cx-warn">The old join key and any links built from it stop working. Agents already inside stay.</p>
-      <button class="cx-btn" data-rotate="join">Generate a join key</button>`;
+    return role === "owner"
+      ? `<p class="cx-p">No join link to show yet. <b>Invite someone</b> above (even yourself) to get one with ready-to-paste setup for agents. Existing join keys keep working.</p>`
+      : `<p class="cx-p">Ask the owner for a join link.</p>`;
   }
 
-  const ROTATE = {
-    join: "Make a new join key? The old join key and join links stop working right away; agents already in the office stay.",
-    view: "Make a new watch link? Any old watch links stop working right away.",
-  };
+  async function act(fn) {
+    try { await fn(); } catch (err) { toast(err.message, "err"); }
+  }
 
-  async function rotate(which) {
-    if (role !== "owner") throw new Error("only the owner can rotate keys");
-    if (!ROTATE[which]) throw new Error(`can't rotate "${which}" from here`);
-    if (!confirm(ROTATE[which])) return;
-    try {
-      const res = await api(office, key, "rotate-keys", { method: "POST", body: JSON.stringify({ which }) });
-      if (which === "join") {
-        if (!res.joinKey) throw new Error("rotate-keys returned no joinKey");
-        info = { ...info, joinKey: res.joinKey, joinUrl: `${location.origin}/o/${encodeURIComponent(office)}#k=${encodeURIComponent(res.joinKey)}` };
-      } else {
-        if (!res.viewUrl) throw new Error("rotate-keys returned no viewUrl");
-        info = { ...info, viewUrl: res.viewUrl };
+  function invite() {
+    if (role !== "owner") throw new Error("only the owner can invite");
+    const label = prompt("Who is this join link for? (their name; their agents show as “via <name>”)")?.trim();
+    if (!label) return;
+    act(async () => {
+      const res = await api(office, key, "invites", { method: "POST", body: JSON.stringify({ op: "create", label }) });
+      if (!res.invite?.key) throw new Error("invite returned no key");
+      info = { ...info, invites: [...(info.invites ?? []), res.invite] };
+      if (!info.joinKey) info = { ...info, joinKey: res.invite.key, joinUrl: res.invite.url };
+      render();
+      toast(`Join link for ${label} ready. Copy it and send it to them.`);
+    });
+  }
+
+  async function revoke(id) {
+    const fresh = await api(office, key, "invites").catch((err) => { toast(err.message, "err"); return null; });
+    if (!fresh) return;
+    info = { ...info, invites: fresh.invites };
+    const inv = info.invites.find((i) => i.id === id);
+    if (!inv) { render(); toast("That link is already gone.", "err"); return; }
+    const theirs = inv.agents ? ` Their ${inv.agents} agent${inv.agents === 1 ? " is" : "s are"} shown out.` : "";
+    if (!confirm(`Revoke ${inv.label === "everyone" ? "the shared join key" : `${inv.label}'s join link`}? It stops working right away.${theirs} Other links keep working.`)) return;
+    act(async () => {
+      const res = await api(office, key, "invites", { method: "POST", body: JSON.stringify({ op: "revoke", id }) });
+      info = { ...info, invites: info.invites.filter((i) => i.id !== id) };
+      if (info.joinKey === inv.key) {
+        const next = info.invites.find((i) => i.key);
+        info = { ...info, joinKey: next?.key ?? null, joinUrl: next?.url ?? null };
       }
       render();
-      toast(which === "join" ? "New join key ready. Old join links no longer work." : "New watch link ready. Old watch links no longer work.");
-    } catch (err) {
-      toast(err.message, "err");
-    }
+      toast(`Revoked ${inv.label}'s link${res.kicked.length ? ` and showed out ${res.kicked.length} agent${res.kicked.length === 1 ? "" : "s"}` : ""}.`);
+    });
+  }
+
+  function addView() {
+    act(async () => {
+      const res = await api(office, key, "view-keys", { method: "POST", body: JSON.stringify({ op: "add" }) });
+      if (!res.url) throw new Error("view-keys returned no url");
+      info = { ...info, viewUrl: res.url, viewKeys: res.count };
+      render();
+      toast("Public link ready. Older public links still work.");
+    });
+  }
+
+  function revokeOtherViews() {
+    const keep = decodeURIComponent(new URL(info.viewUrl).hash.replace(/^#k=/, ""));
+    if (!keep) throw new Error("no public link shown to keep");
+    if (!confirm("Revoke every other public link? Only the one shown here keeps working.")) return;
+    act(async () => {
+      const res = await api(office, key, "view-keys", { method: "POST", body: JSON.stringify({ op: "revoke-others", keep }) });
+      info = { ...info, viewKeys: res.count };
+      render();
+      toast(`Revoked ${res.revoked} other public link${res.revoked === 1 ? "" : "s"}.`);
+    });
   }
 
   async function copy(btn) {

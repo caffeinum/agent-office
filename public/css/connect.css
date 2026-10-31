@@ -83,3 +83,10 @@
   #app .empty { bottom: calc(42% + 16px); left: 8px; right: 8px; transform: none; width: auto; max-width: none; }
   #app.side-off .empty { bottom: 60px; }
 }
+
+.cx-sub { margin: 14px 0 6px !important; }
+.cx-sub small { margin-left: 6px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ink-3); }
+.cx-invite { display: inline-block; margin-top: 8px; font-size: 12.5px; }
+.cx-linkrow .cx-revoke { min-width: 0; }
+.cx-linkrow .cx-revoke:hover { background: rgba(220, 70, 60, 0.16); color: #c0392b; }
+.cx-linkrow > button + button { margin-left: -4px; }

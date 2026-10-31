@@ -2,7 +2,7 @@ import { env, runDurableObjectAlarm, runInDurableObject, SELF } from "cloudflare
 import { describe, expect, it } from "vitest";
 import { sha256hex } from "../src/auth";
 import { AWAY_MS, REMOVE_MS, type Office } from "../src/office";
-import { ADMIN, call, createOffice, join, ORIGIN } from "./helpers";
+import { ADMIN, call, createOffice, join, openWs, ORIGIN } from "./helpers";
 
 const stubOf = (id: string) => env.OFFICE.get(env.OFFICE.idFromName(id));
 
@@ -132,6 +132,101 @@ describe("REST tools", () => {
     expect((await call(o, "connect", {}, { method: "GET", key: o.viewKey })).status).toBe(403);
     const rotated = await call(o, "rotate-keys", { which: "join" }, { key: o.ownerKey });
     expect((await call(o, "connect", {}, { method: "GET", key: o.ownerKey })).body.joinKey).toBe(rotated.body.joinKey);
+  });
+
+  it("invites: create, list, revoke; a new invite never revokes the others", async () => {
+    const o = await createOffice();
+    const owner = { key: o.ownerKey };
+    expect((await call(o, "invites", { op: "create", label: "Bob" })).status).toBe(403);
+    const bob = (await call(o, "invites", { op: "create", label: "Bob" }, owner)).body.invite;
+    expect(bob).toMatchObject({ label: "Bob", agents: 0 });
+    expect(bob.url).toContain(`#k=${encodeURIComponent(bob.key)}`);
+    expect((await call(o, "invites", { op: "create", label: "bob" }, owner)).status).toBe(409);
+    expect((await call(o, "invites", { op: "create", label: " " }, owner)).status).toBe(400);
+    const cat = (await call(o, "invites", { op: "create", label: "Cat" }, owner)).body.invite;
+    expect((await call(o, "kinds", {}, { key: o.joinKey })).status).toBe(200);
+    expect((await call(o, "kinds", {}, { key: bob.key })).status).toBe(200);
+    const list = (await call(o, "invites", {}, { method: "GET", ...owner })).body.invites;
+    expect(list.map((i: { label: string }) => i.label)).toEqual(["everyone", "Bob", "Cat"]);
+    expect(list[0].key).toBe(o.joinKey);
+    const info = (await call(o, "connect", {}, { method: "GET", ...owner })).body;
+    expect(info.joinKey).toBe(o.joinKey);
+    expect(info.invites).toHaveLength(3);
+    expect((await call(o, "connect", {}, { method: "GET", key: bob.key })).body).toMatchObject({ as: "Bob", joinKey: null });
+    const sock = await openWs(o, bob.key);
+    const closed = new Promise<number>((r) => sock.ws.addEventListener("close", (e) => r(e.code)));
+    expect((await call(o, "invites", { op: "revoke", id: "nope" }, owner)).status).toBe(404);
+    expect((await call(o, "invites", { op: "revoke", id: bob.id }, owner)).body).toMatchObject({ ok: true, revoked: bob.id, label: "Bob" });
+    expect(await closed).toBe(4401);
+    expect((await call(o, "kinds", {}, { key: bob.key })).status).toBe(401);
+    expect((await call(o, "kinds", {}, { key: cat.key })).status).toBe(200);
+    expect((await call(o, "kinds", {}, { key: o.joinKey })).status).toBe(200);
+  });
+
+  it("agents carry the invite they came through; revoking it shows out only that person's agents", async () => {
+    const o = await createOffice();
+    const owner = { key: o.ownerKey };
+    const bob = (await call(o, "invites", { op: "create", label: "Bob" }, owner)).body.invite;
+    const viaBob = await call(o, "join", { name: "bobbot" }, { key: bob.key });
+    expect(viaBob.body.agent.via).toBe("Bob");
+    const other = await join(o, "mine");
+    expect((other.agent as { via?: string }).via).toBe("everyone");
+    const ownerAgent = await call(o, "join", { name: "boss" }, owner);
+    expect(ownerAgent.body.agent).not.toHaveProperty("via");
+    const look = (await call(o, "look", {}, { token: other.agentToken })).body;
+    expect(look.agents.find((a: { id: string }) => a.id === viaBob.body.agent.id).via).toBe("Bob");
+    expect((await call(o, "invites", {}, { method: "GET", ...owner })).body.invites[1].agents).toBe(1);
+    const res = (await call(o, "invites", { op: "revoke", id: bob.id }, owner)).body;
+    expect(res.kicked).toEqual([viaBob.body.agent.id]);
+    expect((await call(o, "look", {}, { token: viaBob.body.agentToken })).status).toBe(401);
+    expect((await call(o, "look", {}, { token: other.agentToken })).status).toBe(200);
+  });
+
+  it("a friend on a join link chats as the invite's label, and can't edit", async () => {
+    const o = await createOffice();
+    const bob = (await call(o, "invites", { op: "create", label: "Bob" }, { key: o.ownerKey })).body.invite;
+    const sock = await openWs(o, bob.key);
+    expect((await sock.next((f) => f.type === "snapshot")).as).toBe("Bob");
+    sock.ws.send(JSON.stringify({ type: "chat", text: "hi from bob", as: "owner" }));
+    expect((await sock.next((f) => f.type === "chat")).msg).toMatchObject({ from: "human:Bob", text: "hi from bob" });
+    sock.ws.send(JSON.stringify({ type: "op", op: { op: "add", kind: "plant", x: 3, z: 3 } }));
+    expect((await sock.next((f) => f.type === "error")).error).toMatch(/ownerKey/);
+    sock.ws.close();
+  });
+
+  it("public links: adding one keeps the others; revoke-others is explicit", async () => {
+    const o = await createOffice();
+    const owner = { key: o.ownerKey };
+    const added = (await call(o, "view-keys", { op: "add" }, owner)).body;
+    expect(added.count).toBe(2);
+    expect((await call(o, "connect", {}, { method: "GET", ...owner })).body.viewUrl).toBe(added.url);
+    const ws1 = await openWs(o, o.viewKey);
+    await ws1.next((f) => f.type === "snapshot");
+    const closed = new Promise<number>((r) => ws1.ws.addEventListener("close", (e) => r(e.code)));
+    expect((await call(o, "view-keys", { op: "revoke-others", keep: added.key }, owner)).body).toMatchObject({ revoked: 1, count: 1 });
+    expect(await closed).toBe(4401);
+    await openWs(o, added.key);
+  });
+
+  it("offices saved with a single join/view key get an \"everyone\" invite", async () => {
+    const o = await createOffice();
+    const a = await join(o, "early");
+    await runInDurableObject(stubOf(o.id), async (inst: Office, state) => {
+      const meta = (await state.storage.get<any>("meta"))!;
+      const legacy = { ...meta, keys: { owner: meta.keys.owner, join: meta.keys.join[0].hash, view: meta.keys.view[0] } };
+      await state.storage.put({ meta: legacy, joinKey: o.joinKey, viewKey: o.viewKey });
+      await state.storage.delete(["joinKeys", "viewKeys"]);
+      await (inst as any).migrateKeys(legacy);
+      const keys = (await state.storage.get<any>("meta")).keys;
+      expect(keys.join).toEqual([{ id: "everyone", hash: meta.keys.join[0].hash, label: "everyone", createdAt: meta.createdAt }]);
+      expect(keys.view).toEqual(meta.keys.view);
+      expect(await state.storage.get("joinKeys")).toEqual({ everyone: o.joinKey });
+      expect(await state.storage.get("joinKey")).toBeUndefined();
+    });
+    expect((await call(o, "kinds", {})).status).toBe(200);
+    const info = (await call(o, "connect", {}, { method: "GET", key: o.ownerKey })).body;
+    expect(info).toMatchObject({ joinKey: o.joinKey, viewUrl: o.viewUrl });
+    expect((await call(o, "look", {}, { token: a.agentToken })).status).toBe(200);
   });
 
   it("office_edit and office_chat route ops to the single-purpose tools", async () => {

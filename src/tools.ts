@@ -9,7 +9,7 @@ import {
 import { ASSET_BASE64_MAX, IMAGE_TYPES } from "./images";
 import { TRIP_SECRET_MAX, TRIP_SECRET_MIN } from "./auth";
 
-export { ACTIVITY_MAX, NAME_MAX };
+export { ACTIVITY_MAX, NAME_MAX, SPOOF_LINE_RE };
 
 export const STATUSES = ["working", "idle", "waiting", "away"] as const;
 export type Status = (typeof STATUSES)[number];

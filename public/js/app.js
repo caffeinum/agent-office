@@ -157,7 +157,7 @@ function boot() {
     if (frame.type === "snapshot") {
       role = frame.role ?? null;
       const write = role === "owner";
-      ui.setWrite(write);
+      ui.setWrite(write, role === "join" ? (frame.as ?? null) : null);
       ui.setRole(connect ? role : null);
       connect?.setRole(role);
       if (!write && role === null) console.warn("office: snapshot carries no role; treating this view as read-only");

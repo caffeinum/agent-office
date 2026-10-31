@@ -6,17 +6,24 @@ import {
   UNITS, validateKindDef, validateTheme, type CustomKind, type Theme, type ThemePatch,
 } from "./shared/design";
 import { ASSET_BYTES_MAX, ASSET_DIM_MAX, ASSETS_MAX, ASSETS_TOTAL_MAX, decodeBase64, sniffImage } from "./images";
-import { newOfficeKey, randomSecret, roleOfKey, sha256hex, keyFromRequest, tripcode, WS_PROTOCOL, type KeyHashes, type Role } from "./auth";
+import {
+  DEFAULT_INVITE, newOfficeKey, normalizeKeyHashes, randomSecret, roleOfKey, sha256hex, keyFromRequest, tripcode, WS_PROTOCOL, type Invite, type KeyHashes, type Role,
+} from "./auth";
 import { CORS_HEADERS, errorResponse, HttpError, json, readJson } from "./http";
-import { isMergedTool, MERGED_ROUTES, NAME_MAX, parseArgs, parseOwnerFrame, ToolError, type MergedTool, type Status, type ToolArgs, type ToolName, ACTIVITY_MAX } from "./tools";
+import { isMergedTool, MERGED_ROUTES, NAME_MAX, SPOOF_LINE_RE, parseArgs, parseOwnerFrame, ToolError, type MergedTool, type Status, type ToolArgs, type ToolName, ACTIVITY_MAX } from "./tools";
 import { handleMcp } from "./mcp";
 import { handleRest } from "./api";
 import { registryStub } from "./registry";
 
 export const MAX_CHAT = 200;
-/** The join and view keys in plaintext, so the owner's viewer can share them (connect guide, copy links). */
-const JOIN_KEY_SLOT = "joinKey";
-const VIEW_KEY_SLOT = "viewKey";
+/** Join keys in plaintext by invite id, and view keys oldest first, so the owner's viewer can share them (connect guide, copy links). */
+const JOIN_KEYS_SLOT = "joinKeys";
+const VIEW_KEYS_SLOT = "viewKeys";
+/** Before invites: one plaintext key per role in these slots. */
+const LEGACY_KEY_SLOTS = { join: "joinKey", view: "viewKey" } as const;
+/** Named join keys (invites) and view keys an office may hold at once. */
+export const MAX_INVITES = 50;
+export const MAX_VIEW_KEYS = 20;
 export const CHAT_READ_MAX = 50;
 export const MAX_VIEWERS = 256;
 export const AWAY_MS = 5 * 60_000;
@@ -57,6 +64,8 @@ export interface Agent {
   client?: string;
   /** Public proof of a "name#secret" join; part of the display name too ("claude !Ab3dE6fGh_"). */
   tripcode?: string;
+  /** Label of the invite (join key) it came in through, e.g. "Bob"; absent for agents brought in with the owner key. */
+  via?: string;
   status: Status;
   activity?: string;
   deskId?: string;
@@ -73,6 +82,8 @@ interface AgentRecord extends Agent {
   askedName?: string;
   /** Joined over MCP at least once: with no live session left it is free to reclaim at once. */
   mcp?: true;
+  /** Id of the invite it came in through; revoking that invite shows it out. */
+  inviteId?: string;
 }
 
 export interface ChatMsg {
@@ -137,6 +148,8 @@ export interface CallCtx {
   ip: string;
   /** Request origin, for absolute asset urls in tool results. */
   origin: string;
+  /** The invite whose join key made this request. */
+  invite?: Invite | null;
 }
 
 export interface ToolHost {
@@ -149,7 +162,7 @@ export interface ToolHost {
 }
 
 type Frame =
-  | { type: "snapshot"; state: OfficeState; role: Role }
+  | { type: "snapshot"; state: OfficeState; role: Role; as?: string }
   | { type: "agent"; agent: Agent }
   | { type: "agent-left"; id: string }
   | { type: "item"; item: Item }
@@ -169,9 +182,11 @@ const OWNER_TOOLS = new Set<ToolName>(["office_theme_get", "office_theme_set", "
 interface WsAttachment {
   role: Role;
   sid: string;
+  /** Join-key viewers chat as their invite's label. */
+  label?: string;
 }
 
-const publicAgent = ({ tokenHash: _t, lastRead: _r, sessions: _s, askedName: _n, mcp: _m, ...a }: AgentRecord): Agent => a;
+const publicAgent = ({ tokenHash: _t, lastRead: _r, sessions: _s, askedName: _n, mcp: _m, inviteId: _i, ...a }: AgentRecord): Agent => a;
 
 function hueOf(name: string): number {
   let h = 0;
@@ -221,6 +236,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.meta = (await ctx.storage.get<Meta>("meta")) ?? null;
     if (!this.meta) return;
     await this.migrate();
+    await this.migrateKeys(this.meta);
     for (const [, it] of await ctx.storage.list<Item>({ prefix: "item:" })) this.items.set(it.id, it);
     for (const [, a] of await ctx.storage.list<AgentRecord>({ prefix: "agent:" })) {
       this.agents.set(a.id, a);
@@ -267,6 +283,25 @@ export class Office extends DurableObject<Env> implements ToolHost {
     if (version < 2) await this.ctx.storage.put({ schema: SCHEMA_VERSION, theme: DEFAULT_THEME });
   }
 
+  /** Offices saved with one join key get it as the "everyone" invite, and their one view key as a one-element list. */
+  private async migrateKeys(meta: Meta): Promise<void> {
+    const keys = normalizeKeyHashes(meta.keys, meta.createdAt);
+    if (keys.join !== meta.keys.join || keys.view !== meta.keys.view) {
+      this.meta = { ...meta, keys };
+      await this.ctx.storage.put("meta", this.meta);
+    }
+    const join = await this.ctx.storage.get<string>(LEGACY_KEY_SLOTS.join);
+    if (join !== undefined) {
+      await this.ctx.storage.put(JOIN_KEYS_SLOT, { [DEFAULT_INVITE]: join });
+      await this.ctx.storage.delete(LEGACY_KEY_SLOTS.join);
+    }
+    const view = await this.ctx.storage.get<string>(LEGACY_KEY_SLOTS.view);
+    if (view !== undefined) {
+      await this.ctx.storage.put(VIEW_KEYS_SLOT, [view]);
+      await this.ctx.storage.delete(LEGACY_KEY_SLOTS.view);
+    }
+  }
+
   /**
    * The stored theme, filled up to today's shape: a theme written before a field existed gets that field's
    * default (merged over DEFAULT_THEME) and is written back. Unknown or invalid fields still fail loudly.
@@ -297,16 +332,17 @@ export class Office extends DurableObject<Env> implements ToolHost {
       if (asset) return this.serveAsset(req, asset[1]!);
       const ip = req.headers.get("cf-connecting-ip") ?? "local";
       this.rateLimit(`ip:${ip}`, IP_RATE_MAX);
-      const role = await roleOfKey(keyFromRequest(req), this.meta.keys);
-      if (!role) return errorResponse(401, "missing or wrong key for this office (Authorization: Bearer <key> or ?key=)");
+      const match = await roleOfKey(keyFromRequest(req), this.meta.keys);
+      if (!match) return errorResponse(401, "missing or wrong key for this office (Authorization: Bearer <key> or ?key=)");
+      const { role, invite } = match;
       await this.markActive(role === "owner");
-      if (/^\/o\/[^/]+\/ws$/.test(url.pathname)) return this.acceptViewer(req, role);
+      if (/^\/o\/[^/]+\/ws$/.test(url.pathname)) return this.acceptViewer(req, match.role, match.hash, invite);
       if (/^\/api\/o\/[^/]+$/.test(url.pathname)) {
         if (req.method !== "DELETE") return errorResponse(405, "DELETE /api/o/:office (ownerKey) deletes the office");
         if (role !== "owner") return errorResponse(403, "deleting the office needs the ownerKey");
         return json(200, await this.wipe("this office was deleted by its owner"));
       }
-      const base = { role, token: req.headers.get("x-agent-token"), sessionId: null, ip, origin: url.origin } satisfies CallCtx;
+      const base = { role, token: req.headers.get("x-agent-token"), sessionId: null, ip, origin: url.origin, invite } satisfies CallCtx;
       if (url.pathname === "/mcp") {
         if (role === "view") return errorResponse(403, "a viewKey is read-only; MCP needs the joinKey");
         return await handleMcp(req, this, base);
@@ -315,14 +351,21 @@ export class Office extends DurableObject<Env> implements ToolHost {
       if (m && m[1] === "connect") {
         if (role === "view") return errorResponse(403, "a viewKey is watch-only: it can't bring agents in");
         if (req.method !== "GET") return errorResponse(405, "GET /api/o/:office/connect");
-        return json(200, await this.connectInfo(role, url.origin));
+        return json(200, await this.connectInfo(match, url.origin));
       }
-      if (m && (m[1] === "kick" || m[1] === "rotate-keys" || m[1] === "rotate_keys" || m[1] === "designer")) {
+      if (m && m[1] === "invites") {
+        if (role !== "owner") return errorResponse(403, "invites need the ownerKey");
+        if (req.method === "GET") return json(200, { invites: await this.inviteList(url.origin) });
+        if (req.method !== "POST") return errorResponse(405, "GET /api/o/:office/invites lists them; POST {op: \"create\", label} | {op: \"revoke\", id}");
+        return json(200, await this.manageInvites(((await readJson(req)) ?? {}) as Record<string, unknown>, url.origin));
+      }
+      if (m && (m[1] === "kick" || m[1] === "rotate-keys" || m[1] === "rotate_keys" || m[1] === "designer" || m[1] === "view-keys")) {
         if (role !== "owner") return errorResponse(403, `${m[1]} needs the ownerKey`);
         if (req.method !== "POST") return errorResponse(405, `POST /api/o/:office/${m[1]}`);
         const body = ((await readJson(req)) ?? {}) as Record<string, unknown>;
         if (m[1] === "kick") return json(200, await this.kick(body.id, "human:owner"));
         if (m[1] === "designer") return json(200, await this.setDesigner(body.id));
+        if (m[1] === "view-keys") return json(200, await this.manageViewKeys(body, url.origin));
         return json(200, await this.rotateKeys(body.which, new URL(req.url).origin));
       }
       if (m) {
@@ -346,13 +389,16 @@ export class Office extends DurableObject<Env> implements ToolHost {
     if (this.meta) return errorResponse(409, "office already exists");
     const body = (await readJson(req)) as { id: string; name: string; keys: KeyHashes; joinKey: string; viewKey: string; admin: boolean };
     if (typeof body.admin !== "boolean") return errorResponse(400, "init needs admin: boolean");
-    if (typeof body.joinKey !== "string" || (await sha256hex(body.joinKey)) !== body.keys.join) return errorResponse(400, "init needs the joinKey matching keys.join");
-    if (typeof body.viewKey !== "string" || (await sha256hex(body.viewKey)) !== body.keys.view) return errorResponse(400, "init needs the viewKey matching keys.view");
+    const joinHash = typeof body.joinKey === "string" ? await sha256hex(body.joinKey) : null;
+    if (body.keys.join.length !== 1 || body.keys.join[0]!.id !== DEFAULT_INVITE || body.keys.join[0]!.hash !== joinHash) {
+      return errorResponse(400, `init needs the joinKey matching keys.join (one "${DEFAULT_INVITE}" invite)`);
+    }
+    if (typeof body.viewKey !== "string" || !body.keys.view.includes(await sha256hex(body.viewKey))) return errorResponse(400, "init needs the viewKey matching keys.view");
     const meta: Meta = { id: body.id, name: body.name, grid: { ...GRID }, keys: body.keys, createdAt: Date.now() };
     const items = defaultLayout(meta.createdAt);
     const activity: Activity = { lastActiveAt: meta.createdAt, lastOwnerAt: meta.createdAt, joined: false, graceUntil: meta.createdAt };
     const puts: Record<string, unknown> = {
-      meta, schema: SCHEMA_VERSION, theme: DEFAULT_THEME, [JOIN_KEY_SLOT]: body.joinKey, [VIEW_KEY_SLOT]: body.viewKey, admin: body.admin, activity,
+      meta, schema: SCHEMA_VERSION, theme: DEFAULT_THEME, [JOIN_KEYS_SLOT]: { [DEFAULT_INVITE]: body.joinKey }, [VIEW_KEYS_SLOT]: [body.viewKey], admin: body.admin, activity,
     };
     this.ctx.storage.sql.exec(ASSETS_DDL);
     for (const it of items) puts[`item:${it.id}`] = it;
@@ -903,6 +949,13 @@ export class Office extends DurableObject<Env> implements ToolHost {
       a = { id: `${slug(baseName)}-${shortId()}`, name: "", hue: 0, status: "idle", joinedAt: now, lastSeen: now, tokenHash, lastRead: 0, sessions: [] };
     }
     a.askedName = baseName;
+    if (ctx.invite) {
+      a.inviteId = ctx.invite.id;
+      a.via = ctx.invite.label;
+    } else {
+      delete a.inviteId;
+      delete a.via;
+    }
     if (trip) a.tripcode = trip;
     else delete a.tripcode;
     a.name = this.uniqueName(trip ? `${baseName} !${trip}` : baseName, a.id);
@@ -1156,13 +1209,101 @@ export class Office extends DurableObject<Env> implements ToolHost {
     return { ok: true, kicked: id };
   }
 
-  /** What a viewer needs to bring agents in and share the office. Only the owner gets the join key/link (a join viewer already holds it); any non-view viewer gets the watch-only link. Offices made before keys were kept get null until the owner rotates that key. */
-  private async connectInfo(role: Role, origin: string) {
-    const id = this.mustMeta().id;
-    const joinKey = role === "owner" ? ((await this.ctx.storage.get<string>(JOIN_KEY_SLOT)) ?? null) : null;
-    const viewKey = (await this.ctx.storage.get<string>(VIEW_KEY_SLOT)) ?? null;
-    const link = (k: string | null) => (k ? `${origin}/o/${id}#k=${encodeURIComponent(k)}` : null);
-    return { office: id, mcpUrl: `${origin}/mcp`, designMcpUrl: `${origin}/mcp?mode=design`, joinKey, joinUrl: link(joinKey), viewUrl: link(viewKey) };
+  /**
+   * What a viewer needs to bring agents in and share the office. The owner gets a join key for the setup snippets (the "everyone"
+   * invite if kept, else the oldest invite with a kept key) and the invite list; a join viewer gets its own invite's label (it
+   * already holds the key). Any non-view viewer gets the newest public (watch-only) link. Keys made before plaintext was kept show as null.
+   */
+  private async connectInfo(match: { role: Role; invite: Invite | null }, origin: string) {
+    const meta = this.mustMeta();
+    const kept = await this.keptJoinKeys();
+    const owner = match.role === "owner";
+    const pick = owner ? (meta.keys.join.find((i) => i.id === DEFAULT_INVITE && kept[i.id]) ?? meta.keys.join.find((i) => kept[i.id])) : undefined;
+    const joinKey = pick ? kept[pick.id]! : null;
+    const viewKey = (await this.keptViewKeys()).at(-1) ?? null;
+    return {
+      office: meta.id, mcpUrl: `${origin}/mcp`, designMcpUrl: `${origin}/mcp?mode=design`, joinKey, joinUrl: this.keyLink(joinKey, origin), viewUrl: this.keyLink(viewKey, origin),
+      as: match.invite?.label ?? null,
+      ...(owner ? { invites: await this.inviteList(origin), viewKeys: meta.keys.view.length } : {}),
+    };
+  }
+
+  private keyLink(key: string | null, origin: string): string | null {
+    return key ? `${origin}/o/${this.mustMeta().id}#k=${encodeURIComponent(key)}` : null;
+  }
+
+  private async keptJoinKeys(): Promise<Record<string, string>> {
+    return (await this.ctx.storage.get<Record<string, string>>(JOIN_KEYS_SLOT)) ?? {};
+  }
+
+  private async keptViewKeys(): Promise<string[]> {
+    return (await this.ctx.storage.get<string[]>(VIEW_KEYS_SLOT)) ?? [];
+  }
+
+  private async inviteList(origin: string) {
+    const kept = await this.keptJoinKeys();
+    return this.mustMeta().keys.join.map((i) => ({
+      id: i.id, label: i.label, createdAt: i.createdAt, key: kept[i.id] ?? null, url: this.keyLink(kept[i.id] ?? null, origin),
+      agents: [...this.agents.values()].filter((a) => a.inviteId === i.id).length,
+    }));
+  }
+
+  /**
+   * Owner invites: {op: "create", label} mints a join key for one person (nothing else is revoked); {op: "revoke", id} drops that key,
+   * closes viewers using it and shows out the agents that came in through it (pass kick: false to let them stay).
+   */
+  private async manageInvites(body: Record<string, unknown>, origin: string) {
+    const meta = this.mustMeta();
+    if (body.op === "create") {
+      const label = typeof body.label === "string" ? body.label.trim() : "";
+      if (!label || label.length > NAME_MAX || SPOOF_LINE_RE.test(label)) throw new ToolError(400, `invite label must be 1-${NAME_MAX} plain chars, e.g. the person's name`);
+      if (meta.keys.join.some((i) => i.label.toLowerCase() === label.toLowerCase())) throw new ToolError(409, `there is already an invite for "${label}" — copy that one or revoke it first`);
+      if (meta.keys.join.length >= MAX_INVITES) throw new ToolError(409, `this office already has ${MAX_INVITES} invites — revoke some first`);
+      const key = newOfficeKey(meta.id);
+      const invite: Invite = { id: `inv-${shortId()}`, hash: await sha256hex(key), label, createdAt: Date.now() };
+      this.meta = { ...meta, keys: { ...meta.keys, join: [...meta.keys.join, invite] } };
+      await this.ctx.storage.put({ meta: this.meta, [JOIN_KEYS_SLOT]: { ...(await this.keptJoinKeys()), [invite.id]: key } });
+      return { ok: true, invite: { id: invite.id, label, createdAt: invite.createdAt, key, url: this.keyLink(key, origin), agents: 0 } };
+    }
+    if (body.op === "revoke") {
+      const invite = meta.keys.join.find((i) => i.id === body.id);
+      if (!invite) throw new ToolError(404, `no invite "${String(body.id)}" (GET /api/o/:office/invites lists them)`);
+      if (body.kick !== undefined && typeof body.kick !== "boolean") throw new ToolError(400, "kick must be a boolean");
+      const { [invite.id]: _gone, ...kept } = await this.keptJoinKeys();
+      this.meta = { ...meta, keys: { ...meta.keys, join: meta.keys.join.filter((i) => i !== invite) } };
+      await this.ctx.storage.put({ meta: this.meta, [JOIN_KEYS_SLOT]: kept });
+      for (const ws of this.ctx.getWebSockets(`k:${invite.hash}`)) ws.close(4401, "this invite was revoked");
+      const theirs = body.kick === false ? [] : [...this.agents.values()].filter((a) => a.inviteId === invite.id);
+      for (const a of theirs) await this.removeAgent(a);
+      if (theirs.length) await this.postChat("office", null, `${theirs.map((a) => a.name).join(", ")} left: ${invite.label}'s invite was revoked`);
+      return { ok: true, revoked: invite.id, label: invite.label, kicked: theirs.map((a) => a.id) };
+    }
+    throw new ToolError(400, 'invites: POST {op: "create", label} or {op: "revoke", id, kick?}');
+  }
+
+  /** Owner public links: {op: "add"} mints one more view key (nothing is revoked); {op: "revoke-others", keep} drops every other view key. */
+  private async manageViewKeys(body: Record<string, unknown>, origin: string) {
+    const meta = this.mustMeta();
+    const kept = await this.keptViewKeys();
+    if (body.op === "add") {
+      if (meta.keys.view.length >= MAX_VIEW_KEYS) throw new ToolError(409, `this office already has ${MAX_VIEW_KEYS} public links — revoke the others first ({op: "revoke-others"})`);
+      const key = newOfficeKey(meta.id);
+      this.meta = { ...meta, keys: { ...meta.keys, view: [...meta.keys.view, await sha256hex(key)] } };
+      await this.ctx.storage.put({ meta: this.meta, [VIEW_KEYS_SLOT]: [...kept, key] });
+      return { ok: true, key, url: this.keyLink(key, origin), count: this.meta.keys.view.length };
+    }
+    if (body.op === "revoke-others") {
+      const keep = body.keep;
+      if (typeof keep !== "string" || !keep) throw new ToolError(400, "revoke-others needs keep: the view key to keep");
+      const keepHash = await sha256hex(keep);
+      if (!meta.keys.view.includes(keepHash)) throw new ToolError(404, "keep is not one of this office's view keys");
+      const revoked = meta.keys.view.filter((h) => h !== keepHash);
+      this.meta = { ...meta, keys: { ...meta.keys, view: [keepHash] } };
+      await this.ctx.storage.put({ meta: this.meta, [VIEW_KEYS_SLOT]: [keep] });
+      for (const h of revoked) for (const ws of this.ctx.getWebSockets(`k:${h}`)) ws.close(4401, "this key was revoked");
+      return { ok: true, revoked: revoked.length, count: 1 };
+    }
+    throw new ToolError(400, 'view-keys: POST {op: "add"} or {op: "revoke-others", keep}');
   }
 
   private async rotateKeys(which: unknown, origin: string) {
@@ -1176,12 +1317,15 @@ export class Office extends DurableObject<Env> implements ToolHost {
     for (const r of roles) {
       const key = newOfficeKey(meta.id);
       fresh[r] = key;
-      keys[r] = await sha256hex(key);
+      const hash = await sha256hex(key);
+      if (r === "owner") keys.owner = hash;
+      else if (r === "join") keys.join = [{ id: DEFAULT_INVITE, hash, label: DEFAULT_INVITE, createdAt: Date.now() }];
+      else keys.view = [hash];
     }
     this.meta = { ...meta, keys };
     const puts: Record<string, unknown> = { meta: this.meta };
-    if (fresh.join) puts[JOIN_KEY_SLOT] = fresh.join;
-    if (fresh.view) puts[VIEW_KEY_SLOT] = fresh.view;
+    if (fresh.join) puts[JOIN_KEYS_SLOT] = { [DEFAULT_INVITE]: fresh.join };
+    if (fresh.view) puts[VIEW_KEYS_SLOT] = [fresh.view];
     await this.ctx.storage.put(puts);
     for (const r of roles) for (const ws of this.ctx.getWebSockets(r)) ws.close(4401, "this key was rotated");
     const out: Record<string, string> = {};
@@ -1214,6 +1358,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
         id: a.id,
         name: a.name,
         client: a.client,
+        via: a.via,
         status: a.status,
         activity: a.activity,
         deskId: a.deskId,
@@ -1233,14 +1378,14 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   // ---------- viewers ----------
 
-  private acceptViewer(req: Request, role: Role): Response {
+  private acceptViewer(req: Request, role: Role, keyHash: string, invite: Invite | null): Response {
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return errorResponse(426, "expected a WebSocket upgrade");
     if (this.ctx.getWebSockets().length >= MAX_VIEWERS) return errorResponse(503, `too many viewers (${MAX_VIEWERS})`);
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
-    this.ctx.acceptWebSocket(server, [role]);
-    server.serializeAttachment({ role, sid: shortId() + shortId() } satisfies WsAttachment);
-    server.send(JSON.stringify({ type: "snapshot", state: this.state(), role } satisfies Frame));
+    this.ctx.acceptWebSocket(server, [role, `k:${keyHash}`]);
+    server.serializeAttachment({ role, sid: shortId() + shortId(), ...(invite ? { label: invite.label } : {}) } satisfies WsAttachment);
+    server.send(JSON.stringify({ type: "snapshot", state: this.state(), role, ...(invite ? { as: invite.label } : {}) } satisfies Frame));
     const offered = (req.headers.get("sec-websocket-protocol") ?? "").split(",").map((p) => p.trim());
     const headers = offered.includes(WS_PROTOCOL) ? { "sec-websocket-protocol": WS_PROTOCOL } : undefined;
     return new Response(null, { status: 101, webSocket: client, headers });
@@ -1248,7 +1393,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     const send = (f: Frame) => ws.send(JSON.stringify(f));
-    const { role, sid } = ws.deserializeAttachment() as WsAttachment;
+    const { role, sid, label } = ws.deserializeAttachment() as WsAttachment;
     try {
       this.rateLimit(`ws:${sid}`, WS_RATE_MAX);
     } catch (e) {
@@ -1271,7 +1416,17 @@ export class Office extends DurableObject<Env> implements ToolHost {
         throw new ToolError(400, "frame is not JSON");
       }
       if (frame.type === "ping") return;
-      if (role !== "owner") throw new ToolError(403, "read-only view: chat and edits need the ownerKey");
+      if (role === "join" && frame.type === "chat") {
+        // a friend on a join link chats as their invite's label, never as someone else
+        await this.markActive(false);
+        this.rateLimit(`join-ws:${label ?? DEFAULT_INVITE}`, RATE_MAX);
+        const f = parseOwnerFrame({ ...frame, as: undefined });
+        if (f.type !== "chat") throw new ToolError(400, "expected a chat frame");
+        const to = f.to ? this.findAgentRef(f.to) : null;
+        await this.postChat(`human:${label ?? DEFAULT_INVITE}`, to, f.text);
+        return;
+      }
+      if (role !== "owner") throw new ToolError(403, role === "join" ? "a join link can chat; edits need the ownerKey" : "read-only view: chat and edits need the ownerKey");
       await this.markActive(true);
       this.rateLimit("owner-ws", RATE_MAX);
       const f = parseOwnerFrame(frame);
