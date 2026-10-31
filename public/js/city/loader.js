@@ -2,7 +2,7 @@
 // red banner and throws: a missing listed chunk (the SPA fallback answers with index.html), bad gzip magic,
 // bad SFC1 magic or a version mismatch never turns into silent water.
 
-import { assertGzip, chunkKey, decodeChunk, validateManifest } from "../../shared/city.js";
+import { assertGzip, chunkKey, decodeChunk, decodeLandmarks, decodeLandmask, validateManifest } from "../../shared/city.js";
 import { errorBanner } from "./banner.js";
 
 export { errorBanner };
@@ -42,6 +42,40 @@ async function gunzip(bytes) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
+/** Fetch a gzipped binary (chunks, landmask.bin, landmarks.bin), assertGzip and inflate. → Promise<Uint8Array> */
+export async function fetchGzipped(url) {
+  const res = await fetchOk(url);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  assertGzip(bytes, url);
+  try {
+    return await gunzip(bytes);
+  } catch (e) {
+    throw new Error(`${url}: gzip stream is corrupt (${e.message})`);
+  }
+}
+
+/** manifest.landmask (SFM1, gzipped) next to the manifest, checked against manifest.chunks.grid. → Promise<Landmask> */
+export async function loadLandmask(manifest, baseUrl) {
+  const url = new URL(manifest.landmask, baseUrl).href;
+  const raw = await fetchGzipped(url);
+  try {
+    return decodeLandmask(raw, manifest.chunks.grid);
+  } catch (e) {
+    throw new Error(`${url}: ${e.message}`);
+  }
+}
+
+/** manifest.landmarks (SFL1, gzipped): the global landmark boxes, inside manifest.chunks.grid. → Promise<LandmarkBox[]> */
+export async function loadLandmarks(manifest, baseUrl) {
+  const url = new URL(manifest.landmarks, baseUrl).href;
+  const raw = await fetchGzipped(url);
+  try {
+    return decodeLandmarks(raw, manifest.chunks.grid);
+  } catch (e) {
+    throw new Error(`${url}: ${e.message}`);
+  }
+}
+
 /** Fetch, assertGzip, inflate, decodeChunk with manifest.parents. → Promise<Chunk> */
 export async function fetchChunk(url, parents) {
   const res = await fetchOk(url);
@@ -62,8 +96,8 @@ export async function fetchChunk(url, parents) {
 
 /**
  * Every listed chunk is fetched once and kept decoded. request(cx, cz, priority) queues or re-prioritises a
- * chunk (lower = sooner); the pump keeps MAX_IN_FLIGHT fetches running. A chunk inside min/max but not in the
- * manifest list is "absent" (open water), and so is anything outside min/max.
+ * chunk (lower = sooner); the pump keeps MAX_IN_FLIGHT fetches running. A chunk not in the manifest list is
+ * "absent": sea, a manifest.water chunk, or unbuilt land drawn from landmask.bin (scene.js / unmapped.js).
  * → {get, status, request, pending, onLoad}
  */
 export function createChunkStore(manifest, baseUrl) {

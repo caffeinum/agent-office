@@ -1,12 +1,31 @@
 // Pure voxel picking: a 2D DDA over columns along the ray's ground track, then an exact test against
-// each column's solid y-intervals. Large meshes are never raycast. A chunk the store does not hold is
-// open water (y = 0), matching the manifest rule that unlisted chunks are water.
-import { CHUNK, SURFACE } from "../../shared/city.js";
+// each column's solid y-intervals (format v2: the per-column top, plus the column's props). Large meshes are
+// never raycast. A chunk the store does not hold is open water (y = 0), or unbuilt land when the caller
+// passes `unbuiltAt` (landmask coarse height). A building resolves to `pickId(entry)` (parent || id), so a
+// multi-part landmark picks as one building; a prop on a building column picks as that building.
+import { CHUNK, SURFACE, pickId } from "../../shared/city.js";
 
 const BELOW = -Infinity;
 
+/** Per chunk: column index → its props. */
+const propIndex = new WeakMap();
+function propsAt(chunk, k) {
+  if (!chunk.props || chunk.props.length === 0) return null;
+  let idx = propIndex.get(chunk);
+  if (!idx) {
+    idx = new Map();
+    for (const p of chunk.props) {
+      const key = p.lz * CHUNK + p.lx;
+      if (!idx.has(key)) idx.set(key, []);
+      idx.get(key).push(p);
+    }
+    propIndex.set(chunk, idx);
+  }
+  return idx.get(k) ?? null;
+}
+
 /**
- * Solid intervals of column k, as [lo, hi, kind] triples, where kind is "ground" | "building" | "water" | "deck".
+ * Solid intervals of column k, as [lo, hi, kind] triples, where kind is "ground" | "building" | "water" | "deck" | "prop".
  * Terrain is solid all the way down.
  */
 function columnIntervals(chunk, k, out) {
@@ -19,8 +38,8 @@ function columnIntervals(chunk, k, out) {
   if (b) {
     const B = chunk.buildings[b - 1];
     if (!B) throw new Error(`pick: chunk ${chunk.cx},${chunk.cz} column ${k} points past its building table`);
-    out.push(B.base, B.top, "building");
-    top = B.top;
+    top = chunk.top[k];
+    out.push(B.base, top, "building");
   }
   const deck = chunk.deck[k];
   const d = Math.abs(deck);
@@ -28,6 +47,8 @@ function columnIntervals(chunk, k, out) {
     const slabLo = Math.max(d - 1, top);
     out.push(deck < 0 ? top : slabLo, d, "deck");
   }
+  const props = propsAt(chunk, k);
+  if (props) for (const p of props) out.push(p.y0, p.y1, "prop");
   return out;
 }
 
@@ -35,14 +56,19 @@ const WATER_ONLY = [BELOW, 0, "water"];
 
 /**
  * store.get(cx, cz) → Chunk | undefined | null; origin, dir = {x, y, z} in blocks (dir need not be unit).
- * → {x, z (the hit column), y (hit height), cx, cz, kind, buildingId?, surface?, point: {x, y, z}, dist} | null
+ * opts.unbuiltAt(x, z) → coarse height | null, for columns of chunks the store does not hold.
+ * → {x, z (the hit column), y (hit height), cx, cz, kind, buildingId?, entryId?, surface?, point: {x, y, z}, dist} | null
+ * kind: "building" (buildingId = parent || id, entryId = the entry), "ground", "water", "deck", "prop" (a prop on a
+ * column without a building), "unbuilt" (landmask land outside the listed chunks).
  */
-export function pickRay(store, origin, dir, maxDist) {
+export function pickRay(store, origin, dir, maxDist, opts = {}) {
   if (!store || typeof store.get !== "function") throw new Error("pickRay: store.get(cx, cz) required");
   for (const v of [origin, dir]) {
     if (!v || ![v.x, v.y, v.z].every(Number.isFinite)) throw new Error(`pickRay: bad vector ${JSON.stringify(v)}`);
   }
   if (!(maxDist > 0)) throw new Error(`pickRay: maxDist must be > 0, got ${maxDist}`);
+  const { unbuiltAt = null } = opts;
+  if (unbuiltAt !== null && typeof unbuiltAt !== "function") throw new Error("pickRay: opts.unbuiltAt must be a function (x, z) → height | null");
   const len = Math.hypot(dir.x, dir.y, dir.z);
   if (len === 0) throw new Error("pickRay: zero direction");
   const dx = dir.x / len, dy = dir.y / len, dz = dir.z / len;
@@ -56,13 +82,19 @@ export function pickRay(store, origin, dir, maxDist) {
   let tIn = 0;
   let chunk, ccx = NaN, ccz = NaN;
   const iv = [];
+  const unbuilt = [BELOW, 0, "unbuilt"];
 
   while (tIn <= maxDist) {
     const tOut = Math.min(tMaxX, tMaxZ, maxDist);
     const cx = Math.floor(X / CHUNK), cz = Math.floor(Z / CHUNK);
     if (cx !== ccx || cz !== ccz) { chunk = store.get(cx, cz); ccx = cx; ccz = cz; }
     const k = (Z - cz * CHUNK) * CHUNK + (X - cx * CHUNK);
-    const list = chunk ? columnIntervals(chunk, k, iv) : WATER_ONLY;
+    let list = WATER_ONLY;
+    if (chunk) list = columnIntervals(chunk, k, iv);
+    else if (unbuiltAt) {
+      const h = unbuiltAt(X, Z);
+      if (h !== null) { unbuilt[1] = h; list = unbuilt; }
+    }
     let best = Infinity, bestKind = null;
     for (let n = 0; n < list.length; n += 3) {
       const lo = list[n], hi = list[n + 1];
@@ -82,8 +114,14 @@ export function pickRay(store, origin, dir, maxDist) {
       const hit = { x: X, y: point.y, z: Z, cx, cz, kind: bestKind, point, dist: best };
       if (chunk) {
         hit.surface = chunk.surface[k];
-        if (bestKind === "building") hit.buildingId = chunk.buildings[chunk.bldg[k] - 1].id;
-      } else hit.surface = SURFACE.WATER;
+        const b = chunk.bldg[k];
+        if (b && (bestKind === "building" || bestKind === "prop")) {
+          const B = chunk.buildings[b - 1];
+          hit.kind = "building";
+          hit.buildingId = pickId(B);
+          hit.entryId = B.id;
+        }
+      } else if (bestKind === "water") hit.surface = SURFACE.WATER;
       return hit;
     }
     if (tOut >= maxDist) return null;
