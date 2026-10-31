@@ -125,16 +125,20 @@ export function checkSource(entries) {
   return { shipped, skipped };
 }
 
-/** manifest + directory of {cx}_{cz}.bin → column lookup. A listed chunk that fails to load throws; an unlisted one inside the range is open water. */
+/**
+ * manifest + directory of {cx}_{cz}.bin → column lookup. A listed chunk that fails to load throws; a manifest.water
+ * chunk is open water; any other chunk (unbuilt land or sea outside the areas) is outside the built city (null).
+ */
 export function createColumnReader(manifest, chunksDir) {
   const listed = new Set(manifest.chunks.list.map(([cx, cz]) => chunkKey(cx, cz)));
+  const water = new Set(manifest.water.map(([cx, cz]) => chunkKey(cx, cz)));
   const { min, max } = manifest.chunks;
   const cache = new Map();
   const load = (cx, cz) => {
     const key = chunkKey(cx, cz);
     if (!cache.has(key)) {
       if (!listed.has(key)) {
-        cache.set(key, null);
+        cache.set(key, water.has(key) ? "water" : "unbuilt");
       } else {
         const file = join(chunksDir, `${key}.bin`);
         const gz = readFileSync(file);
@@ -147,15 +151,33 @@ export function createColumnReader(manifest, chunksDir) {
     return cache.get(key);
   };
   /** → {ground, surface, building: {id, base, top}|null} for the column, or null outside the manifest range. */
-  return function columnAt(x, z) {
+  function columnAt(x, z) {
     const [cx, cz] = chunkOf(x, z);
     if (cx < min[0] || cx > max[0] || cz < min[1] || cz > max[1]) return null;
     const chunk = load(cx, cz);
-    if (!chunk) return { ground: 0, surface: SURFACE.WATER, building: null };
+    if (chunk === "unbuilt") return null;
+    if (chunk === "water") return { ground: 0, surface: SURFACE.WATER, building: null };
     const i = (z - cz * CHUNK) * CHUNK + (x - cx * CHUNK);
     const b = chunk.bldg[i];
     return { ground: chunk.ground[i], surface: chunk.surface[i], building: b ? chunk.buildings[b - 1] : null };
+  }
+  let roofs = null;
+  /**
+   * A v2 entry's `top` is the max over its columns in one chunk; a building's roof is the max over every chunk
+   * that holds it. → blocks (throws for an id no listed chunk holds)
+   */
+  columnAt.roofOf = (id) => {
+    if (!roofs) {
+      roofs = new Map();
+      for (const [cx, cz] of manifest.chunks.list) {
+        for (const b of load(cx, cz).buildings) roofs.set(b.id, Math.max(roofs.get(b.id) ?? -Infinity, b.top));
+      }
+    }
+    const r = roofs.get(id);
+    if (r === undefined) fail(`building ${id} is in no listed chunk`);
+    return r;
   };
+  return columnAt;
 }
 
 const isWater = (col) => col.surface === SURFACE.WATER || col.surface === SURFACE.SHALLOW;
@@ -221,7 +243,7 @@ export function placeOnGrid(columnAt, block, what = "site", override = null) {
 
 const round7 = (v) => Number(v.toFixed(7));
 
-function siteFor(e, eas, place, block) {
+function siteFor(e, eas, place, block, roofY) {
   const notes = [
     e.note,
     eas.range ? `Address range ${eas.range}; EAS queried the first number.` : null,
@@ -234,7 +256,7 @@ function siteFor(e, eas, place, block) {
     ...(notes.length ? { note: notes.join(" ") } : {}),
     lat: eas.lat, lon: eas.lon, eas: { id: eas.id, parcel: eas.parcel }, hintFrom: e.hint.from,
     buildingId: building.id, block, chunk: chunkOf(block.x, block.z), anchor: place.anchor,
-    roofY: building.top, heightM: (building.top - building.base) * BLOCK_M,
+    roofY, heightM: (roofY - building.base) * BLOCK_M,
     placement: place.placement, placementDistM: place.placementDistM,
   };
 }
@@ -272,13 +294,12 @@ export async function buildCompanies({
   const points = await geocodeAll(shipped, { resolve, rawDir });
   const sites = [];
   const outside = [];
-  const { min, max } = manifest.chunks;
   for (const e of shipped) {
     const eas = points.get(e.id);
     const p = lonLatToBlock(eas.lon, eas.lat, manifest.proj);
     const block = { x: Math.floor(p.x), z: Math.floor(p.z) };
     const [cx, cz] = chunkOf(block.x, block.z);
-    if (cx < min[0] || cx > max[0] || cz < min[1] || cz > max[1]) {
+    if (columnAt(block.x, block.z) === null) {
       outside.push({ id: e.id, chunk: [cx, cz] });
       continue;
     }
@@ -287,7 +308,8 @@ export async function buildCompanies({
       const o = lonLatToBlock(e.building.lon, e.building.lat, manifest.proj);
       override = { x: Math.floor(o.x), z: Math.floor(o.z) };
     }
-    sites.push(siteFor(e, eas, placeOnGrid(columnAt, block, `${e.id} (${e.address})`, override), block));
+    const place = placeOnGrid(columnAt, block, `${e.id} (${e.address})`, override);
+    sites.push(siteFor(e, eas, place, block, columnAt.roofOf(place.building.id)));
   }
   for (const o of outside) {
     const e = shipped.find((x) => x.id === o.id);

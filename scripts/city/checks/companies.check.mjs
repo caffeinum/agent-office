@@ -5,7 +5,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CITY_VERSION, SURFACE, validateCompanies, validateManifest } from "../../../public/shared/city.js";
+import { CITY_VERSION, SURFACE, lonLatToBlock, validateCompanies, validateManifest } from "../../../public/shared/city.js";
+
+/** SF EAS address point for 501 2nd St (eas_baseid 366241, dataset 3mea-di5p; also asserted in format.check). */
+const FIREGOAT_EAS = Object.freeze({ id: 366241, lat: 37.78293133749337, lon: -122.39320537355528 });
 import { easQueryUrl, normalizeAddress, pickEasHit, resolveEas } from "../lib/eas.mjs";
 import { ANCHOR_RADIUS, PLACE_RADIUS, buildCompanies, checkSource, createColumnReader } from "../companies-sf.mjs";
 
@@ -235,8 +238,9 @@ function verifyAgainstChunks(doc, manifest, chunksDir) {
     }
     assert.ok(found, `${s.id}: building ${s.buildingId} not found near ${s.block.x},${s.block.z}`);
     assert.equal(found.id, s.buildingId, `${s.id}: buildingId`);
-    assert.equal(found.top, s.roofY, `${s.id}: roofY`);
-    assert.equal((found.top - found.base) * 3, s.heightM, `${s.id}: heightM`);
+    assert.ok(found.top <= s.roofY, `${s.id}: chunk entry top ${found.top} above roofY ${s.roofY}`);
+    assert.equal(columnAt.roofOf(s.buildingId), s.roofY, `${s.id}: roofY is the max entry top over every chunk`);
+    assert.equal((s.roofY - found.base) * 3, s.heightM, `${s.id}: heightM`);
     const a = columnAt(s.anchor.x, s.anchor.z);
     assert.ok(a, `${s.id}: anchor outside the city`);
     assert.equal(a.building, null, `${s.id}: anchor column is a building`);
@@ -328,6 +332,15 @@ await test("sf: companies.json against the real chunks [post-int]", () => {
   const pge = doc.sites.find((s) => s.id === "pge-77-beale");
   assert.equal(pge.placement, "override");
   assert.ok(pge.heightM >= 140 && pge.heightM <= 160, `77 Beale is the ~150 m PG&E Building, got ${pge.heightM} m`);
+  // spec-v2 §6: Firegoat sits on the SF EAS address point for 501 2nd St, on the footprint containing it
+  const fg = doc.sites.find((s) => s.id === "firegoat-501-2nd");
+  assert.ok(fg, "Firegoat ships");
+  assert.equal(fg.eas.id, FIREGOAT_EAS.id);
+  const p = lonLatToBlock(FIREGOAT_EAS.lon, FIREGOAT_EAS.lat, manifest.proj);
+  assert.ok(Math.hypot(fg.block.x + 0.5 - p.x, fg.block.z + 0.5 - p.z) <= 1, `Firegoat block ${fg.block.x},${fg.block.z} vs EAS ${p.x.toFixed(1)},${p.z.toFixed(1)}`);
+  assert.equal(fg.placement, "contains", "the EAS point lies on the building footprint containing it");
+  const yc = doc.sites.find((s) => s.companyId === "y-combinator");
+  assert.ok(yc && yc.address === "560 20th St", "Y Combinator ships at its Pier 70 registry address");
 });
 
 console.log(`companies.check: ${passed} passed`);
