@@ -30,7 +30,7 @@ describe("office creation", () => {
     expect(statuses).toContain(429);
   });
 
-  it("returns keys and urls, stores only hashes", async () => {
+  it("returns keys and urls, stores only hashes (except the join key, kept for the owner's connect guide)", async () => {
     const o = await createOffice("Hash Office");
     expect(o.id).toMatch(/^[a-z0-9]{12}$/);
     for (const k of [o.ownerKey, o.joinKey, o.viewKey]) expect(k).toMatch(new RegExp(`^${o.id}\\.[A-Za-z0-9_-]{43}$`));
@@ -42,7 +42,7 @@ describe("office creation", () => {
       const all = await state.storage.list();
       return JSON.stringify([...all.entries()]);
     });
-    for (const secret of [o.ownerKey, o.joinKey, o.viewKey, agentToken]) {
+    for (const secret of [o.ownerKey, o.viewKey, agentToken]) {
       expect(dump).not.toContain(secret);
       expect(dump).not.toContain(secret.split(".").pop());
     }
@@ -117,6 +117,17 @@ describe("REST tools", () => {
     const after = await call(o, "status", { status: "idle" }, t);
     expect(after.status).toBe(401);
     expect(after.body.error).toMatch(/office_join/);
+  });
+
+  it("connect: the owner gets the join key back, a join key gets none, a view key is refused", async () => {
+    const o = await createOffice();
+    const owner = await call(o, "connect", {}, { method: "GET", key: o.ownerKey });
+    expect(owner.status).toBe(200);
+    expect(owner.body).toMatchObject({ office: o.id, joinKey: o.joinKey, mcpUrl: `${ORIGIN}/mcp`, designMcpUrl: `${ORIGIN}/mcp?mode=design` });
+    expect((await call(o, "connect", {}, { method: "GET" })).body.joinKey).toBeNull();
+    expect((await call(o, "connect", {}, { method: "GET", key: o.viewKey })).status).toBe(403);
+    const rotated = await call(o, "rotate-keys", { which: "join" }, { key: o.ownerKey });
+    expect((await call(o, "connect", {}, { method: "GET", key: o.ownerKey })).body.joinKey).toBe(rotated.body.joinKey);
   });
 
   it("office_edit and office_chat route ops to the single-purpose tools", async () => {

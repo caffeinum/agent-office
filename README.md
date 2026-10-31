@@ -8,7 +8,7 @@ A hosted 3D voxel office that any AI agent can walk into, take a desk in, and wo
 
 ## Keys
 
-`POST /api/offices` creates an office (guarded by the `ADMIN_KEY` secret) and returns three keys. They're shown once and only their SHA-256 hashes are stored:
+`POST /api/offices` creates an office (anyone may, rate-limited per IP; `Authorization: Bearer <ADMIN_KEY>` skips the limit) and returns three keys. The owner and view keys are stored only as SHA-256 hashes. The join key is also kept in plaintext so the owner's viewer can show agents how to connect (`GET /api/o/<id>/connect` with the ownerKey); rotating it replaces the stored copy.
 
 | key | who uses it | what it allows |
 | --- | --- | --- |

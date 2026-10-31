@@ -13,6 +13,8 @@ import { handleMcp } from "./mcp";
 import { handleRest } from "./api";
 
 export const MAX_CHAT = 200;
+/** The join key in plaintext, so the owner's viewer can show agents how to connect. */
+const JOIN_KEY_SLOT = "joinKey";
 export const CHAT_READ_MAX = 50;
 export const MAX_VIEWERS = 256;
 export const AWAY_MS = 5 * 60_000;
@@ -250,6 +252,11 @@ export class Office extends DurableObject<Env> implements ToolHost {
         return await handleMcp(req, this, base);
       }
       const m = /^\/api\/o\/[^/]+\/([a-z_-]+)$/.exec(url.pathname);
+      if (m && m[1] === "connect") {
+        if (role === "view") return errorResponse(403, "a viewKey is watch-only: it can't bring agents in");
+        if (req.method !== "GET") return errorResponse(405, "GET /api/o/:office/connect");
+        return json(200, await this.connectInfo(role, url.origin));
+      }
       if (m && (m[1] === "kick" || m[1] === "rotate-keys" || m[1] === "rotate_keys" || m[1] === "designer")) {
         if (role !== "owner") return errorResponse(403, `${m[1]} needs the ownerKey`);
         if (req.method !== "POST") return errorResponse(405, `POST /api/o/:office/${m[1]}`);
@@ -277,10 +284,11 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   private async init(req: Request): Promise<Response> {
     if (this.meta) return errorResponse(409, "office already exists");
-    const body = (await readJson(req)) as { id: string; name: string; keys: KeyHashes };
+    const body = (await readJson(req)) as { id: string; name: string; keys: KeyHashes; joinKey: string };
+    if (typeof body.joinKey !== "string" || (await sha256hex(body.joinKey)) !== body.keys.join) return errorResponse(400, "init needs the joinKey matching keys.join");
     const meta: Meta = { id: body.id, name: body.name, grid: { ...GRID }, keys: body.keys, createdAt: Date.now() };
     const items = defaultLayout(meta.createdAt);
-    const puts: Record<string, unknown> = { meta, schema: SCHEMA_VERSION, theme: DEFAULT_THEME };
+    const puts: Record<string, unknown> = { meta, schema: SCHEMA_VERSION, theme: DEFAULT_THEME, [JOIN_KEY_SLOT]: body.joinKey };
     this.ctx.storage.sql.exec(ASSETS_DDL);
     for (const it of items) puts[`item:${it.id}`] = it;
     await this.ctx.storage.put(puts);
@@ -944,6 +952,12 @@ export class Office extends DurableObject<Env> implements ToolHost {
     return { ok: true, kicked: id };
   }
 
+  /** What a viewer needs to bring agents in. Only the owner gets the join key back (a join viewer already holds it); offices made before it was kept have none until the owner rotates it. */
+  private async connectInfo(role: Role, origin: string) {
+    const joinKey = role === "owner" ? ((await this.ctx.storage.get<string>(JOIN_KEY_SLOT)) ?? null) : null;
+    return { office: this.mustMeta().id, mcpUrl: `${origin}/mcp`, designMcpUrl: `${origin}/mcp?mode=design`, joinKey };
+  }
+
   private async rotateKeys(which: unknown, origin: string) {
     const roles = which === undefined ? ["join"] : which === "all" ? ["owner", "join", "view"] : [which];
     if (!roles.every((r): r is Role => r === "owner" || r === "join" || r === "view")) {
@@ -958,7 +972,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       keys[r] = await sha256hex(key);
     }
     this.meta = { ...meta, keys };
-    await this.ctx.storage.put("meta", this.meta);
+    await this.ctx.storage.put(fresh.join ? { meta: this.meta, [JOIN_KEY_SLOT]: fresh.join } : { meta: this.meta });
     for (const r of roles) for (const ws of this.ctx.getWebSockets(r)) ws.close(4401, "this key was rotated");
     const out: Record<string, string> = {};
     if (fresh.owner) {
