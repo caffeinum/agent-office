@@ -15,7 +15,7 @@
 //   uvs?:      Float32Array  LOD0 only, in blocks (1 uv unit = 1 block). Opaque: top faces (x, z),
 //                            sides (along, y), for grainTexture(). Walls: (along, y) for the window atlas,
 //                            whose textures carry repeat 1/8 (see textures.js).
-//   glow?:     Uint8Array    LOD1/2 only, one per vertex: 255 on building walls (flat night tint), else 0
+//   glow?:     Uint8Array    LOD1/2 only, one per vertex: 255 on building walls (night window grid in scene.js), else 0
 //   indices:   Uint32Array   triangles, counter-clockwise from outside
 //   origin:    [x, y, z]     world block coordinates of local (0, 0, 0)
 // }

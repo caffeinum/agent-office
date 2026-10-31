@@ -28,15 +28,36 @@ export const chunkRing = (tcx, tcz, cx, cz) => Math.max(Math.abs(cx - tcx), Math
  */
 export const withinRing = (ring, dist, R, inside) => (inside ? dist <= R + 0.5 + HYSTERESIS : ring <= R);
 
-/** Region meshes carry a per-vertex `glow` (255 on building walls): the night emissive tint only lights those. */
+/** Lit-window share and pane area of the LOD0 atlas (textures.js): the region windows average out to the same glow. */
+export const WINDOW_LIT = 0.38;
+export const WINDOW_PANE = 0.35;
+/** Sub-pixel windows glow at this share of the grid's mean, roughly what the mipmapped LOD0 atlas reads like after tone mapping. */
+export const WINDOW_FAR = 0.45;
+
+/**
+ * Region meshes carry a per-vertex `glow` (255 on building walls). At night the emissive term on those walls is
+ * a procedural window grid in world blocks (u = x + z along any axis-aligned wall, v = y), lit per cell by a hash,
+ * so LOD1/LOD2 read like the LOD0 atlas; once a cell is smaller than a pixel it fades to a dimmed average.
+ */
 function glowEmissive(material) {
   material.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader
-      .replace("#include <common>", "#include <common>\nattribute float glow;\nvarying float vGlow;")
-      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvGlow = glow;");
+      .replace("#include <common>", "#include <common>\nattribute float glow;\nvarying float vGlow;\nvarying vec3 vWPos;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvGlow = glow;\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;");
     sh.fragmentShader = sh.fragmentShader
-      .replace("#include <common>", "#include <common>\nvarying float vGlow;")
-      .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance *= vGlow;");
+      .replace("#include <common>", `#include <common>
+varying float vGlow;
+varying vec3 vWPos;
+float cityHash(vec2 c) { vec3 p = fract(vec3(c.xyx) * 0.1031); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }
+float cityWindows(vec3 w) {
+  vec2 uv = vec2(w.x + w.z, w.y);
+  vec2 f = fract(uv);
+  float lit = step(cityHash(floor(uv)), ${WINDOW_LIT.toFixed(2)});
+  float pane = step(0.19, f.x) * step(f.x, 0.81) * step(0.19, f.y) * step(f.y, 0.75);
+  vec2 fw = fwidth(uv);
+  return mix(lit * pane, ${(WINDOW_LIT * WINDOW_PANE * WINDOW_FAR).toFixed(3)}, smoothstep(0.35, 1.2, max(fw.x, fw.y)));
+}`)
+      .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance *= vGlow * cityWindows(vWPos);");
   };
   return material;
 }
@@ -66,13 +87,13 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
       roughness: 0.8, metalness: 0, flatShading: true,
     }),
     region: glowEmissive(new THREE.MeshStandardMaterial({
-      vertexColors: true, roughness: 0.92, metalness: 0, flatShading: true, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
+      vertexColors: true, emissive: new THREE.Color("#ffd9a0"), emissiveIntensity: 0, roughness: 0.92, metalness: 0, flatShading: true, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2,
     })),
     water: new THREE.MeshStandardMaterial({ color: SURFACE_COLORS[SURFACE.WATER], roughness: 0.35, metalness: 0, polygonOffset: true, polygonOffsetFactor: 4, polygonOffsetUnits: 8 }),
   };
   stage.onTheme((name, th) => {
     mats.walls.emissiveIntensity = th.windows * 1.6;
-    mats.region.emissive.set(name === "night" ? "#2e2416" : "#000000");
+    mats.region.emissiveIntensity = th.windows * 1.6 * 0.6;
   });
   stage.setTheme(theme);
 
