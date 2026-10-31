@@ -1,5 +1,6 @@
 // Land/water mask at block-centre resolution. Primary: a DataSF land polygon set (config MASK). Fallback:
 // OSM natural=coastline ways assembled and closed along the bbox edge (sea on the right of the way).
+import { CHUNK, landmaskHeight } from "../../../public/shared/city.js";
 import { pointInPolygon, scanPolygon } from "./geo.mjs";
 
 /** landPolygons in global block coords. → Uint8Array over the raster, 1 = water */
@@ -14,6 +15,67 @@ export function buildWaterMask(raster, landPolygons) {
     });
   }
   return water;
+}
+
+/**
+ * landmask.bin cells (spec-v2 §2) over the whole reserved grid: 0 = sea, else coarse ground (blocks) + 1, clamped
+ * to 255. A cell is land when its centre lies in the land polygons (global block coords); heightAt(x, z) gives the
+ * ground in blocks at a block-space point (the cell centre). → {cellsX, cellsZ, cells}
+ */
+export function buildLandmask({ grid, chunk, cell, landPolygons, heightAt }) {
+  if (!Array.isArray(landPolygons) || landPolygons.length === 0) throw new Error("buildLandmask: no land polygons");
+  const cellsX = (grid[0] * chunk) / cell, cellsZ = (grid[1] * chunk) / cell;
+  if (!Number.isInteger(cellsX) || !Number.isInteger(cellsZ)) throw new Error(`buildLandmask: grid ${grid} × ${chunk} is not a multiple of cell ${cell}`);
+  const land = new Uint8Array(cellsX * cellsZ);
+  for (const poly of landPolygons) {
+    const scaled = poly.map((ring) => ring.map(([x, z]) => [x / cell, z / cell]));
+    scanPolygon(scaled, (cx, cz) => {
+      if (cx >= 0 && cz >= 0 && cx < cellsX && cz < cellsZ) land[cz * cellsX + cx] = 1;
+    });
+  }
+  const cells = new Uint8Array(cellsX * cellsZ);
+  for (let cz = 0; cz < cellsZ; cz++) {
+    for (let cx = 0; cx < cellsX; cx++) {
+      const i = cz * cellsX + cx;
+      if (!land[i]) continue;
+      const h = heightAt((cx + 0.5) * cell, (cz + 0.5) * cell);
+      if (!Number.isInteger(h) || h < 1) throw new Error(`buildLandmask: height at cell ${cx},${cz} must be an integer ≥ 1, got ${h}`);
+      cells[i] = Math.min(255, h + 1);
+    }
+  }
+  return { cellsX, cellsZ, cells };
+}
+
+/**
+ * Skirts (spec-v2 §2): |ground − coarse height| for every edge column of a listed chunk whose neighbour chunk is
+ * unbuilt (neither listed nor water) and whose neighbouring landmask cell is land. listed/water = Sets of "cx,cz".
+ * → number[] (blocks)
+ */
+export function skirtHeights(chunks, listed, water, mask) {
+  const out = [];
+  const isUnbuilt = (cx, cz) => !listed.has(`${cx},${cz}`) && !water.has(`${cx},${cz}`);
+  for (const c of chunks) {
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      if (!isUnbuilt(c.cx + dx, c.cz + dz)) continue;
+      for (let k = 0; k < CHUNK; k++) {
+        const lx = dx === 1 ? CHUNK - 1 : dx === -1 ? 0 : k;
+        const lz = dz === 1 ? CHUNK - 1 : dz === -1 ? 0 : k;
+        const g = c.ground[lz * CHUNK + lx];
+        if (g === 0) continue;
+        const h = landmaskHeight(mask, c.cx * CHUNK + lx + dx, c.cz * CHUNK + lz + dz);
+        if (h === null) continue;
+        out.push(Math.abs(g - h));
+      }
+    }
+  }
+  return out;
+}
+
+/** Nearest-rank percentile (p in 0..1) of a number list; 0 for an empty list. */
+export function percentile(xs, p) {
+  if (xs.length === 0) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.floor(p * s.length))];
 }
 
 const ptKey = ([x, z]) => `${x},${z}`;

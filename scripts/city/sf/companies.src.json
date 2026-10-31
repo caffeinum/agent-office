@@ -1237,33 +1237,39 @@
    "lon": -122.4003768,
    "from": "scout"
   },
-  "note": "Not shipped: only 2015-2020 lease news found; current occupancy of 510 Townsend St is unverified (HQ moved to South San Francisco).",
+  "note": "Not shipped: retried 2026-10-31. Only 2015-2020 lease news found; Google Cloud subleased 510 Townsend St in 2022 and the HQ moved to South San Francisco (Oyster Point), outside the city.",
   "ship": false
  },
  {
-  "id": "dropbox-1800-owens",
+  "id": "dropbox-50-hawthorne",
   "companyId": "dropbox",
   "name": "Dropbox",
   "primary": true,
-  "address": "1800 Owens St",
+  "address": "50 Hawthorne St",
   "status": "hq",
   "category": "software",
   "color": "#0061ff",
   "sources": [
    {
-    "url": "https://www.sec.gov/Archives/edgar/data/1467623/000146762326000008/dbx-20251231.htm",
+    "url": "https://www.sec.gov/Archives/edgar/data/0001467623/000146762326000049/dbx-20260630.htm",
     "kind": "occupancy",
-    "date": "2026-02-20"
+    "accessed": "2026-10-31"
+   },
+   {
+    "url": "https://therealdeal.com/san-francisco/2026/02/23/dropbox-to-vacate-mission-bay-headquarters",
+    "kind": "news",
+    "date": "2026-02-23",
+    "accessed": "2026-10-31"
    }
   ],
   "verifiedAt": "2026-10-31",
   "hint": {
-   "lat": 37.7656261,
-   "lon": -122.3928771,
-   "from": "scout"
+   "lat": 37.7851064,
+   "lon": -122.3987825,
+   "from": "https://nominatim.openstreetmap.org/search?q=50+Hawthorne+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
   },
-  "note": "Not shipped: SEC filings changed the principal address from 1800 Owens St to 50 Hawthorne St in 2026 and OpenAI subleased 1800 Owens; Dropbox's current occupancy is unverified.",
-  "ship": false
+  "note": "Retried in v2: the 10-Q for the quarter ended 2026-06-30 gives the principal executive offices as 50 Hawthorne Street, San Francisco 94105; Dropbox left 1800 Owens St (The Real Deal, 2026-02-23).",
+  "ship": true
  },
  {
   "id": "scale-ai-303-2nd",
@@ -1287,32 +1293,45 @@
    "lon": -122.3952956,
    "from": "scout"
   },
-  "note": "Not shipped: 303 2nd St appears only in aggregator listings; the dated lease news is for 650 Townsend St (2024) and its occupancy is unconfirmed.",
+  "note": "Not shipped: retried 2026-10-31. 303 2nd St appears only in aggregator listings; the dated lease news is a 2024 sublease of 650 Townsend St and no source confirms Scale AI moved in.",
   "ship": false
  },
  {
-  "id": "notion-2300-harrison",
+  "id": "notion-685-market",
   "companyId": "notion",
   "name": "Notion",
   "primary": true,
-  "address": "2300 Harrison St",
+  "address": "685 Market St",
   "status": "hq",
   "category": "software",
   "color": "#000000",
   "sources": [
    {
-    "url": "https://www.notion.com/careers",
-    "kind": "company"
+    "url": "https://sfstandard.com/2025/06/08/notion-san-francisco-headquarters-market-street/",
+    "kind": "occupancy",
+    "date": "2025-06-08",
+    "accessed": "2026-10-31"
+   },
+   {
+    "url": "https://therealdeal.com/sanfrancisco/2024/11/05/notion-signs-lease-for-headquarters-in-san-francisco",
+    "kind": "news",
+    "date": "2024-11-05",
+    "accessed": "2026-10-31"
+   },
+   {
+    "url": "https://data.sf.gov/resource/g8m3-pdis.json?$where=ownership_name='Notion Labs Inc'",
+    "kind": "registry",
+    "accessed": "2026-10-31"
    }
   ],
   "verifiedAt": "2026-10-31",
   "hint": {
-   "lat": 37.7603744,
-   "lon": -122.4132617,
-   "from": "scout"
+   "lat": 37.787652,
+   "lon": -122.402772,
+   "from": "https://data.sf.gov/resource/g8m3-pdis.json?$where=ownership_name='Notion Labs Inc'"
   },
-  "note": "Not shipped: notion.com/careers names San Francisco but no street address; 2300 Harrison St appears only in aggregator listings.",
-  "ship": false
+  "note": "Retried in v2: HQ moved in May 2025 from 2300 Harrison St to the Monadnock Building, 685 Market St (~105k sf lease, SF Standard 2025-06-08); DataSF registry location since 2025-05-05.",
+  "ship": true
  },
  {
   "id": "plaid-1098-harrison",
@@ -1336,7 +1355,74 @@
    "lon": -122.4060945,
    "from": "scout"
   },
-  "note": "Not shipped: the job posting that named 1098 Harrison St as the SF HQ now returns 404; current postings name only San Francisco.",
+  "note": "Not shipped: retried 2026-10-31. The job posting that named 1098 Harrison St as the SF HQ now returns 404; the DataSF registry still lists 1098 Harrison St (since 2019) and 85 2nd St, but no dated occupancy source names either, and directories disagree (150 Spear St).",
+  "ship": false
+ },
+ {
+  "id": "y-combinator-560-20th",
+  "companyId": "y-combinator",
+  "name": "Y Combinator",
+  "primary": true,
+  "address": "560 20th St",
+  "status": "hq",
+  "category": "investor",
+  "color": "#f26522",
+  "sources": [
+   {
+    "url": "https://fortune.com/2024/01/12/garry-tan-founders-y-combinator-headquarters/",
+    "kind": "occupancy",
+    "date": "2024-01-12",
+    "accessed": "2026-10-31"
+   },
+   {
+    "url": "https://sfist.com/2025/03/06/new-plans-announced-for-steph-currys-splashy-new-offices-in-dogpatch/",
+    "kind": "occupancy",
+    "date": "2025-03-06",
+    "accessed": "2026-10-31"
+   },
+   {
+    "url": "https://data.sf.gov/resource/g8m3-pdis.json?$where=ownership_name='Y Combinator Management, LLC'",
+    "kind": "registry",
+    "accessed": "2026-10-31"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.760823,
+   "lon": -122.3860545,
+   "from": "https://data.sf.gov/resource/g8m3-pdis.json?$where=ownership_name='Y Combinator Management, LLC'"
+  },
+  "note": "Pier 70 campus in Dogpatch: Fortune (city records, confirmed by YC) reports the move from Mountain View; SFist places YC's SF headquarters two doors from 600 20th St. Y Combinator Management, LLC is registered at 560 20th St since 2024-01-01 (and 580 20th St since 2023-06-01); 560 is the newer registry location.",
+  "ship": true
+ },
+ {
+  "id": "ilm-letterman",
+  "companyId": "ilm",
+  "name": "Industrial Light & Magic",
+  "primary": true,
+  "address": "1 Letterman Dr",
+  "status": "hq",
+  "category": "media",
+  "color": "#1a1a1a",
+  "sources": [
+   {
+    "url": "https://data.sf.gov/resource/g8m3-pdis.json?$where=ownership_name='Lucasfilm Ltd LLC'",
+    "kind": "registry",
+    "accessed": "2026-10-31"
+   },
+   {
+    "url": "https://www.ilm.com/locations/san-francisco/",
+    "kind": "company",
+    "accessed": "2026-10-31"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.798083,
+   "lon": -122.449716,
+   "from": "https://data.sf.gov/resource/g8m3-pdis.json?$where=ownership_name='Lucasfilm Ltd LLC'"
+  },
+  "note": "Not shipped: ILM's San Francisco studio page names the city only, and the street address (1 Letterman Dr Bldg B for Lucasfilm in the DataSF registry; 1110 Gorgas Ave on Wikipedia) has no occupancy source, so it fails rule 1 (registry alone is not enough).",
   "ship": false
  },
  {

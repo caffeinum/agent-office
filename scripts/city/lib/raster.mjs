@@ -8,7 +8,7 @@ const ENTRY_KEYS = new Set(["id", "parent", "base", "top", "accentFrom", "palett
 /**
  * → raster {x0, z0, w, h, ground: Int16Array, surface: Uint8Array, owner: Int32Array (entry index or -1),
  *   deck: Int16Array, top: Int16Array (per-column building top, 0 = none), entries: Entry[], props: GlobalProp[],
- *   setColumn, setSurface, clearBuilding, addEntry, addProp, entryIndex}
+ *   parents: {id: name}, setColumn, setSurface, clearBuilding, addEntry, addProp, entryIndex, newId, addParent}
  * Starts all open water.
  */
 export function createRaster(minChunk, maxChunk) {
@@ -29,8 +29,10 @@ export function createRaster(minChunk, maxChunk) {
     top: new Int16Array(w * h),
     entries: [],
     props: [],
+    parents: {},
   };
   const byId = new Map();
+  let maxId = 0;
   const at = (x, z, what) => {
     const i = rasterIndex(raster, x, z);
     if (i < 0) throw new Error(`${what}: block ${x},${z} is outside the raster`);
@@ -49,7 +51,24 @@ export function createRaster(minChunk, maxChunk) {
     const e = { ...ENTRY_DEFAULTS, accent: entry.palette, ...entry };
     byId.set(e.id, raster.entries.length);
     raster.entries.push(e);
+    if (e.id > maxId) maxId = e.id;
+    if (e.parent > maxId) maxId = e.parent;
     return e.id;
+  };
+  /** A fresh id above every entry and parent id so far (for hook-made entries and virtual parents). */
+  raster.newId = () => ++maxId;
+  /**
+   * Name a virtual parent id shared by several entries (a multi-part landmark); build-sf writes these to
+   * manifest.parents, which decodeChunk needs to accept a parent outside a chunk's own table.
+   */
+  raster.addParent = (id, name) => {
+    if (!Number.isInteger(id) || id < 1) throw new Error(`addParent: id must be a positive integer, got ${id}`);
+    if (typeof name !== "string" || !name.trim()) throw new Error(`addParent ${id}: name must be a non-empty string`);
+    if (byId.has(id)) throw new Error(`addParent: ${id} is already an entry id`);
+    if (raster.parents[id] !== undefined && raster.parents[id] !== name) throw new Error(`addParent: ${id} is already "${raster.parents[id]}"`);
+    raster.parents[id] = name;
+    if (id > maxId) maxId = id;
+    return id;
   };
   /** Index of entry `id` in raster.entries (the owner value). */
   raster.entryIndex = (id) => {
@@ -88,6 +107,24 @@ export function createRaster(minChunk, maxChunk) {
 export function rasterIndex(raster, x, z) {
   const lx = x - raster.x0, lz = z - raster.z0;
   return lx >= 0 && lz >= 0 && lx < raster.w && lz < raster.h ? lz * raster.w + lx : -1;
+}
+
+/** Turn chunk (cx, cz) of the raster back into open water and drop its props (chunks outside every area). */
+export function resetChunkToSea(raster, cx, cz) {
+  const lx0 = cx * CHUNK - raster.x0, lz0 = cz * CHUNK - raster.z0;
+  if (lx0 < 0 || lz0 < 0 || lx0 >= raster.w || lz0 >= raster.h) throw new Error(`resetChunkToSea: chunk ${cx},${cz} is outside the raster`);
+  for (let lz = lz0; lz < lz0 + CHUNK; lz++) {
+    const row = lz * raster.w;
+    for (let lx = lx0; lx < lx0 + CHUNK; lx++) {
+      const i = row + lx;
+      raster.ground[i] = 0;
+      raster.surface[i] = SURFACE.WATER;
+      raster.owner[i] = -1;
+      raster.deck[i] = 0;
+      raster.top[i] = 0;
+    }
+  }
+  raster.props = raster.props.filter((p) => Math.floor(p.x / CHUNK) !== cx || Math.floor(p.z / CHUNK) !== cz);
 }
 
 const isOpenWater = (raster, i) => raster.surface[i] === SURFACE.WATER && raster.deck[i] === 0 && raster.owner[i] === -1;

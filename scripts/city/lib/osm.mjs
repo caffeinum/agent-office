@@ -1,10 +1,20 @@
-// Overpass queries and OSM tag → city class rules (spec section 2).
+// Overpass queries and OSM tag → city class rules (spec §2, spec-v2 §3).
 import { SURFACE } from "../../../public/shared/city.js";
 
 export const OVERPASS_PREFIX = "[out:json][timeout:300][maxsize:1073741824];";
 
+const EXTRA = Object.freeze([
+  '["building:part"]',
+  '["leisure"~"^(stadium|track|sports_centre|dog_park|swimming_pool)$"]',
+  '["amenity"="fountain"]',
+  '["water"~"^(pond|fountain|reflecting_pool|basin)$"]',
+]);
+
 /**
- * → {roads, land, buildings, coastline} query strings, each prefixed [out:json][timeout:300][maxsize:1073741824];
+ * → {roads, land, buildings, extra, points, trees, coastline} query strings, each prefixed
+ * [out:json][timeout:300][maxsize:1073741824]. roads/land/buildings are the v1 strings unchanged, so cached
+ * requests stay valid (roads already carries highway=busway). spec-v2 §3.1 adds `extra` (building:part, sports,
+ * dog-park, pool and fountain areas, ponds), `points` (lighting towers, masts, towers, flagpoles) and `trees`.
  * Queries that return relations end in `out geom;` rather than the spec's `out geom tags;`: the `tags`
  * verbosity drops relation members, so multipolygons would arrive without geometry. Default (body)
  * verbosity still carries every tag.
@@ -24,6 +34,9 @@ export function overpassQueries(bbox) {
     roads: `${OVERPASS_PREFIX}way["highway"]${b};out geom tags;`,
     land: `${OVERPASS_PREFIX}(${land});out geom;`,
     buildings: `${OVERPASS_PREFIX}wr["building"]${b};out geom;`,
+    extra: `${OVERPASS_PREFIX}(${EXTRA.map((f) => `wr${f}${b};`).join("")});out geom;`,
+    points: `${OVERPASS_PREFIX}(node["tower:type"="lighting"]${b};node["man_made"~"^(mast|tower|flagpole)$"]${b};);out;`,
+    trees: `${OVERPASS_PREFIX}node["natural"="tree"]${b};out;`,
     coastline: `${OVERPASS_PREFIX}way["natural"="coastline"]${b};out geom tags;`,
   };
 }
@@ -36,6 +49,9 @@ export function layerOf(tags) {
   const n = Number(String(tags.layer).split(";")[0].trim());
   return Number.isFinite(n) ? Math.trunc(n) : null;
 }
+
+/** `bridge` present and not "no". */
+export const isBridge = (tags) => typeof tags.bridge === "string" && tags.bridge !== "no";
 
 /** Highway filter (spec section 2). → boolean */
 export function keepHighway(tags) {
@@ -50,6 +66,20 @@ export function keepHighway(tags) {
   return true;
 }
 
+/**
+ * Building filter (spec-v2 §3.2): drops underground and zero-level slabs (the Muni/BART station boxes).
+ * → null to keep, or the reason string it was dropped for.
+ */
+export function dropBuildingReason(tags) {
+  const layer = layerOf(tags);
+  if (layer !== null && layer < 0) return "layer<0";
+  if (tags.location === "underground") return "location=underground";
+  if (tags["building:levels"] !== undefined && Number(String(tags["building:levels"]).trim()) === 0 && parseHeightM(tags.height) === null) {
+    return "building:levels=0 without height";
+  }
+  return null;
+}
+
 const ROAD_CLASSES = Object.freeze({
   motorway: { roadway: 7, sidewalk: 0, surface: SURFACE.ROAD },
   trunk: { roadway: 6, sidewalk: 1, surface: SURFACE.ROAD },
@@ -59,6 +89,7 @@ const ROAD_CLASSES = Object.freeze({
   residential: { roadway: 4, sidewalk: 1, surface: SURFACE.ROAD },
   unclassified: { roadway: 4, sidewalk: 1, surface: SURFACE.ROAD },
   living_street: { roadway: 3, sidewalk: 1, surface: SURFACE.ROAD },
+  busway: { roadway: 3, sidewalk: 0, surface: SURFACE.ROAD },
   service: { roadway: 2, sidewalk: 0, surface: SURFACE.ROAD },
   pedestrian: { roadway: 3, sidewalk: 0, surface: SURFACE.PLAZA },
   footway: { roadway: 1, sidewalk: 0, surface: SURFACE.SIDEWALK },
@@ -70,8 +101,10 @@ const NAME_OVERRIDES = Object.freeze({
   "Market Street": { roadway: 7, sidewalk: 2 },
   "Van Ness Avenue": { roadway: 8 },
 });
-/** Classes whose bridges/elevated ways become decks. */
+/** Classes whose elevated ways (layer ≥ 1 or any bridge length) become decks; other classes only as short bridges. */
 export const DECK_CLASSES = new Set(["motorway", "trunk", "primary"]);
+/** Any `bridge` way under this length (metres) is a deck, over water too (spec-v2 §3.8). */
+export const SHORT_BRIDGE_M = 300;
 
 /** Base class of a highway value: "primary_link" → "primary". */
 export const highwayClass = (h) => (h.endsWith("_link") ? h.slice(0, -5) : h);
@@ -92,18 +125,43 @@ export function roadSpec(tags) {
   return spec;
 }
 
-/** Landcover table (spec section 2). → SURFACE value or null (unmapped, counted in the report) */
+const PAVED = new Set(["paved", "asphalt", "concrete", "concrete:plates", "paving_stones", "sett", "cobblestone", "unhewn_cobblestone", "bricks", "brick", "stone", "granite"]);
+const COURT_SURFACES = new Set(["asphalt", "concrete", "acrylic", "paved"]);
+const DIRT_SURFACES = new Set(["dirt", "clay", "earth"]);
+const POND_WATER = new Set(["pond", "fountain", "reflecting_pool", "basin"]);
+
+/**
+ * Landcover table (spec §2 + spec-v2 §3.7). → SURFACE value, or null (unmapped or skipped, counted in the report).
+ * POOL is returned for ponds, fountains, pools and raised (layer ≥ 1) water; the caller stamps it only on mask
+ * land, keeping the ground, so the "water iff ground 0" rule holds.
+ */
 export function landcoverSurface(tags) {
-  const { leisure, landuse, natural, amenity } = tags;
+  const { leisure, landuse, natural, amenity, surface } = tags;
+  const layer = layerOf(tags);
   if (tags.man_made === "pier") return SURFACE.PIER;
   if (tags.highway === "pedestrian" && tags.area === "yes") return SURFACE.PLAZA;
-  if (amenity === "parking") return SURFACE.PARKING;
+  if (amenity === "parking") return tags.parking === "underground" || (layer !== null && layer < 0) ? null : SURFACE.PARKING;
   if (landuse === "railway") return SURFACE.RAIL;
-  if (natural === "water") return SURFACE.WATER;
-  if (natural === "sand" || natural === "beach") return SURFACE.SAND;
+  if (amenity === "fountain" || leisure === "swimming_pool") return SURFACE.POOL;
+  if (natural === "water") return POND_WATER.has(tags.water) || (layer !== null && layer >= 1) ? SURFACE.POOL : SURFACE.WATER;
+  if (natural === "sand" || natural === "beach") return natural === "sand" && (tags.sport === "baseball" || DIRT_SURFACES.has(surface)) ? SURFACE.DIRT : SURFACE.SAND;
   if (landuse === "forest" || natural === "wood" || natural === "scrub") return SURFACE.FOREST;
+  if (leisure === "track") return SURFACE.TRACK;
+  if (leisure === "pitch") {
+    if (surface === "tartan") return SURFACE.TRACK;
+    if (COURT_SURFACES.has(surface)) return SURFACE.COURT;
+    if (DIRT_SURFACES.has(surface)) return SURFACE.DIRT;
+    return SURFACE.GRASS;
+  }
+  if (leisure === "park" && PAVED.has(surface)) return SURFACE.PLAZA;
   if (leisure === "park" || leisure === "garden" || landuse === "recreation_ground" || landuse === "cemetery") return SURFACE.PARK;
-  if (leisure === "pitch" || leisure === "golf_course" || landuse === "grass" || natural === "grassland") return SURFACE.GRASS;
+  if (leisure === "golf_course" || leisure === "dog_park" || landuse === "grass" || natural === "grassland") return SURFACE.GRASS;
+  return null;
+}
+
+/** Why landcoverSurface skipped a tagged feature on purpose (not just unmapped), or null. */
+export function landcoverSkipReason(tags) {
+  if (tags.amenity === "parking" && landcoverSurface(tags) === null) return "underground parking";
   return null;
 }
 
@@ -123,9 +181,40 @@ export function parseHeightM(value) {
 }
 const pos = (v) => (Number.isFinite(v) && v > 0 ? v : null);
 
-/** building:levels → metres at 3.5 m per level, or null. */
-export function levelsHeightM(value) {
+const levelCount = (value) => {
   if (value === undefined) return null;
   const n = Number(String(value).trim());
-  return Number.isFinite(n) && n > 0 ? n * 3.5 : null;
+  return Number.isFinite(n) && n >= 0 ? n : null;
+};
+
+/** building:levels → metres at 3.5 m per level, or null. */
+export function levelsHeightM(value) {
+  const n = levelCount(value);
+  return n !== null && n > 0 ? n * 3.5 : null;
+}
+
+export const OFFICE_LEVEL_M = 4;
+export const OFFICE_LEVELS_MIN = 10;
+const isOffice = (tags) => tags["building:part"] === "office" || tags.building === "office" || tags.office !== undefined;
+
+/**
+ * Height of an OSM building or part (spec-v2 §3.4 rule 5): `height`, else levels × 3.5 m, or 4 m per level for
+ * office buildings/parts with ≥ 10 levels. → metres, or null when untagged or unparseable.
+ */
+export function osmHeightM(tags) {
+  if (tags.height !== undefined) return parseHeightM(tags.height);
+  const n = levelCount(tags["building:levels"]);
+  if (n === null || n === 0) return null;
+  return n * (isOffice(tags) && n >= OFFICE_LEVELS_MIN ? OFFICE_LEVEL_M : 3.5);
+}
+
+/** `min_height`, else building:min_level × 3.5 m. → metres, or null when neither is tagged/parseable. */
+export function osmMinHeightM(tags) {
+  if (tags.min_height !== undefined) {
+    const v = String(tags.min_height).trim();
+    if (v === "0") return 0;
+    return parseHeightM(v);
+  }
+  const n = levelCount(tags["building:min_level"]);
+  return n === null ? null : n * 3.5;
 }
