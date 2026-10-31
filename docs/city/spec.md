@@ -58,9 +58,9 @@ The operator confirms these on the fixture (`/city/fixture`) at the end of W1. W
   | Coit Tower | 37.8024 | −122.4058 | 3349.7 | 1201.6 | 52,18 |
   | Pier 39 | 37.8087 | −122.4098 | 3232.4 | 969.4 | 50,15 |
   | Ghirardelli | 37.8059 | −122.4229 | 2848.1 | 1072.6 | 44,16 |
-  | OpenAI, 1455 3rd St (provisional) | 37.770045 | −122.388788 | 3848.7 | 2394.1 | 60,37 |
+  | OpenAI, 1455 3rd St (EAS 489890) | 37.770061 | −122.3887726 | 3849.2 | 2393.5 | 60,37 |
 
-  - The OpenAI row was back-computed from the earlier block value, so it is provisional. W3 replaces it with the EAS point and updates the check in the same commit.
+  - The OpenAI row is the EAS point for 1455 03RD ST (eas_baseid 489890, parcel 8721033), set by W3 together with the check.
 - **Default spawn:** target 3610,1667, distance 600, day theme.
 
 ## 2. data pipeline

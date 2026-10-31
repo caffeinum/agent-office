@@ -1,1 +1,1329 @@
-[]
+[
+ {
+  "id": "anthropic-500-howard",
+  "companyId": "anthropic",
+  "name": "Anthropic",
+  "primary": true,
+  "address": "500 Howard St",
+  "status": "hq",
+  "category": "ai-lab",
+  "color": "#d97757",
+  "sources": [
+   {
+    "url": "https://sfstandard.com/2026/09/01/ai-alley-anthropic-kpmg-howard-street/",
+    "kind": "occupancy",
+    "date": "2026-09-01"
+   },
+   {
+    "url": "https://www.bisnow.com/news/san-francisco/office/anthropic-cements-240k-sf-lease-howard-street-133989",
+    "kind": "occupancy",
+    "date": "2026-04-06"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7885108,
+   "lon": -122.3967378,
+   "from": "https://nominatim.openstreetmap.org/search?q=500+Howard+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Rule 8: primary. Direct lease of ~240k sf signed Apr 2026 (Bisnow), occupied per SF Standard Sep 2026. Leased 300 and 342 Howard St (whole buildings, Jan 2026) are not occupied yet and are not shipped; 548 Market St is a mail address and is not shipped.",
+  "ship": true
+ },
+ {
+  "id": "anthropic-505-howard",
+  "companyId": "anthropic",
+  "name": "Anthropic",
+  "primary": false,
+  "address": "505 Howard St",
+  "status": "office",
+  "category": "ai-lab",
+  "color": "#d97757",
+  "sources": [
+   {
+    "url": "https://sfstandard.com/2026/09/01/ai-alley-anthropic-kpmg-howard-street/",
+    "kind": "occupancy",
+    "date": "2026-09-01"
+   },
+   {
+    "url": "https://www.bisnow.com/news/san-francisco/office/anthropic-cements-240k-sf-lease-howard-street-133989",
+    "kind": "news",
+    "date": "2026-04-06"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7880084,
+   "lon": -122.3961109,
+   "from": "https://nominatim.openstreetmap.org/search?q=505+Howard+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Rule 8: own occupancy source (two floors, SF Standard Sep 2026), ships as office.",
+  "ship": true
+ },
+ {
+  "id": "anthropic-400-howard",
+  "companyId": "anthropic",
+  "name": "Anthropic",
+  "primary": false,
+  "address": "400 Howard St",
+  "status": "office",
+  "category": "ai-lab",
+  "color": "#d97757",
+  "sources": [
+   {
+    "url": "https://www.bisnow.com/news/san-francisco/office/anthropic-cements-240k-sf-lease-howard-street-133989",
+    "kind": "occupancy",
+    "date": "2026-04-06"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7891711,
+   "lon": -122.3958247,
+   "from": "https://nominatim.openstreetmap.org/search?q=400+Howard+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Rule 8: was a registry-only address in the scout; now has its own lease news (~100k sf added Mar 2026, Bisnow), ships as office.",
+  "ship": true
+ },
+ {
+  "id": "openai-1455-3rd",
+  "companyId": "openai",
+  "name": "OpenAI",
+  "primary": true,
+  "address": "1455 3rd St",
+  "status": "hq",
+  "category": "ai-lab",
+  "color": "#10a37f",
+  "sources": [
+   {
+    "url": "https://hoodline.com/2026/01/openai-poised-to-gobble-up-dropbox-mission-bay-hq-space/",
+    "kind": "occupancy",
+    "date": "2026-01-08"
+   },
+   {
+    "url": "https://therealdeal.com/sanfrancisco/2024/09/23/openai-subleases-350k-sf-building-in-sfs-mission-bay",
+    "kind": "news",
+    "date": "2024-09-23"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7700459,
+   "lon": -122.3887896,
+   "from": "https://nominatim.openstreetmap.org/search?q=1455+3rd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Campus primary; 1455 and 1515 3rd St subleased from Uber (~486,600 sf).",
+  "ship": true
+ },
+ {
+  "id": "openai-1515-3rd",
+  "companyId": "openai",
+  "name": "OpenAI",
+  "primary": false,
+  "address": "1515 3rd St",
+  "status": "office",
+  "category": "ai-lab",
+  "color": "#10a37f",
+  "sources": [
+   {
+    "url": "https://hoodline.com/2026/01/openai-poised-to-gobble-up-dropbox-mission-bay-hq-space/",
+    "kind": "occupancy",
+    "date": "2026-01-08"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7693278,
+   "lon": -122.3888868,
+   "from": "https://nominatim.openstreetmap.org/search?q=1515+3rd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "openai-550-terry-francois",
+  "companyId": "openai",
+  "name": "OpenAI",
+  "primary": false,
+  "address": "550 Terry A Francois Blvd",
+  "status": "office",
+  "category": "ai-lab",
+  "color": "#10a37f",
+  "sources": [
+   {
+    "url": "https://hoodline.com/2026/01/openai-poised-to-gobble-up-dropbox-mission-bay-hq-space/",
+    "kind": "occupancy",
+    "date": "2026-01-08"
+   },
+   {
+    "url": "https://globest.com/2024/09/24/openai-inks-315k-sf-office-lease-in-san-francisco",
+    "kind": "news",
+    "date": "2024-09-24"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7694815,
+   "lon": -122.3865719,
+   "from": "https://nominatim.openstreetmap.org/search?q=550+Terry+A+Francois+Blvd%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Whole-building lease, ~315k sf, former Old Navy HQ.",
+  "ship": true
+ },
+ {
+  "id": "uber-1725-3rd",
+  "companyId": "uber",
+  "name": "Uber",
+  "primary": true,
+  "address": "1725 3rd St",
+  "status": "hq",
+  "category": "mobility",
+  "color": "#000000",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1543151/000154315126000015/uber-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-13"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7673882,
+   "lon": -122.388581,
+   "from": "https://nominatim.openstreetmap.org/search?q=1725+3rd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "salesforce-tower",
+  "companyId": "salesforce",
+  "name": "Salesforce",
+  "primary": true,
+  "address": "415 Mission St",
+  "status": "hq",
+  "category": "enterprise-software",
+  "color": "#00a1e0",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1108524/000110852426000060/crm-20260131.htm",
+    "kind": "occupancy",
+    "date": "2026-03-02"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7897744,
+   "lon": -122.3969321,
+   "from": "https://nominatim.openstreetmap.org/search?q=415+Mission+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Salesforce Tower.",
+  "ship": true
+ },
+ {
+  "id": "slack-salesforce-tower",
+  "companyId": "slack",
+  "name": "Slack",
+  "primary": true,
+  "address": "415 Mission St",
+  "status": "hq",
+  "category": "enterprise-software",
+  "color": "#4a154b",
+  "sources": [
+   {
+    "url": "https://fortune.com/2023/02/13/slack-ditching-san-francisco-headquarters-500-howard-moving-into-salesforce-tower-to-cut-costs",
+    "kind": "occupancy",
+    "date": "2023-02-13"
+   },
+   {
+    "url": "https://therealdeal.com/sanfrancisco/2023/02/15/slack-to-vacate-hq-move-into-parents-salesforce-tower",
+    "kind": "news",
+    "date": "2023-02-15"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7897744,
+   "lon": -122.3969321,
+   "from": "https://nominatim.openstreetmap.org/search?q=415+Mission+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Moved from 500 Howard St into Salesforce Tower in Feb 2023.",
+  "ship": true
+ },
+ {
+  "id": "airbnb-888-brannan",
+  "companyId": "airbnb",
+  "name": "Airbnb",
+  "primary": true,
+  "address": "888 Brannan St",
+  "status": "hq",
+  "category": "marketplace",
+  "color": "#ff5a5f",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1559720/000155972026000004/abnb-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-12"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7719568,
+   "lon": -122.4054484,
+   "from": "https://nominatim.openstreetmap.org/search?q=888+Brannan+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "pinterest-651-brannan",
+  "companyId": "pinterest",
+  "name": "Pinterest",
+  "primary": true,
+  "address": "651 Brannan St",
+  "status": "hq",
+  "category": "social",
+  "color": "#e60023",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1506293/000150629326000153/pins-20260930.htm",
+    "kind": "occupancy",
+    "date": "2026-10-29"
+   },
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1506293/000150629326000021/pins-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-12"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7752457,
+   "lon": -122.3996673,
+   "from": "https://nominatim.openstreetmap.org/search?q=651+Brannan+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "HQ is 651 Brannan St; the scout's 505 Brannan St is being vacated and is not shipped.",
+  "ship": true
+ },
+ {
+  "id": "cloudflare-101-townsend",
+  "companyId": "cloudflare",
+  "name": "Cloudflare",
+  "primary": true,
+  "address": "101 Townsend St",
+  "status": "hq",
+  "category": "infrastructure",
+  "color": "#f38020",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1477333/000147733326000016/cloud-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-26"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7802552,
+   "lon": -122.3905129,
+   "from": "https://nominatim.openstreetmap.org/search?q=101+Townsend+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "lyft-185-berry",
+  "companyId": "lyft",
+  "name": "Lyft",
+  "primary": true,
+  "address": "185 Berry St",
+  "status": "hq",
+  "category": "mobility",
+  "color": "#ff00bf",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1759509/000162828026006960/lyft-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-11"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7762432,
+   "lon": -122.3917021,
+   "from": "https://nominatim.openstreetmap.org/search?q=185+Berry+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "instacart-50-beale",
+  "companyId": "instacart",
+  "name": "Instacart",
+  "primary": true,
+  "address": "50 Beale St",
+  "status": "hq",
+  "category": "marketplace",
+  "color": "#43b02a",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1579091/000157909126000018/cart-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-26"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7912566,
+   "lon": -122.3964864,
+   "from": "https://nominatim.openstreetmap.org/search?q=50+Beale+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Maplebear Inc.",
+  "ship": true
+ },
+ {
+  "id": "doordash-303-2nd",
+  "companyId": "doordash",
+  "name": "DoorDash",
+  "primary": true,
+  "address": "303 2nd St, South Tower",
+  "status": "hq",
+  "category": "marketplace",
+  "color": "#ff3008",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1792789/000179278926000013/dash-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-18"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7851497,
+   "lon": -122.395515,
+   "from": "https://www.openstreetmap.org/node/3894036010"
+  },
+  "ship": true
+ },
+ {
+  "id": "reddit-303-2nd",
+  "companyId": "reddit",
+  "name": "Reddit",
+  "primary": true,
+  "address": "303 2nd St, South Tower",
+  "status": "hq",
+  "category": "social",
+  "color": "#ff4500",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1713445/000171344526000022/rddt-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-06"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7851497,
+   "lon": -122.395515,
+   "from": "https://www.openstreetmap.org/node/3894036010"
+  },
+  "ship": true
+ },
+ {
+  "id": "okta-100-1st",
+  "companyId": "okta",
+  "name": "Okta",
+  "primary": true,
+  "address": "100 1st St",
+  "status": "hq",
+  "category": "security",
+  "color": "#007dc1",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1660134/000166013426000020/okta-20260131.htm",
+    "kind": "occupancy",
+    "date": "2026-03-05"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.789207,
+   "lon": -122.397587,
+   "from": "https://nominatim.openstreetmap.org/search?q=100+1st+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "samsara-1-de-haro",
+  "companyId": "samsara",
+  "name": "Samsara",
+  "primary": true,
+  "address": "1 De Haro St",
+  "status": "hq",
+  "category": "iot",
+  "color": "#0384fc",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1642896/000162828026018167/iot-20260131.htm",
+    "kind": "occupancy",
+    "date": "2026-03-16"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7695333,
+   "lon": -122.4017263,
+   "from": "https://nominatim.openstreetmap.org/search?q=1+De+Haro+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "asana-633-folsom",
+  "companyId": "asana",
+  "name": "Asana",
+  "primary": true,
+  "address": "633 Folsom St",
+  "status": "hq",
+  "category": "software",
+  "color": "#f06a6a",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1477720/000147772026000021/asan-20260131.htm",
+    "kind": "occupancy",
+    "date": "2026-03-13"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7845376,
+   "lon": -122.3972187,
+   "from": "https://nominatim.openstreetmap.org/search?q=633+Folsom+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "yelp-350-mission",
+  "companyId": "yelp",
+  "name": "Yelp",
+  "primary": true,
+  "address": "350 Mission St",
+  "status": "hq",
+  "category": "consumer",
+  "color": "#d32323",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1345016/000134501626000019/yelp-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-27"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7908723,
+   "lon": -122.3967203,
+   "from": "https://nominatim.openstreetmap.org/search?q=350+Mission+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "wells-fargo-333-market",
+  "companyId": "wells-fargo",
+  "name": "Wells Fargo",
+  "primary": true,
+  "address": "333 Market St",
+  "status": "hq",
+  "category": "finance",
+  "color": "#d71e28",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/72971/000007297126000327/wfc-20260930.htm",
+    "kind": "occupancy",
+    "date": "2026-10-28"
+   },
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/72971/000007297126000133/wfc-20251231_d2.htm",
+    "kind": "occupancy",
+    "date": "2026-02-24"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7919383,
+   "lon": -122.3974036,
+   "from": "https://nominatim.openstreetmap.org/search?q=333+Market+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Principal executive offices per SEC filings; the scout's 420 Montgomery St is not shipped.",
+  "ship": true
+ },
+ {
+  "id": "levi-strauss-1155-battery",
+  "companyId": "levi-strauss",
+  "name": "Levi Strauss & Co.",
+  "primary": true,
+  "address": "1155 Battery St",
+  "status": "hq",
+  "category": "retail",
+  "color": "#c41230",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/94845/000009484526000008/lvis-20251130.htm",
+    "kind": "occupancy",
+    "date": "2026-01-28"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.8017218,
+   "lon": -122.4022962,
+   "from": "https://nominatim.openstreetmap.org/search?q=1155+Battery+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Levi's Plaza.",
+  "ship": true
+ },
+ {
+  "id": "gap-2-folsom",
+  "companyId": "gap",
+  "name": "Gap Inc.",
+  "primary": true,
+  "address": "2 Folsom St",
+  "status": "hq",
+  "category": "retail",
+  "color": "#002868",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/39911/000162828026018573/gap-20260131.htm",
+    "kind": "occupancy",
+    "date": "2026-03-17"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7907938,
+   "lon": -122.3909815,
+   "from": "https://nominatim.openstreetmap.org/search?q=2+Folsom+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "autodesk-1-market",
+  "companyId": "autodesk",
+  "name": "Autodesk",
+  "primary": true,
+  "address": "1 Market St",
+  "status": "hq",
+  "category": "software",
+  "color": "#0696d7",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/769397/000076939726000015/adsk-20260131.htm",
+    "kind": "occupancy",
+    "date": "2026-03-03"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.79382,
+   "lon": -122.3948144,
+   "from": "https://nominatim.openstreetmap.org/search?q=1+Market+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "One Market Plaza.",
+  "ship": true
+ },
+ {
+  "id": "nextdoor-420-taylor",
+  "companyId": "nextdoor",
+  "name": "Nextdoor",
+  "primary": true,
+  "address": "420 Taylor St",
+  "status": "hq",
+  "category": "social",
+  "color": "#8ed500",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1846069/000184606926000023/kind-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-18"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7863489,
+   "lon": -122.411051,
+   "from": "https://nominatim.openstreetmap.org/search?q=420+Taylor+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "affirm-221-main",
+  "companyId": "affirm",
+  "name": "Affirm",
+  "primary": true,
+  "address": "221 Main St",
+  "status": "hq",
+  "category": "fintech",
+  "color": "#4a4af4",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1820953/000162828026059279/afrm-20260630.htm",
+    "kind": "occupancy",
+    "date": "2026-08-27"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7903719,
+   "lon": -122.3921857,
+   "from": "https://nominatim.openstreetmap.org/search?q=221+Main+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "HQ is 221 Main St per the FY2026 10-K; the scout's 650 California St is not shipped.",
+  "ship": true
+ },
+ {
+  "id": "fastly-475-brannan",
+  "companyId": "fastly",
+  "name": "Fastly",
+  "primary": true,
+  "address": "475 Brannan St",
+  "status": "hq",
+  "category": "infrastructure",
+  "color": "#ff282d",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1517413/000151741326000053/fsly-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-25"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7786108,
+   "lon": -122.3950406,
+   "from": "https://nominatim.openstreetmap.org/search?q=475+Brannan+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "unity-116-new-montgomery",
+  "companyId": "unity",
+  "name": "Unity",
+  "primary": true,
+  "address": "116 New Montgomery St",
+  "status": "hq",
+  "category": "software",
+  "color": "#222c37",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1810806/000181080626000043/unity-20260630.htm",
+    "kind": "occupancy",
+    "date": "2026-08-06"
+   },
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1810806/000181080626000011/unity-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-11"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7871945,
+   "lon": -122.4003392,
+   "from": "https://nominatim.openstreetmap.org/search?q=116+New+Montgomery+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "HQ is 116 New Montgomery St per SEC filings; the scout's 30 3rd St is not shipped.",
+  "ship": true
+ },
+ {
+  "id": "williams-sonoma-3250-van-ness",
+  "companyId": "williams-sonoma",
+  "name": "Williams-Sonoma",
+  "primary": true,
+  "address": "3250 Van Ness Ave",
+  "status": "hq",
+  "category": "retail",
+  "color": "#3d3d3d",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/719955/000071995526000059/wsm-20260201.htm",
+    "kind": "occupancy",
+    "date": "2026-03-26"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.8059054,
+   "lon": -122.4247337,
+   "from": "https://nominatim.openstreetmap.org/search?q=3250+Van+Ness+Ave%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "dolby-1275-market",
+  "companyId": "dolby",
+  "name": "Dolby Laboratories",
+  "primary": true,
+  "address": "1275 Market St",
+  "status": "hq",
+  "category": "media-tech",
+  "color": "#1a1a1a",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1308547/000130854725000007/dlb-20250926.htm",
+    "kind": "occupancy",
+    "date": "2025-11-18"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7775595,
+   "lon": -122.4156499,
+   "from": "https://nominatim.openstreetmap.org/search?q=1275+Market+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Owned headquarters building.",
+  "ship": true
+ },
+ {
+  "id": "atlassian-350-bush",
+  "companyId": "atlassian",
+  "name": "Atlassian",
+  "primary": true,
+  "address": "350 Bush St",
+  "status": "hq",
+  "category": "software",
+  "color": "#0052cc",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1650372/000165037226000036/team-20260630.htm",
+    "kind": "occupancy",
+    "date": "2026-08-14"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7913454,
+   "lon": -122.4032976,
+   "from": "https://nominatim.openstreetmap.org/search?q=350+Bush+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "amplitude-201-3rd",
+  "companyId": "amplitude",
+  "name": "Amplitude",
+  "primary": true,
+  "address": "201 3rd St",
+  "status": "hq",
+  "category": "software",
+  "color": "#1e61f0",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1866692/000119312526057847/ampl-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-19"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7850747,
+   "lon": -122.3998734,
+   "from": "https://nominatim.openstreetmap.org/search?q=201+3rd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "chime-101-california",
+  "companyId": "chime",
+  "name": "Chime",
+  "primary": true,
+  "address": "101 California St",
+  "status": "hq",
+  "category": "fintech",
+  "color": "#1ec677",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1795586/000179558626000013/chym-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-03-06"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7929054,
+   "lon": -122.3981127,
+   "from": "https://nominatim.openstreetmap.org/search?q=101+California+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "ship": true
+ },
+ {
+  "id": "figma-760-market",
+  "companyId": "figma",
+  "name": "Figma",
+  "primary": true,
+  "address": "760 Market St",
+  "status": "hq",
+  "category": "software",
+  "color": "#a259ff",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1579878/000162828026009228/fig-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-18"
+   },
+   {
+    "url": "https://us.jll.com/en/newsroom/figma-extends-lease-commitment-at-downtown-san-francisco-headquarters",
+    "kind": "news"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7863711,
+   "lon": -122.4054895,
+   "from": "https://nominatim.openstreetmap.org/search?q=760+Market+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Phelan Building.",
+  "ship": true
+ },
+ {
+  "id": "twilio-101-spear",
+  "companyId": "twilio",
+  "name": "Twilio",
+  "primary": true,
+  "address": "101 Spear St",
+  "status": "hq",
+  "category": "software",
+  "color": "#f22f46",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1447669/000144766926000021/twlo-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-24"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7924308,
+   "lon": -122.3936209,
+   "from": "https://nominatim.openstreetmap.org/search?q=101+Spear+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Verified for v1 via the FY2025 10-K (83,372 sf actively occupied at 101 Spear St).",
+  "ship": true
+ },
+ {
+  "id": "databricks-160-spear",
+  "companyId": "databricks",
+  "name": "Databricks",
+  "primary": true,
+  "address": "160 Spear St",
+  "status": "hq",
+  "category": "data-ai",
+  "color": "#ff3621",
+  "sources": [
+   {
+    "url": "https://www.databricks.com/company/contact",
+    "kind": "occupancy",
+    "date": "2026-10-31"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7914376,
+   "lon": -122.3935588,
+   "from": "https://nominatim.openstreetmap.org/search?q=160+Spear+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Rule 8: the company contact page lists HQ at 160 Spear St, 15th Floor (read 2026-10-31); the move to One Sansome is targeted for the second half of 2026.",
+  "ship": true
+ },
+ {
+  "id": "databricks-1-sansome",
+  "companyId": "databricks",
+  "name": "Databricks",
+  "primary": false,
+  "address": "1 Sansome St",
+  "status": "office",
+  "category": "data-ai",
+  "color": "#ff3621",
+  "sources": [
+   {
+    "url": "https://www.databricks.com/company/newsroom/press-releases/databricks-deepens-san-francisco-investment-new-office-and-multi",
+    "kind": "occupancy",
+    "date": "2025-03-06"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7904266,
+   "lon": -122.4011683,
+   "from": "https://nominatim.openstreetmap.org/search?q=1+Sansome+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Nine floors leased for the new HQ; renovation due 2026.",
+  "ship": true
+ },
+ {
+  "id": "wikimedia-1-sansome",
+  "companyId": "wikimedia",
+  "name": "Wikimedia Foundation",
+  "primary": true,
+  "address": "1 Sansome St",
+  "status": "hq",
+  "category": "nonprofit",
+  "color": "#339966",
+  "sources": [
+   {
+    "url": "https://wikimediafoundation.org/about/contact/",
+    "kind": "occupancy",
+    "date": "2026-10-31"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7904266,
+   "lon": -122.4011683,
+   "from": "https://nominatim.openstreetmap.org/search?q=1+Sansome+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Contact page gives the postal address 1 Sansome Street, Suite 1895 (read 2026-10-31); the scout's 1 Montgomery St is not shipped.",
+  "ship": true
+ },
+ {
+  "id": "discord-444-de-haro",
+  "companyId": "discord",
+  "name": "Discord",
+  "primary": true,
+  "address": "444 De Haro St",
+  "status": "hq",
+  "category": "social",
+  "color": "#5865f2",
+  "sources": [
+   {
+    "url": "https://discord.com/terms",
+    "kind": "occupancy",
+    "date": "2025-08-29"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7641587,
+   "lon": -122.4020123,
+   "from": "https://nominatim.openstreetmap.org/search?q=444+De+Haro+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Terms of Service: Discord Inc. is located at 444 De Haro Street #200.",
+  "ship": true
+ },
+ {
+  "id": "visa-mission-rock",
+  "companyId": "visa",
+  "name": "Visa",
+  "primary": true,
+  "address": "300 Toni Stone Crossing",
+  "status": "hq",
+  "category": "fintech",
+  "color": "#1a1f71",
+  "sources": [
+   {
+    "url": "https://corporate.visa.com/en/sites/visa-perspectives/company-news/mission-rock-market-support-center.html",
+    "kind": "occupancy",
+    "date": "2024-06-07"
+   },
+   {
+    "url": "https://www.bisnow.com/news/san-francisco/office/visa-to-build-global-hq-at-giants-tishman-speyers-mission-rock-101678",
+    "kind": "news"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7757686,
+   "lon": -122.3886743,
+   "from": "https://nominatim.openstreetmap.org/search?q=300+Toni+Stone+Crossing%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Mission Rock building at Toni Stone Crossing and Dr. Maya Angelou Lane.",
+  "ship": true
+ },
+ {
+  "id": "linkedin-222-2nd",
+  "companyId": "linkedin",
+  "name": "LinkedIn",
+  "primary": true,
+  "address": "222 2nd St",
+  "status": "office",
+  "category": "social",
+  "color": "#0a66c2",
+  "sources": [
+   {
+    "url": "https://ipgsf.com/linkedin-renews-soma-lease/",
+    "kind": "occupancy",
+    "date": "2025-06-30"
+   },
+   {
+    "url": "https://therealdeal.com/san-francisco/2025/06/30/linkedin-renews-san-francisco-office-lease",
+    "kind": "news",
+    "date": "2025-06-30"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7864738,
+   "lon": -122.3982635,
+   "from": "https://nominatim.openstreetmap.org/search?q=222+2nd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Lease renewed for ~154k sf, floors 2-8. LinkedIn's HQ is outside SF.",
+  "ship": true
+ },
+ {
+  "id": "google-345-spear",
+  "companyId": "google",
+  "name": "Google",
+  "primary": true,
+  "address": "345 Spear St",
+  "status": "office",
+  "category": "big-tech",
+  "color": "#4285f4",
+  "sources": [
+   {
+    "url": "https://hoodline.com/2025/01/google-revamps-san-francisco-footprint-expands-at-hills-plaza-exits-one-market-plaza/",
+    "kind": "occupancy",
+    "date": "2025-01-22"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7894073,
+   "lon": -122.3895538,
+   "from": "https://www.openstreetmap.org/node/9093309161"
+  },
+  "note": "Hills Plaza; expanded by ~134k sf in Jan 2025. Google's HQ is outside SF.",
+  "ship": true
+ },
+ {
+  "id": "x-1355-market",
+  "companyId": "x",
+  "name": "X (Twitter)",
+  "primary": true,
+  "address": "1355 Market St",
+  "status": "former",
+  "category": "social",
+  "color": "#14171a",
+  "sources": [
+   {
+    "url": "https://sfist.com/2024/08/05/elon-musk-makes-good-on-threat-to-close-x-twitter-offices-in-sf-says-office-will-close-in-a-few-weeks",
+    "kind": "news",
+    "date": "2024-08-05"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7767159,
+   "lon": -122.4165832,
+   "from": "https://www.openstreetmap.org/way/35111960"
+  },
+  "note": "Former HQ; X closed the office in 2024 and moved staff to San Jose and Palo Alto.",
+  "ship": true
+ },
+ {
+  "id": "block-1455-market",
+  "companyId": "block",
+  "name": "Block (Square)",
+  "primary": true,
+  "address": "1455 Market St",
+  "status": "former",
+  "category": "fintech",
+  "color": "#3e4348",
+  "sources": [
+   {
+    "url": "https://www.bisnow.com/news/san-francisco/office/block-113431",
+    "kind": "news",
+    "date": "2022-06-15"
+   },
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1512673/000162828026012254/xyz-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-26"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7756701,
+   "lon": -122.4181333,
+   "from": "https://www.openstreetmap.org/node/8410287828"
+  },
+  "note": "Former HQ; Block did not renew its 470k sf lease (expired Sep 2023). Principal offices are now in Oakland.",
+  "ship": true
+ },
+ {
+  "id": "pge-77-beale",
+  "companyId": "pge",
+  "name": "PG&E",
+  "primary": true,
+  "address": "77 Beale St",
+  "status": "former",
+  "category": "utility",
+  "color": "#0067a5",
+  "sources": [
+   {
+    "url": "https://www.businesswire.com/news/home/20200608005788/en",
+    "kind": "company",
+    "date": "2020-06-08"
+   },
+   {
+    "url": "https://rebusinessonline.com/pge-to-move-to-oakland-sell-san-francisco-headquarters/",
+    "kind": "news"
+   },
+   {
+    "url": "https://www.businesswire.com/news/home/20210831005846/en/PGE%E2%80%99s-Proposal-to-Return-400-Million-to-Customers-from-Net-Gain-on-Sale-of-San-Francisco-Headquarters-Approved-by-California-Public-Utilities-Commission",
+    "kind": "company",
+    "date": "2021-08-31"
+   },
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1004980/000100498026000009/pcg-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-12"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.79178,
+   "lon": -122.395756,
+   "from": "https://nominatim.openstreetmap.org/search?q=77+Beale+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Former HQ campus; PG&E sold 77 Beale and moved to 300 Lakeside Dr, Oakland.",
+  "ship": true
+ },
+ {
+  "id": "cruise-1201-bryant",
+  "companyId": "cruise",
+  "name": "Cruise",
+  "primary": true,
+  "address": "1201 Bryant St",
+  "status": "former",
+  "category": "mobility",
+  "color": "#ff6e4a",
+  "sources": [
+   {
+    "url": "https://www.sfexaminer.com/news/technology/cruise-cuts-more-than-300-in-sf-after-gm-takes-full-control/article_6cf730fa-e3ff-11ef-9ce1-6fe280a2c4b9.html",
+    "kind": "news",
+    "date": "2025-02-05"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7700194,
+   "lon": -122.4097576,
+   "from": "scout"
+  },
+  "note": "Not shipped: GM ended Cruise's robotaxi service (Dec 2024) and Feb 2025 layoffs name a Bryant Street office, but no source ties Cruise to 1201 Bryant St specifically.",
+  "ship": false
+ },
+ {
+  "id": "stripe-510-townsend",
+  "companyId": "stripe",
+  "name": "Stripe",
+  "primary": true,
+  "address": "510 Townsend St",
+  "status": "office",
+  "category": "fintech",
+  "color": "#635bff",
+  "sources": [
+   {
+    "url": "https://www.bisnow.com/news/san-francisco/office/behind-the-deal-stripes-mega-lease-45440",
+    "kind": "news"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7735091,
+   "lon": -122.4003768,
+   "from": "scout"
+  },
+  "note": "Not shipped: only 2015-2020 lease news found; current occupancy of 510 Townsend St is unverified (HQ moved to South San Francisco).",
+  "ship": false
+ },
+ {
+  "id": "dropbox-1800-owens",
+  "companyId": "dropbox",
+  "name": "Dropbox",
+  "primary": true,
+  "address": "1800 Owens St",
+  "status": "hq",
+  "category": "software",
+  "color": "#0061ff",
+  "sources": [
+   {
+    "url": "https://www.sec.gov/Archives/edgar/data/1467623/000146762326000008/dbx-20251231.htm",
+    "kind": "occupancy",
+    "date": "2026-02-20"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7656261,
+   "lon": -122.3928771,
+   "from": "scout"
+  },
+  "note": "Not shipped: SEC filings changed the principal address from 1800 Owens St to 50 Hawthorne St in 2026 and OpenAI subleased 1800 Owens; Dropbox's current occupancy is unverified.",
+  "ship": false
+ },
+ {
+  "id": "scale-ai-303-2nd",
+  "companyId": "scale-ai",
+  "name": "Scale AI",
+  "primary": true,
+  "address": "303 2nd St, South Tower",
+  "status": "hq",
+  "category": "ai-lab",
+  "color": "#5b3cc4",
+  "sources": [
+   {
+    "url": "https://therealdeal.com/sanfrancisco/2024/05/29/scaleai-signs-san-franciscos-largest-office-lease-of-2024",
+    "kind": "news",
+    "date": "2024-05-29"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7852369,
+   "lon": -122.3952956,
+   "from": "scout"
+  },
+  "note": "Not shipped: 303 2nd St appears only in aggregator listings; the dated lease news is for 650 Townsend St (2024) and its occupancy is unconfirmed.",
+  "ship": false
+ },
+ {
+  "id": "notion-2300-harrison",
+  "companyId": "notion",
+  "name": "Notion",
+  "primary": true,
+  "address": "2300 Harrison St",
+  "status": "hq",
+  "category": "software",
+  "color": "#000000",
+  "sources": [
+   {
+    "url": "https://www.notion.com/careers",
+    "kind": "company"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7603744,
+   "lon": -122.4132617,
+   "from": "scout"
+  },
+  "note": "Not shipped: notion.com/careers names San Francisco but no street address; 2300 Harrison St appears only in aggregator listings.",
+  "ship": false
+ },
+ {
+  "id": "plaid-1098-harrison",
+  "companyId": "plaid",
+  "name": "Plaid",
+  "primary": true,
+  "address": "1098 Harrison St",
+  "status": "hq",
+  "category": "fintech",
+  "color": "#111111",
+  "sources": [
+   {
+    "url": "https://www.indexventures.com/startup-jobs/plaid/senior-software-engineer-backend-4/",
+    "kind": "company",
+    "date": "2026-10-30"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7760407,
+   "lon": -122.4060945,
+   "from": "scout"
+  },
+  "note": "Not shipped: the job posting that named 1098 Harrison St as the SF HQ now returns 404; current postings name only San Francisco.",
+  "ship": false
+ }
+]
