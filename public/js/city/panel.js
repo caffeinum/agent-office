@@ -1,5 +1,7 @@
 // Building panel: every company site in the clicked building (name, address, status, category, verified date,
-// sources, height), or "building · N m" when it holds none. No office link in v1 (spec §1).
+// sources, height), or "building · N m" when it holds none, plus "here now" (spec-v2 §7.5): the office agents
+// bridged to those companies, walkers gone inside, and walkers standing at the door. Also the people list (every
+// walker, tap to follow) with the city chat tail. All names and chat go through textContent only.
 
 import { BLOCK_M } from "../../shared/city.js";
 
@@ -26,11 +28,77 @@ export function panelTitle(info) {
   return info.sites.length ? `${info.sites.length === 1 ? "1 company" : `${info.sites.length} companies`} · ${info.heightM} m` : `building · ${info.heightM} m`;
 }
 
-function el(tag, cls, text) {
-  const e = document.createElement(tag);
+/** Walkers within this many blocks of a site's anchor count as "at the door". */
+export const NEAR_SITE = 8;
+export const CHAT_SHOWN = 8;
+const WHERE_ORDER = { office: 0, inside: 1, outside: 2 };
+
+/**
+ * Pure. Who is at the companies of a panel `info`: presence agents ("office"), walkers inside one of its sites
+ * ("inside") and walkers within NEAR_SITE of a site anchor ("outside"). positionOf(id) → {x, z} | null.
+ * → [{key, name, hue, status, where, companyId, walkerId?}]
+ */
+export function whoIsHere(info, { presence, walkers, positionOf }) {
+  const companies = new Set(info.sites.map((s) => s.companyId));
+  const siteIds = new Set(info.sites.map((s) => s.id));
+  const rows = [];
+  for (const p of presence) {
+    if (!companies.has(p.companyId)) continue;
+    for (const a of p.agents) rows.push({ key: `o:${p.companyId}:${a.name}`, name: a.name, hue: a.hue, status: a.status, where: "office", companyId: p.companyId });
+  }
+  for (const w of walkers) {
+    if (w.inside) {
+      if (!siteIds.has(w.siteId)) continue;
+      const site = info.sites.find((s) => s.id === w.siteId);
+      rows.push({ key: `w:${w.id}`, name: w.name, hue: w.hue, status: w.status, where: "inside", companyId: site.companyId, walkerId: w.id });
+      continue;
+    }
+    const pos = positionOf(w.id);
+    if (!pos) throw new Error(`whoIsHere: walker ${w.id} has no position`);
+    const at = info.sites.find((s) => Math.hypot(pos.x - (s.anchor.x + 0.5), pos.z - (s.anchor.z + 0.5)) <= NEAR_SITE);
+    if (at) rows.push({ key: `w:${w.id}`, name: w.name, hue: w.hue, status: w.status, where: "outside", companyId: at.companyId, walkerId: w.id });
+  }
+  return rows.sort((a, b) => WHERE_ORDER[a.where] - WHERE_ORDER[b.where] || a.name.localeCompare(b.name));
+}
+
+/** Pure. A walker's one-word activity for the people list. */
+export function walkerActivity(w, pos) {
+  if (w.inside) return "inside";
+  if (!pos?.moving) return "here";
+  return w.mode === "ride" ? "riding" : "walking";
+}
+
+function el(tag, cls, text, doc = document) {
+  const e = doc.createElement(tag);
   if (cls) e.className = cls;
   if (text !== undefined) e.textContent = text;
   return e;
+}
+
+const hueOf = (h) => String(((h % 360) + 360) % 360);
+
+/** One chat line, text only: a URL or markup in the text stays literal (never linkified, never parsed). */
+export function chatLine(c, doc = document) {
+  const li = el("li", `cu-chat-line ${c.scope}`, undefined, doc);
+  const name = el("b", "", c.name, doc);
+  const text = el("span", "", c.text, doc);
+  const scope = el("small", "", c.scope === "city" ? "city" : "near", doc);
+  li.append(name, text, scope);
+  return li;
+}
+
+/** One person row (hue dot, name, status, where) — a button when it is a walker that can be followed. */
+export function personRow(p, onFollow, doc = document) {
+  const row = el(p.walkerId ? "button" : "div", `cu-person ${p.where ?? ""}`, undefined, doc);
+  if (p.walkerId) {
+    row.type = "button";
+    row.title = `follow ${p.name}`;
+    row.addEventListener("click", () => onFollow(p.walkerId));
+  }
+  row.style.setProperty("--h", hueOf(p.hue));
+  row.append(el("i", "cu-hue", undefined, doc), el("b", "", p.name, doc), el("span", "cu-pstatus", p.status, doc));
+  if (p.where) row.append(el("small", "", p.where === "office" ? "in office" : p.where, doc));
+  return row;
 }
 
 function sourceLink(src, siteId) {
@@ -72,8 +140,8 @@ function siteCard(s) {
   return card;
 }
 
-/** → {show(info), hide(), el} */
-export function createPanel(root, { onClose = () => {} } = {}) {
+/** → {show(info), setPeople(rows), hide(), el, open, info} */
+export function createPanel(root, { onClose = () => {}, onFollow = () => {} } = {}) {
   const panel = el("aside", "cu-panel cu-glass");
   panel.hidden = true;
   panel.setAttribute("aria-live", "polite");
@@ -84,12 +152,19 @@ export function createPanel(root, { onClose = () => {} } = {}) {
   close.setAttribute("aria-label", "close");
   head.append(title, close);
   const body = el("div", "cu-panel-body");
-  panel.append(head, body);
+  const here = el("section", "cu-here");
+  here.hidden = true;
+  const hereTitle = el("h3", "", "here now");
+  const hereList = el("div", "cu-here-list");
+  here.append(hereTitle, hereList);
+  panel.append(head, here, body);
+  let current = null;
   root.appendChild(panel);
 
   function hide() {
     if (panel.hidden) return;
     panel.hidden = true;
+    current = null;
     onClose();
   }
   close.addEventListener("click", hide);
@@ -101,7 +176,58 @@ export function createPanel(root, { onClose = () => {} } = {}) {
     panel.dataset.building = String(info.buildingId);
     panel.classList.toggle("empty", cards.length === 0);
     panel.hidden = false;
+    current = info;
   }
 
-  return { show, hide, el: panel, get open() { return !panel.hidden; } };
+  function setPeople(rows) {
+    hereTitle.textContent = `here now · ${rows.length}`;
+    hereList.replaceChildren(...rows.map((p) => personRow(p, onFollow)));
+    here.hidden = rows.length === 0;
+  }
+
+  return { show, setPeople, hide, el: panel, get open() { return !panel.hidden; }, get info() { return current; } };
+}
+
+/**
+ * The people list: live status, every walker (tap to follow) and the last CHAT_SHOWN city chat lines.
+ * render({walkers, positionOf, chat, selected}) and setStatus(status, detail). → {render, setStatus, el}
+ */
+export function createPeople(root, { onFollow = () => {} } = {}) {
+  const box = el("aside", "cu-people cu-glass");
+  const head = el("button", "cu-people-head");
+  head.type = "button";
+  head.setAttribute("aria-expanded", "false");
+  const dot = el("i", "cu-live-dot");
+  const title = el("b", "", "people");
+  const status = el("small", "cu-live", "connecting");
+  head.append(dot, title, status);
+  const body = el("div", "cu-people-body");
+  body.hidden = true;
+  const list = el("div", "cu-people-list");
+  const chatList = el("ul", "cu-chat");
+  body.append(list, chatList);
+  box.append(head, body);
+  root.appendChild(box);
+  head.addEventListener("click", () => {
+    body.hidden = !body.hidden;
+    head.setAttribute("aria-expanded", String(!body.hidden));
+  });
+
+  function render({ walkers, positionOf, chat, selected }) {
+    title.textContent = `people · ${walkers.length}`;
+    const rows = [...walkers].sort((a, b) => a.name.localeCompare(b.name)).map((w) => {
+      const row = personRow({ name: w.name, hue: w.hue, status: w.status, where: walkerActivity(w, positionOf(w.id)), walkerId: w.id }, onFollow);
+      row.classList.toggle("on", w.id === selected);
+      return row;
+    });
+    list.replaceChildren(...(rows.length ? rows : [el("p", "cu-empty", "nobody is walking the city right now")]));
+    chatList.replaceChildren(...chat.slice(-CHAT_SHOWN).map((c) => chatLine(c)));
+  }
+
+  function setStatus(s, detail) {
+    box.dataset.live = s;
+    status.textContent = s === "offline" && detail?.retryMs ? `offline · retry in ${Math.round(detail.retryMs / 1000)} s` : s;
+  }
+
+  return { render, setStatus, el: box };
 }
