@@ -2,15 +2,16 @@ import { SELF } from "cloudflare:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { describe, expect, it } from "vitest";
-import { TOOL_NAMES } from "../src/tools";
+import { DESIGN_TOOLS, TOOL_NAMES } from "../src/tools";
 import { b64, createOffice, fakeImage, ORIGIN, type Created } from "./helpers";
 
 const selfFetch = (input: string | URL | Request, init?: RequestInit) => SELF.fetch(input as never, init as never) as unknown as Promise<Response>;
 
-async function connect(office: Created, opts: { viaQuery?: boolean; key?: string } = {}) {
+async function connect(office: Created, opts: { viaQuery?: boolean; key?: string; design?: boolean } = {}) {
   const key = opts.key ?? office.joinKey;
   const url = new URL(`${ORIGIN}/mcp`);
   if (opts.viaQuery) url.searchParams.set("key", key);
+  if (opts.design) url.searchParams.set("mode", "design");
   const transport = new StreamableHTTPClientTransport(url, {
     fetch: selfFetch,
     requestInit: opts.viaQuery ? {} : { headers: { authorization: `Bearer ${key}` } },
@@ -26,15 +27,28 @@ async function tool(client: Client, name: string, args: Record<string, unknown> 
 }
 
 describe("MCP over Streamable HTTP", () => {
-  it("lists all tools with instructions", async () => {
+  it("hides the design tools and prompt by default", async () => {
     const o = await createOffice();
     const { client } = await connect(o);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
+    expect(tools.map((t) => t.name).sort()).toEqual(TOOL_NAMES.filter((n) => !DESIGN_TOOLS.has(n)).sort());
     expect(client.getInstructions()).toMatch(/office_join once/);
+    expect(client.getInstructions()).toMatch(/\?mode=design/);
+    expect(client.getInstructions()).not.toMatch(/office-designer/);
+    expect(client.getServerCapabilities()?.prompts).toBeFalsy();
+    expect(client.getServerVersion()?.name).toBe("agent-office");
+    const hidden = (await client.callTool({ name: "office_theme_set", arguments: { brand: { primary: "#ff0000" } } })) as { isError?: boolean };
+    expect(hidden.isError).toBe(true);
+    await client.close();
+  });
+
+  it("design mode lists every tool with the designer instructions and prompt", async () => {
+    const o = await createOffice();
+    const { client } = await connect(o, { design: true });
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
     expect(client.getInstructions()).toMatch(/office-designer/);
     expect(client.getServerCapabilities()?.prompts).toBeTruthy();
-    expect(client.getServerVersion()?.name).toBe("agent-office");
     await client.close();
   });
 
@@ -96,7 +110,7 @@ describe("MCP over Streamable HTTP", () => {
 
   it("office-designer prompt: prompts/list + prompts/get", async () => {
     const o = await createOffice();
-    const { client } = await connect(o);
+    const { client } = await connect(o, { design: true });
     const { prompts } = await client.listPrompts();
     expect(prompts.map((p) => p.name)).toEqual(["office-designer"]);
     expect(prompts[0]!.arguments?.map((a) => a.name).sort()).toEqual(["company", "request"]);
@@ -112,7 +126,7 @@ describe("MCP over Streamable HTTP", () => {
 
   it("design tools over MCP: theme, custom kind, base64 upload, logo", async () => {
     const o = await createOffice();
-    const { client } = await connect(o);
+    const { client } = await connect(o, { design: true });
     await tool(client, "office_join", { name: "Designer", client: "claude-code" });
     const theme = await tool(client, "office_theme_set", { brand: { primary: "#e94d3d", dark: "#141414", accent: "#d28f88" } });
     expect(theme.isError).toBe(false);

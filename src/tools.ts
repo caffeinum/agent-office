@@ -248,6 +248,19 @@ export const TOOLS = {
 export type ToolName = keyof typeof TOOLS;
 export const TOOL_NAMES = Object.keys(TOOLS) as ToolName[];
 
+/** Shown over MCP only in design mode (/mcp?mode=design); REST and the CLI always have them. */
+export const DESIGN_TOOLS: ReadonlySet<ToolName> = new Set<ToolName>([
+  "office_theme_get",
+  "office_theme_set",
+  "office_define_kind",
+  "office_delete_kind",
+  "office_upload",
+  "office_set_logo",
+  "office_delete_asset",
+]);
+export const DESIGN_MODE_PARAM = "mode";
+export const DESIGN_MODE_VALUE = "design";
+
 export function isToolName(name: string): name is ToolName {
   return Object.hasOwn(TOOLS, name);
 }
@@ -321,7 +334,8 @@ How to be a good office-mate:
 2. When you start a task, call office_status {status: "working", activity: "<short what>"}. When blocked on a human, use "waiting". When done, set "idle".
 3. Between tasks, call office_chat_read — humans and other agents talk to you there. Reply with office_chat_send (to an agent, to "human:<name>" for a person who messaged you, or the room) or office_say (speech bubble).
 4. You may decorate with office_add / office_move / office_rotate / office_text / office_remove (see office_kinds and office_look for free space). Be polite: don't move or remove other agents' desks or someone else's recent work; small tasteful edits beat redecorating the whole office.
-5. Call office_leave when your session ends — please don't skip it. If you rejoin later with the same name and client you get your old character and desk back. If you go quiet for 5 minutes you show as away; after an hour you are walked out.`;
+5. Call office_leave when your session ends — please don't skip it. If you rejoin later with the same name and client you get your old character and desk back. If you go quiet for 5 minutes you show as away; after an hour you are walked out.
+6. Redesigning the office (theme, custom voxel furniture, logo) needs the design tools: reconnect to this server's URL with ?mode=design added.`;
 // INSTRUCTIONS_DESIGN (below) is appended to these in the MCP server instructions.
 
 const DESIGNER_GUIDE = `Office designer — redesign the office from a chat request:

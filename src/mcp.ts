@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { randomSecret } from "./auth";
 import { BIG_BODY_MAX, errorResponse, readJson } from "./http";
-import { DESIGNER_PROMPT, INSTRUCTIONS, INSTRUCTIONS_DESIGN, TOOL_NAMES, TOOLS, ToolError, type ToolName } from "./tools";
+import { DESIGN_MODE_PARAM, DESIGN_MODE_VALUE, DESIGN_TOOLS, DESIGNER_PROMPT, INSTRUCTIONS, INSTRUCTIONS_DESIGN, TOOL_NAMES, TOOLS, ToolError, type ToolName } from "./tools";
 import type { CallCtx, ToolHost } from "./office";
 
 const READ_ONLY = new Set<ToolName>(["office_look", "office_kinds", "office_chat_read", "office_theme_get"]);
@@ -17,9 +17,15 @@ function isInitialize(body: unknown): boolean {
   return msgs.some((m) => m && typeof m === "object" && (m as { method?: unknown }).method === "initialize");
 }
 
-export function buildServer(host: ToolHost, ctx: CallCtx): McpServer {
-  const server = new McpServer({ name: "agent-office", version: SERVER_VERSION }, { instructions: INSTRUCTIONS + INSTRUCTIONS_DESIGN });
+export function isDesignMode(req: Request): boolean {
+  return new URL(req.url).searchParams.get(DESIGN_MODE_PARAM) === DESIGN_MODE_VALUE;
+}
+
+export function buildServer(host: ToolHost, ctx: CallCtx, design: boolean): McpServer {
+  const instructions = design ? INSTRUCTIONS + INSTRUCTIONS_DESIGN : INSTRUCTIONS;
+  const server = new McpServer({ name: "agent-office", version: SERVER_VERSION }, { instructions });
   for (const name of TOOL_NAMES) {
+    if (!design && DESIGN_TOOLS.has(name)) continue;
     const def = TOOLS[name];
     server.registerTool(
       name,
@@ -40,6 +46,12 @@ export function buildServer(host: ToolHost, ctx: CallCtx): McpServer {
       },
     );
   }
+  if (design) registerDesignerPrompt(server);
+  server.server.registerCapabilities({ tools: { listChanged: false }, ...(design ? { prompts: { listChanged: false } } : {}) }); // no stream to announce changes on
+  return server;
+}
+
+function registerDesignerPrompt(server: McpServer) {
   server.registerPrompt(
     DESIGNER_PROMPT.name,
     { title: DESIGNER_PROMPT.title, description: DESIGNER_PROMPT.description, argsSchema: DESIGNER_PROMPT.argsSchema },
@@ -48,8 +60,6 @@ export function buildServer(host: ToolHost, ctx: CallCtx): McpServer {
       messages: [{ role: "user" as const, content: { type: "text" as const, text: DESIGNER_PROMPT.text(args) } }],
     }),
   );
-  server.server.registerCapabilities({ tools: { listChanged: false }, prompts: { listChanged: false } }); // no stream to announce changes on
-  return server;
 }
 
 export async function handleMcp(req: Request, host: ToolHost, base: CallCtx): Promise<Response> {
@@ -73,7 +83,7 @@ export async function handleMcp(req: Request, host: ToolHost, base: CallCtx): Pr
   }
   const sessionId = init ? randomSecret() : sessionHeader;
   if (init && sessionId) await host.startSession(sessionId);
-  const server = buildServer(host, { ...base, sessionId });
+  const server = buildServer(host, { ...base, sessionId }, isDesignMode(req));
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
   try {

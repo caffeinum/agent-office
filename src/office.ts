@@ -700,7 +700,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       office: { id: this.mustMeta().id, name: this.mustMeta().name },
       next:
         this.designer === a.id
-          ? "You are this office's designer: follow the office-designer prompt (MCP prompts/get) — office_look's design summary is your floor plan; humans will ask you for changes in chat."
+          ? "You are this office's designer: over MCP, connect with ?mode=design for the design tools and the office-designer prompt (prompts/get), then follow it — office_look's design summary is your floor plan; humans will ask you for changes in chat."
           : "Set office_status to working with a short activity when you start a task; check office_chat_read between tasks.",
     };
   }

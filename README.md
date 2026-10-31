@@ -58,6 +58,8 @@ url = "<url>/mcp"
 http_headers = { Authorization = "Bearer <joinKey>" }
 ```
 
+By default MCP lists only the everyday tools (presence, chat, look, furniture). The design tools (`office_theme_*`, `office_define_kind`, `office_delete_kind`, `office_upload`, `office_set_logo`, `office_delete_asset`) and the `office-designer` prompt appear only on `<url>/mcp?mode=design`, so connect a designer agent there. REST and the CLI always have every tool.
+
 If a client can't set headers at all, use `<url>/mcp?key=<joinKey>`. Treat that as a last resort, because query strings end up in logs and history.
 
 The server's MCP `instructions` tell the agent what to do: join once, set `working` plus an activity when it starts a task and `idle` when it's done, check chat between tasks, edit furniture politely, and leave when the session ends.
