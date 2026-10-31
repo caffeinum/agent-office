@@ -1,1 +1,119 @@
-/* STUB (W1) — owner W6. City UI styles, injected by public/js/city/app.js. */
+/* City UI (W6): labels, building panel, search, attribution footer. Injected by public/js/city/app.js. */
+
+.cu-ui {
+  --cu-font: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --cu-ink: #2b2420;
+  --cu-ink-2: #6d625a;
+  --cu-ink-3: #a1958b;
+  --cu-glass: rgba(255, 251, 245, 0.8);
+  --cu-glass-line: rgba(255, 255, 255, 0.9);
+  --cu-glass-shadow: 0 10px 40px rgba(80, 52, 30, 0.16), 0 1px 0 rgba(255, 255, 255, 0.6) inset;
+  --cu-chip: rgba(70, 50, 30, 0.07);
+  --cu-accent: #e8794a;
+  --cu-gutter: 14px;
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--cu-ink);
+  font: 14px/1.4 var(--cu-font);
+  -webkit-font-smoothing: antialiased;
+}
+.cu-ui[data-theme="night"] {
+  --cu-ink: #f1ecf7;
+  --cu-ink-2: #b9b2cc;
+  --cu-ink-3: #8a83a3;
+  --cu-glass: rgba(28, 30, 58, 0.78);
+  --cu-glass-line: rgba(255, 255, 255, 0.12);
+  --cu-glass-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  --cu-chip: rgba(255, 255, 255, 0.08);
+}
+.cu-ui button, .cu-ui input { font: inherit; color: inherit; }
+.cu-ui [hidden] { display: none !important; }
+
+.cu-glass {
+  background: var(--cu-glass);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--cu-glass-line);
+  box-shadow: var(--cu-glass-shadow);
+  border-radius: 16px;
+  pointer-events: auto;
+}
+.cu-sw { flex: none; display: inline-block; width: 9px; height: 9px; border-radius: 2px; background: var(--c); box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.18); }
+
+/* ── label chips ─────────────────────────────────────────────────────────────────── */
+
+.cu-labels { position: absolute; inset: 0; pointer-events: none; }
+.cu-chip {
+  position: absolute; left: 0; top: 0;
+  display: flex; flex-direction: column; align-items: stretch; gap: 1px;
+  padding: 3px 8px 3px 6px; border: 0; border-radius: 10px;
+  background: rgba(255, 252, 247, 0.93); color: #2b2420;
+  box-shadow: 0 2px 8px rgba(60, 40, 20, 0.2);
+  font-size: 12px; line-height: 1.35; white-space: nowrap; text-align: left;
+  pointer-events: auto; cursor: pointer; will-change: transform;
+}
+.cu-chip::after { content: ""; position: absolute; left: 50%; bottom: -4px; width: 8px; height: 8px; background: inherit; transform: translateX(-50%) rotate(45deg); border-radius: 1px; }
+.cu-chip:hover, .cu-chip:focus-visible { outline: 2px solid var(--cu-accent); outline-offset: 1px; }
+.cu-chip-row { display: flex; align-items: center; gap: 5px; }
+.cu-chip-row b { font-weight: 700; }
+.cu-chip-row.former { color: #9a9088; }
+.cu-chip-row.former b { font-weight: 600; text-decoration: line-through; text-decoration-color: rgba(0, 0, 0, 0.25); }
+.cu-chip-row.former .cu-sw { filter: grayscale(1); opacity: 0.6; }
+.cu-chip-row small { font-size: 10px; color: #a1958b; }
+.cu-badge { margin-left: 2px; padding: 0 6px; border-radius: 8px; background: var(--c); color: #fff; font-size: 10.5px; font-weight: 700; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25); }
+
+/* ── search ──────────────────────────────────────────────────────────────────────── */
+
+.cu-search { position: absolute; left: var(--cu-gutter); top: var(--cu-gutter); width: min(320px, calc(100vw - 2 * var(--cu-gutter))); padding: 6px; }
+.cu-search-input { width: 100%; padding: 8px 11px; border: 1px solid transparent; border-radius: 11px; background: var(--cu-chip); outline: none; font-size: 14px; }
+.cu-search-input:focus { border-color: var(--cu-accent); }
+.cu-results { list-style: none; margin: 6px 0 0; padding: 0; max-height: min(50vh, 360px); overflow-y: auto; }
+.cu-result { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 8px; padding: 7px 9px; border-radius: 10px; cursor: pointer; }
+.cu-result small { grid-column: 2; color: var(--cu-ink-2); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cu-result.on, .cu-result:hover { background: var(--cu-chip); }
+.cu-result.former b { color: var(--cu-ink-3); }
+.cu-result.none { display: block; color: var(--cu-ink-3); cursor: default; }
+
+/* ── building panel ──────────────────────────────────────────────────────────────── */
+
+.cu-panel { position: absolute; right: var(--cu-gutter); top: var(--cu-gutter); width: min(340px, calc(100vw - 2 * var(--cu-gutter))); max-height: calc(100% - 2 * var(--cu-gutter) - 48px); display: flex; flex-direction: column; overflow: hidden; }
+.cu-panel-head { display: flex; align-items: center; gap: 8px; padding: 12px 10px 8px 16px; }
+.cu-panel-title { flex: 1; margin: 0; font-size: 15px; font-weight: 800; letter-spacing: -0.01em; }
+.cu-close { flex: none; width: 30px; height: 30px; border: 0; border-radius: 10px; background: var(--cu-chip); font-size: 18px; line-height: 1; cursor: pointer; }
+.cu-panel-body { overflow-y: auto; padding: 0 10px 10px; display: flex; flex-direction: column; gap: 8px; }
+.cu-panel.empty .cu-panel-body { display: none; }
+.cu-site { padding: 10px 12px; border-radius: 12px; background: var(--cu-chip); box-shadow: inset 3px 0 0 var(--c); }
+.cu-site header { display: flex; align-items: center; gap: 7px; }
+.cu-site header b { flex: 1; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cu-site.former { opacity: 0.7; }
+.cu-site.former .cu-sw { filter: grayscale(1); }
+.cu-status { flex: none; padding: 1px 7px; border-radius: 8px; background: var(--cu-chip); color: var(--cu-ink-2); font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.cu-status.hq { background: rgba(232, 121, 74, 0.16); color: #b8552c; }
+.cu-ui[data-theme="night"] .cu-status.hq { color: #f2a07d; }
+.cu-addr { margin: 4px 0 0; font-size: 13px; }
+.cu-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 2px 0 0; color: var(--cu-ink-2); font-size: 11.5px; }
+.cu-note { margin: 4px 0 0; color: var(--cu-ink-3); font-size: 11.5px; }
+.cu-srcs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.cu-src { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 2px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.55); color: var(--cu-ink); font-size: 11.5px; text-decoration: none; }
+.cu-ui[data-theme="night"] .cu-src { background: rgba(255, 255, 255, 0.08); }
+.cu-src:hover { box-shadow: inset 0 0 0 1px var(--cu-accent); }
+.cu-src-kind { color: var(--cu-ink-3); font-size: 10.5px; }
+.cu-src-host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cu-src time { color: var(--cu-ink-3); font-size: 10.5px; }
+
+/* ── attribution footer, errors ──────────────────────────────────────────────────── */
+
+.cu-attrib { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); max-width: calc(100vw - 2 * var(--cu-gutter)); padding: 4px 12px; border-radius: 10px; color: var(--cu-ink-2); font-size: 11px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.cu-attrib.open { white-space: normal; }
+.cu-error { position: absolute; left: 50%; top: 72px; transform: translateX(-50%); max-width: calc(100vw - 2 * var(--cu-gutter)); padding: 8px 14px; border-radius: 12px; background: #e0614f; color: #fff; font-weight: 700; font-size: 13px; pointer-events: auto; box-shadow: 0 6px 20px rgba(120, 30, 20, 0.3); }
+
+@media (max-width: 640px) {
+  .cu-ui { --cu-gutter: 10px; }
+  .cu-search { width: calc(100vw - 2 * var(--cu-gutter)); }
+  .cu-panel { top: auto; bottom: 40px; right: var(--cu-gutter); width: calc(100vw - 2 * var(--cu-gutter)); max-height: 46vh; }
+  .cu-attrib { left: var(--cu-gutter); right: var(--cu-gutter); transform: none; max-width: none; text-align: center; }
+  .cu-chip { font-size: 11px; padding: 2px 7px 2px 5px; }
+}
