@@ -36,6 +36,12 @@ async function route(req: Request, env: Env): Promise<Response> {
     return withCors(await officeStub(env, office).fetch(req));
   }
   if (path.startsWith("/api/")) return errorResponse(404, `no route ${path}`);
+  const asset = /^\/o\/([^/]+)\/assets\/[^/]+$/.exec(path);
+  if (asset) {
+    // asset ids are content hashes nobody can guess, and <img>/texture loads can't send keys: no key needed
+    if (!OFFICE_ID_RE.test(asset[1]!)) return errorResponse(404, "no such office");
+    return officeStub(env, asset[1]!).fetch(req);
+  }
   const ws = /^\/o\/([^/]+)\/ws$/.exec(path);
   if (ws) {
     const office = ws[1]!;
@@ -44,8 +50,8 @@ async function route(req: Request, env: Env): Promise<Response> {
     }
     return officeStub(env, office).fetch(req);
   }
-  const asset = await env.ASSETS.fetch(req);
-  const out = new Response(asset.body, asset);
+  const page = await env.ASSETS.fetch(req);
+  const out = new Response(page.body, page);
   out.headers.set("referrer-policy", "no-referrer");
   out.headers.set("x-content-type-options", "nosniff");
   return out;

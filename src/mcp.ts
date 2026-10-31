@@ -4,12 +4,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { randomSecret } from "./auth";
-import { errorResponse, readJson } from "./http";
-import { INSTRUCTIONS, TOOL_NAMES, TOOLS, ToolError, type ToolName } from "./tools";
+import { BIG_BODY_MAX, errorResponse, readJson } from "./http";
+import { DESIGNER_PROMPT, INSTRUCTIONS, INSTRUCTIONS_DESIGN, TOOL_NAMES, TOOLS, ToolError, type ToolName } from "./tools";
 import type { CallCtx, ToolHost } from "./office";
 
-const READ_ONLY = new Set<ToolName>(["office_look", "office_kinds", "office_chat_read"]);
-const DESTRUCTIVE = new Set<ToolName>(["office_remove", "office_leave"]);
+const READ_ONLY = new Set<ToolName>(["office_look", "office_kinds", "office_chat_read", "office_theme_get"]);
+const DESTRUCTIVE = new Set<ToolName>(["office_remove", "office_leave", "office_delete_kind", "office_delete_asset"]);
 export const SERVER_VERSION = "0.1.0";
 
 function isInitialize(body: unknown): boolean {
@@ -18,7 +18,7 @@ function isInitialize(body: unknown): boolean {
 }
 
 export function buildServer(host: ToolHost, ctx: CallCtx): McpServer {
-  const server = new McpServer({ name: "agent-office", version: SERVER_VERSION }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: "agent-office", version: SERVER_VERSION }, { instructions: INSTRUCTIONS + INSTRUCTIONS_DESIGN });
   for (const name of TOOL_NAMES) {
     const def = TOOLS[name];
     server.registerTool(
@@ -40,7 +40,15 @@ export function buildServer(host: ToolHost, ctx: CallCtx): McpServer {
       },
     );
   }
-  server.server.registerCapabilities({ tools: { listChanged: false } }); // no stream to announce changes on
+  server.registerPrompt(
+    DESIGNER_PROMPT.name,
+    { title: DESIGNER_PROMPT.title, description: DESIGNER_PROMPT.description, argsSchema: DESIGNER_PROMPT.argsSchema },
+    (args) => ({
+      description: DESIGNER_PROMPT.description,
+      messages: [{ role: "user" as const, content: { type: "text" as const, text: DESIGNER_PROMPT.text(args) } }],
+    }),
+  );
+  server.server.registerCapabilities({ tools: { listChanged: false }, prompts: { listChanged: false } }); // no stream to announce changes on
   return server;
 }
 
@@ -56,7 +64,7 @@ export async function handleMcp(req: Request, host: ToolHost, base: CallCtx): Pr
     return new Response(null, { status: 204 });
   }
   if (req.method !== "POST") return errorResponse(405, `method ${req.method} not allowed on /mcp`);
-  const body = await readJson(req);
+  const body = await readJson(req, BIG_BODY_MAX);
   if (body === undefined) return errorResponse(400, "empty JSON-RPC body");
   const init = isInitialize(body);
   if (!init) {

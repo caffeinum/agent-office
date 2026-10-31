@@ -1,8 +1,13 @@
 // One Durable Object per office: furniture, agents, chat, viewer WebSockets (hibernation API) and presence.
 import { DurableObject } from "cloudflare:workers";
-import { applyOp, defaultLayout, findFreeSpot, GRID, KINDS, MAX_AGENTS, MAX_ITEMS, OfficeError, TEXT_MAX, type Grid, type Item, type Op } from "./shared/catalog";
+import { applyOp, defaultLayout, findFreeSpot, GRID, KINDS, kindOf, MAX_AGENTS, MAX_ITEMS, OfficeError, TEXT_MAX, validateLayout, type Grid, type Item, type Op } from "./shared/catalog";
+import {
+  allSpots, brandTheme, BOXES_MAX, describeTheme, CUSTOM_KINDS_MAX, DEFAULT_THEME, designSummary, FOOTPRINT_MAX, HEIGHT_MAX, mergeTheme, summarizeKind, ThemeError,
+  UNITS, validateKindDef, validateTheme, type CustomKind, type Theme, type ThemePatch,
+} from "./shared/design";
+import { ASSET_BYTES_MAX, ASSET_DIM_MAX, ASSETS_MAX, ASSETS_TOTAL_MAX, decodeBase64, sniffImage } from "./images";
 import { newOfficeKey, randomSecret, roleOfKey, sha256hex, keyFromRequest, WS_PROTOCOL, type KeyHashes, type Role } from "./auth";
-import { errorResponse, HttpError, json, readJson } from "./http";
+import { CORS_HEADERS, errorResponse, HttpError, json, readJson } from "./http";
 import { NAME_MAX, parseArgs, parseOwnerFrame, ToolError, type Status, type ToolArgs, type ToolName, ACTIVITY_MAX } from "./tools";
 import { handleMcp } from "./mcp";
 import { handleRest } from "./api";
@@ -16,7 +21,7 @@ export const RATE_WINDOW_MS = 10_000;
 export const RATE_MAX = 30;
 export const IP_RATE_MAX = 120;
 export const WS_FRAME_MAX = 4096;
-export const WS_RATE_MAX = 20;
+export const WS_RATE_MAX = 30;
 export const JOIN_WINDOW_MS = 60_000;
 export const JOIN_RATE_MAX = 10;
 /** Desks the office adds by itself when every desk is taken; beyond this, late joiners stand. */
@@ -25,6 +30,12 @@ export const MAX_MCP_SESSIONS = 2000;
 export const MCP_SESSION_TTL_MS = 7 * 24 * 60 * 60_000;
 /** A same-name+client agent counts as "still at work" (and is not reclaimed by a new join) while seen this recently. */
 export const RECLAIM_AFTER_MS = 90_000;
+/** Storage schema: 1 = meta/items/agents/chat only; 2 = + theme, custom kinds ("kind:<slug>"), assets table, designer. */
+export const SCHEMA_VERSION = 2;
+export const UPLOAD_WINDOW_MS = 60_000;
+export const UPLOAD_RATE_MAX = 10;
+const ASSETS_DDL =
+  "CREATE TABLE IF NOT EXISTS assets (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, w INTEGER NOT NULL, h INTEGER NOT NULL, size INTEGER NOT NULL, by TEXT NOT NULL, at INTEGER NOT NULL, bytes BLOB NOT NULL)";
 
 export interface Agent {
   id: string;
@@ -54,6 +65,19 @@ export interface ChatMsg {
   ts: number;
 }
 
+/** Asset metadata (the bytes stay in SQLite). url is office-relative: /o/:office/assets/:id */
+export interface AssetMeta {
+  id: string;
+  url: string;
+  name: string;
+  type: string;
+  w: number;
+  h: number;
+  size: number;
+  by: string;
+  at: number;
+}
+
 export interface OfficeState {
   id: string;
   name: string;
@@ -61,6 +85,11 @@ export interface OfficeState {
   items: Item[];
   agents: Agent[];
   chat: ChatMsg[];
+  theme: Theme;
+  customKinds: CustomKind[];
+  assets: AssetMeta[];
+  /** Agent id the owner marked as the office's designer, or null. */
+  designer: string | null;
 }
 
 interface Meta {
@@ -76,10 +105,14 @@ export interface CallCtx {
   token: string | null;
   sessionId: string | null;
   ip: string;
+  /** Request origin, for absolute asset urls in tool results. */
+  origin: string;
 }
 
 export interface ToolHost {
   callTool(name: ToolName, args: unknown, ctx: CallCtx): Promise<unknown>;
+  /** Raw-body upload (REST): same checks and result as office_upload. */
+  upload(bytes: Uint8Array, filename: string, contentType: string | undefined, ctx: CallCtx): Promise<unknown>;
   startSession(sessionId: string): Promise<void>;
   hasSession(sessionId: string): Promise<boolean>;
   endSession(sessionId: string): Promise<void>;
@@ -92,7 +125,16 @@ type Frame =
   | { type: "item"; item: Item }
   | { type: "item-removed"; id: string }
   | { type: "chat"; msg: ChatMsg }
-  | { type: "error"; error: string };
+  | { type: "theme"; theme: Theme }
+  | { type: "kind"; kind: CustomKind }
+  | { type: "kind-removed"; kind: string }
+  | { type: "asset"; asset: AssetMeta }
+  | { type: "asset-removed"; id: string }
+  | { type: "designer"; id: string | null }
+  | { type: "error"; error: string; retryAfter?: number };
+
+/** Tools a human with the ownerKey may call without joining (acting as "human:owner"). */
+const OWNER_TOOLS = new Set<ToolName>(["office_theme_get", "office_theme_set", "office_define_kind", "office_delete_kind", "office_upload", "office_set_logo", "office_delete_asset"]);
 
 interface WsAttachment {
   role: Role;
@@ -124,25 +166,66 @@ export class Office extends DurableObject<Env> implements ToolHost {
   private byToken = new Map<string, string>();
   private sessions = new Map<string, string>();
   private hits = new Map<string, number[]>();
+  private wsWarned = new Map<string, number>();
   private mcpSessions = new Map<string, number>();
   private alarmAt: number | null = null;
+  private theme: Theme = validateTheme(DEFAULT_THEME);
+  private customKinds: Record<string, CustomKind> = {};
+  private assets = new Map<string, AssetMeta>();
+  private designer: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}'));
-    ctx.blockConcurrencyWhile(async () => {
-      this.meta = (await ctx.storage.get<Meta>("meta")) ?? null;
-      if (!this.meta) return;
-      for (const [, it] of await ctx.storage.list<Item>({ prefix: "item:" })) this.items.set(it.id, it);
-      for (const [, a] of await ctx.storage.list<AgentRecord>({ prefix: "agent:" })) {
-        this.agents.set(a.id, a);
-        this.byToken.set(a.tokenHash, a.id);
-        for (const s of a.sessions) this.sessions.set(s, a.id);
-      }
-      this.chat = (await ctx.storage.get<ChatMsg[]>("chat")) ?? [];
-      for (const [k, at] of await ctx.storage.list<number>({ prefix: "mcps:" })) this.mcpSessions.set(k.slice(5), at);
-      this.alarmAt = await ctx.storage.getAlarm();
-    });
+    ctx.blockConcurrencyWhile(() => this.load());
+  }
+
+  /** Loads the office from storage (migrating older schemas first). Runs once, in the constructor. */
+  private async load(): Promise<void> {
+    const ctx = this.ctx;
+    this.meta = (await ctx.storage.get<Meta>("meta")) ?? null;
+    if (!this.meta) return;
+    await this.migrate();
+    for (const [, it] of await ctx.storage.list<Item>({ prefix: "item:" })) this.items.set(it.id, it);
+    for (const [, a] of await ctx.storage.list<AgentRecord>({ prefix: "agent:" })) {
+      this.agents.set(a.id, a);
+      this.byToken.set(a.tokenHash, a.id);
+      for (const s of a.sessions) this.sessions.set(s, a.id);
+    }
+    this.chat = (await ctx.storage.get<ChatMsg[]>("chat")) ?? [];
+    for (const [k, at] of await ctx.storage.list<number>({ prefix: "mcps:" })) this.mcpSessions.set(k.slice(5), at);
+    this.alarmAt = await ctx.storage.getAlarm();
+    this.theme = await this.loadTheme();
+    for (const [, k] of await ctx.storage.list<CustomKind>({ prefix: "kind:" })) this.customKinds[k.kind] = k;
+    this.designer = (await ctx.storage.get<string>("designer")) ?? null;
+    const rows = ctx.storage.sql.exec<{ id: string; name: string; type: string; w: number; h: number; size: number; by: string; at: number }>(
+      "SELECT id, name, type, w, h, size, by, at FROM assets ORDER BY at",
+    );
+    for (const r of rows) this.assets.set(r.id, { ...r, url: this.assetUrl(r.id) });
+  }
+
+  /** Brings a stored office up to SCHEMA_VERSION. v1 offices get the default theme and an empty assets table. */
+  private async migrate(): Promise<void> {
+    this.ctx.storage.sql.exec(ASSETS_DDL);
+    const version = (await this.ctx.storage.get<number>("schema")) ?? 1;
+    if (version > SCHEMA_VERSION) throw new Error(`office storage is schema ${version}, this build understands up to ${SCHEMA_VERSION}`);
+    if (version < 2) await this.ctx.storage.put({ schema: SCHEMA_VERSION, theme: DEFAULT_THEME });
+  }
+
+  /**
+   * The stored theme, filled up to today's shape: a theme written before a field existed gets that field's
+   * default (merged over DEFAULT_THEME) and is written back. Unknown or invalid fields still fail loudly.
+   */
+  private async loadTheme(): Promise<Theme> {
+    const stored = await this.ctx.storage.get<Theme>("theme");
+    if (!stored) return DEFAULT_THEME;
+    const theme = mergeTheme(DEFAULT_THEME, stored) as Theme;
+    if (JSON.stringify(theme) !== JSON.stringify(stored)) await this.ctx.storage.put("theme", theme);
+    return theme;
+  }
+
+  private assetUrl(id: string): string {
+    return `/o/${this.mustMeta().id}/assets/${id}`;
   }
 
   // ---------- HTTP entry (the worker forwards here) ----------
@@ -152,22 +235,25 @@ export class Office extends DurableObject<Env> implements ToolHost {
       const url = new URL(req.url);
       if (url.pathname === "/internal/init") return await this.init(req);
       if (!this.meta) return errorResponse(404, "no such office");
+      const asset = /^\/o\/[^/]+\/assets\/([^/]+)$/.exec(url.pathname);
+      if (asset) return this.serveAsset(req, asset[1]!);
       const ip = req.headers.get("cf-connecting-ip") ?? "local";
       this.rateLimit(`ip:${ip}`, IP_RATE_MAX);
       const role = await roleOfKey(keyFromRequest(req), this.meta.keys);
       if (!role) return errorResponse(401, "missing or wrong key for this office (Authorization: Bearer <key> or ?key=)");
       if (/^\/o\/[^/]+\/ws$/.test(url.pathname)) return this.acceptViewer(req, role);
-      const base = { role, token: req.headers.get("x-agent-token"), sessionId: null, ip } satisfies CallCtx;
+      const base = { role, token: req.headers.get("x-agent-token"), sessionId: null, ip, origin: url.origin } satisfies CallCtx;
       if (url.pathname === "/mcp") {
         if (role === "view") return errorResponse(403, "a viewKey is read-only; MCP needs the joinKey");
         return await handleMcp(req, this, base);
       }
       const m = /^\/api\/o\/[^/]+\/([a-z_-]+)$/.exec(url.pathname);
-      if (m && (m[1] === "kick" || m[1] === "rotate-keys" || m[1] === "rotate_keys")) {
+      if (m && (m[1] === "kick" || m[1] === "rotate-keys" || m[1] === "rotate_keys" || m[1] === "designer")) {
         if (role !== "owner") return errorResponse(403, `${m[1]} needs the ownerKey`);
         if (req.method !== "POST") return errorResponse(405, `POST /api/o/:office/${m[1]}`);
         const body = ((await readJson(req)) ?? {}) as Record<string, unknown>;
         if (m[1] === "kick") return json(200, await this.kick(body.id, "human:owner"));
+        if (m[1] === "designer") return json(200, await this.setDesigner(body.id));
         return json(200, await this.rotateKeys(body.which, new URL(req.url).origin));
       }
       if (m) {
@@ -182,7 +268,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   private errorToResponse(e: unknown): Response {
     if (e instanceof ToolError || e instanceof HttpError) return errorResponse(e.status, e.message, e.extra);
-    if (e instanceof OfficeError) return errorResponse(400, e.message);
+    if (e instanceof OfficeError || e instanceof ThemeError) return errorResponse(400, e.message);
     console.error("office: unexpected error", e);
     return errorResponse(500, "internal error");
   }
@@ -192,7 +278,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
     const body = (await readJson(req)) as { id: string; name: string; keys: KeyHashes };
     const meta: Meta = { id: body.id, name: body.name, grid: { ...GRID }, keys: body.keys, createdAt: Date.now() };
     const items = defaultLayout(meta.createdAt);
-    const puts: Record<string, unknown> = { meta };
+    const puts: Record<string, unknown> = { meta, schema: SCHEMA_VERSION, theme: DEFAULT_THEME };
+    this.ctx.storage.sql.exec(ASSETS_DDL);
     for (const it of items) puts[`item:${it.id}`] = it;
     await this.ctx.storage.put(puts);
     this.meta = meta;
@@ -223,6 +310,10 @@ export class Office extends DurableObject<Env> implements ToolHost {
       items: [...this.items.values()],
       agents: [...this.agents.values()].map(publicAgent),
       chat: this.chat,
+      theme: this.theme,
+      customKinds: Object.values(this.customKinds),
+      assets: [...this.assets.values()],
+      designer: this.designer,
     };
   }
 
@@ -252,6 +343,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
   }
 
   private async removeAgent(a: AgentRecord): Promise<void> {
+    if (this.designer === a.id) await this.setDesigner(null);
     this.agents.delete(a.id);
     this.byToken.delete(a.tokenHash);
     for (const s of a.sessions) this.sessions.delete(s);
@@ -269,7 +361,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
   }
 
   private async applyItemOp(op: unknown, by: string): Promise<{ item: Item | null; removed: string | null }> {
-    const res = applyOp(this.itemList(), op as Op, by, { grid: this.mustMeta().grid, now: Date.now() });
+    const res = applyOp(this.itemList(), op as Op, by, { grid: this.mustMeta().grid, now: Date.now(), kinds: this.customKinds });
     const item = res.item ?? null;
     const removed = res.removed ?? null;
     if (item) {
@@ -302,7 +394,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     if (this.items.size >= MAX_ITEMS) return;
     const autoDesks = [...this.items.values()].filter((it) => it.kind === "desk" && it.by === "office").length;
     if (autoDesks >= MAX_AUTO_DESKS) return;
-    const spot = findFreeSpot(this.itemList(), this.mustMeta().grid, "desk", 0);
+    const spot = findFreeSpot(this.itemList(), this.mustMeta().grid, "desk", 0, this.customKinds);
     if (!spot) return;
     const { item } = await this.applyItemOp({ op: "add", kind: "desk", x: spot.x, z: spot.z, rot: 0 }, "office");
     if (item) a.deskId = item.id;
@@ -415,7 +507,11 @@ export class Office extends DurableObject<Env> implements ToolHost {
   async callTool(name: ToolName, rawArgs: unknown, ctx: CallCtx): Promise<unknown> {
     this.mustMeta();
     const args = parseArgs(name, rawArgs) as Record<string, unknown> & { agentToken?: string };
-    if (name === "office_kinds") return this.kinds();
+    if (name === "office_kinds") return this.kinds((args as ToolArgs<"office_kinds">).kind);
+    if (OWNER_TOOLS.has(name)) {
+      const by = await this.designActor(ctx, args.agentToken);
+      return this.designTool(name, args, by, ctx);
+    }
     if (name === "office_join") {
       this.rateLimit(`join:${ctx.ip}`, JOIN_RATE_MAX, JOIN_WINDOW_MS);
       return this.join(args as ToolArgs<"office_join">, ctx);
@@ -509,8 +605,10 @@ export class Office extends DurableObject<Env> implements ToolHost {
     if (sitter) throw new ToolError(409, `${id} is ${sitter.name}'s desk — be a polite office-mate and don't ${verb} it`);
   }
 
-  /** Chat target: an agent id or name, or "human:<name>" for a person watching the office. */
-  private chatTarget(ref: string): string {
+  /** Chat target: an agent id or name, "human:<name>" for a person watching the office, or null (the room) for "room"/"all"/"everyone" when no agent has that name. */
+  private chatTarget(ref: string): string | null {
+    const roomAlias = ["room", "all", "everyone"].includes(ref.trim().toLowerCase());
+    if (roomAlias && !this.agents.has(ref) && ![...this.agents.values()].some((a) => a.name.toLowerCase() === ref.trim().toLowerCase())) return null;
     if (ref.startsWith("human:")) {
       const name = ref.slice(6).trim();
       if (!name || name.length > NAME_MAX) throw new ToolError(400, `"human:<name>" needs a name of 1-${NAME_MAX} chars`);
@@ -525,7 +623,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     const byName = [...this.agents.values()].filter((a) => a.name.toLowerCase() === lower);
     if (byName.length === 1) return byName[0]!.id;
     if (byName.length > 1) throw new ToolError(400, `"${ref}" matches ${byName.length} agents — use an agent id (${byName.map((a) => a.id).join(", ")})`);
-    throw new ToolError(404, `no agent "${ref}" in the office (office_look lists who is here)`);
+    throw new ToolError(404, `no agent "${ref}" in the office (office_look lists who is here; omit "to" to post to the room, or use "human:<name>" to answer a person)`);
   }
 
   private namesFor(msgs: ChatMsg[]): Record<string, string> {
@@ -541,16 +639,25 @@ export class Office extends DurableObject<Env> implements ToolHost {
     return names;
   }
 
-  private kinds() {
+  private kinds(one?: string) {
+    if (one !== undefined) {
+      const k = kindOf(one, this.customKinds);
+      if (!k) throw new ToolError(404, `no kind "${one}" (built-ins: ${Object.keys(KINDS).join(", ")}; custom: ${Object.keys(this.customKinds).join(", ") || "none"})`);
+      return { kind: one, ...k };
+    }
     return {
       grid: this.mustMeta().grid,
       kinds: KINDS,
+      custom: Object.fromEntries(Object.values(this.customKinds).map((k) => [k.kind, summarizeKind(k)])),
+      limits: { customKinds: CUSTOM_KINDS_MAX, boxesPerKind: BOXES_MAX, footprintMax: FOOTPRINT_MAX, unitsPerCell: UNITS, heightMax: HEIGHT_MAX, assets: ASSETS_MAX, assetBytes: ASSET_BYTES_MAX, assetPx: ASSET_DIM_MAX },
       rules: [
         "(x, z) is the footprint's min corner; x runs along the back wall, z away from it.",
         "rot 90/270 swaps a footprint's w and d. A model's front faces +z at rot 0.",
         "Items collide only within their layer: rugs (floor) lie under furniture, wall items hang above it.",
         "Wall kinds hang on a wall: rot 0 with z 0 (back wall) or rot 90 with x 0 (left wall).",
         `Text (sign, poster, whiteboard) ≤ ${TEXT_MAX} chars.`,
+        "Seats/stations are in local units (16 per cell) from the footprint's min corner at rot 0; office_look lists them placed in the world.",
+        "Custom kinds: office_define_kind (voxel boxes), then office_add like any built-in; office_kinds {kind} returns a kind in full.",
       ],
     };
   }
@@ -591,7 +698,10 @@ export class Office extends DurableObject<Env> implements ToolHost {
       agent: publicAgent(a),
       desk: desk ? { id: desk.id, x: desk.x, z: desk.z, rot: desk.rot } : null,
       office: { id: this.mustMeta().id, name: this.mustMeta().name },
-      next: "Set office_status to working with a short activity when you start a task; check office_chat_read between tasks.",
+      next:
+        this.designer === a.id
+          ? "You are this office's designer: follow the office-designer prompt (MCP prompts/get) — office_look's design summary is your floor plan; humans will ask you for changes in chat."
+          : "Set office_status to working with a short activity when you start a task; check office_chat_read between tasks.",
     };
   }
 
@@ -603,6 +713,183 @@ export class Office extends DurableObject<Env> implements ToolHost {
         .filter((a) => a.name.toLowerCase() === n && (a.client ?? "") === (client ?? "") && now - a.lastSeen > RECLAIM_AFTER_MS)
         .sort((p, q) => q.lastSeen - p.lastSeen)[0] ?? null
     );
+  }
+
+  // ---------- design: theme, custom kinds, assets, designer ----------
+
+  /** Who is acting on a design tool: a joined agent (touched + rate limited), or the owner without joining. */
+  private async designActor(ctx: CallCtx, explicit: string | undefined): Promise<string> {
+    const agent = await this.resolveAgent(ctx, explicit);
+    if (!agent) {
+      if (ctx.role !== "owner") await this.requireAgent(ctx, explicit);
+      this.rateLimit("owner-api", RATE_MAX);
+      return "human:owner";
+    }
+    this.rateLimit(`agent:${agent.id}`, RATE_MAX);
+    const changed = this.touch(agent);
+    await this.saveAgent(agent, changed);
+    await this.scheduleAlarm();
+    return agent.id;
+  }
+
+  private async designTool(name: ToolName, args: Record<string, unknown>, by: string, ctx: CallCtx): Promise<unknown> {
+    switch (name) {
+      case "office_theme_get":
+        return { theme: this.theme, summary: describeTheme(this.theme), assets: this.assetList(ctx.origin) };
+      case "office_theme_set": {
+        const { theme, brand } = args as ToolArgs<"office_theme_set">;
+        if (!theme && !brand) throw new ToolError(400, "office_theme_set needs `theme` (the parts to change) and/or `brand` {primary, dark?, accent?}");
+        return this.setTheme(theme as ThemePatch | undefined, brand);
+      }
+      case "office_set_logo": {
+        const { assetId, onSigns } = args as ToolArgs<"office_set_logo">;
+        return this.setTheme(onSigns === undefined ? { logo: assetId } : { logo: assetId, logoOnSigns: onSigns }, undefined);
+      }
+      case "office_define_kind": {
+        const { agentToken: _t, ...def } = args as ToolArgs<"office_define_kind">;
+        return this.defineKind(def, by);
+      }
+      case "office_delete_kind":
+        return this.deleteKind((args as ToolArgs<"office_delete_kind">).kind);
+      case "office_upload": {
+        const { filename, contentType, base64 } = args as ToolArgs<"office_upload">;
+        return this.storeAsset(decodeBase64(base64), filename, contentType, by, ctx.origin);
+      }
+      case "office_delete_asset":
+        return this.deleteAsset((args as ToolArgs<"office_delete_asset">).assetId);
+      default:
+        throw new ToolError(400, `unknown design tool ${name}`);
+    }
+  }
+
+  async upload(bytes: Uint8Array, filename: string, contentType: string | undefined, ctx: CallCtx): Promise<unknown> {
+    this.mustMeta();
+    const by = await this.designActor(ctx, undefined);
+    return this.storeAsset(bytes, filename, contentType, by, ctx.origin);
+  }
+
+  private async setTheme(patch: ThemePatch | undefined, brand: { primary: string; dark?: string; accent?: string } | undefined) {
+    let next = brand ? brandTheme(brand, this.theme) : this.theme;
+    if (patch) next = mergeTheme(next, patch);
+    if (next.logo && !this.assets.has(next.logo)) throw new ToolError(404, `no asset ${next.logo} in this office — office_upload it first (office_theme_get lists assets)`);
+    this.theme = next;
+    await this.ctx.storage.put("theme", next);
+    this.broadcast({ type: "theme", theme: next });
+    return { ok: true, theme: next };
+  }
+
+  private async defineKind(def: unknown, by: string) {
+    let kind: CustomKind;
+    try {
+      kind = validateKindDef(def);
+    } catch (e) {
+      if (e instanceof OfficeError) throw new ToolError(400, `office_define_kind: ${e.message}`);
+      throw e;
+    }
+    const existing = this.customKinds[kind.kind];
+    if (!existing && Object.keys(this.customKinds).length >= CUSTOM_KINDS_MAX) {
+      throw new ToolError(409, `this office already has ${CUSTOM_KINDS_MAX} custom kinds — office_delete_kind one you no longer use`);
+    }
+    const stored: CustomKind = { ...kind, by, at: Date.now() };
+    const next = { ...this.customKinds, [kind.kind]: stored };
+    const placed = this.itemList().filter((it) => it.kind === kind.kind);
+    if (placed.length) {
+      try {
+        validateLayout(this.itemList(), this.mustMeta().grid, next);
+      } catch (e) {
+        if (e instanceof OfficeError) throw new ToolError(409, `can't redefine ${kind.kind}: with the new shape ${e.message} — move or remove the placed ones first`);
+        throw e;
+      }
+    }
+    this.customKinds = next;
+    await this.ctx.storage.put(`kind:${kind.kind}`, stored);
+    this.broadcast({ type: "kind", kind: stored });
+    return {
+      ok: true,
+      kind: { kind: kind.kind, ...summarizeKind(stored) },
+      updated: existing ? placed.map((it) => it.id) : undefined,
+      next: placed.length ? undefined : `place it: office_add {kind: "${kind.kind}", x, z, rot}`,
+    };
+  }
+
+  private async deleteKind(slug: string) {
+    if (kindOf(slug)) throw new ToolError(400, `${slug} is a built-in kind`);
+    if (!this.customKinds[slug]) throw new ToolError(404, `no custom kind "${slug}" (custom kinds: ${Object.keys(this.customKinds).join(", ") || "none"})`);
+    const placed = this.itemList().filter((it) => it.kind === slug).map((it) => it.id);
+    if (placed.length) throw new ToolError(409, `${slug} is in use by ${placed.join(", ")} — office_remove them first`);
+    const { [slug]: _gone, ...rest } = this.customKinds;
+    this.customKinds = rest;
+    await this.ctx.storage.delete(`kind:${slug}`);
+    this.broadcast({ type: "kind-removed", kind: slug });
+    return { ok: true, deleted: slug };
+  }
+
+  private assetList(origin: string) {
+    return [...this.assets.values()].map((a) => ({ ...a, url: `${origin}${a.url}` }));
+  }
+
+  private async storeAsset(bytes: Uint8Array, rawName: string, contentType: string | undefined, by: string, origin: string) {
+    const info = sniffImage(bytes, contentType);
+    const id = `a${[...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 23)}`;
+    const name = (rawName.split(/[\\/]/).pop() ?? "").replace(/[^\w.\- ]+/g, "_").slice(0, 100) || "image";
+    const have = this.assets.get(id);
+    if (have) return { ok: true, assetId: id, url: `${origin}${have.url}`, w: have.w, h: have.h, type: have.type, size: have.size, deduped: true, next: `office_set_logo {assetId: "${id}"}` };
+    this.rateLimit("upload", UPLOAD_RATE_MAX, UPLOAD_WINDOW_MS);
+    if (this.assets.size >= ASSETS_MAX) throw new ToolError(409, `this office has ${ASSETS_MAX} images already — office_delete_asset one first`);
+    const total = [...this.assets.values()].reduce((n, a) => n + a.size, 0);
+    if (total + bytes.length > ASSETS_TOTAL_MAX) {
+      throw new ToolError(409, `images would take ${total + bytes.length} bytes, max ${ASSETS_TOTAL_MAX} (8 MB) per office — office_delete_asset something first`);
+    }
+    const at = Date.now();
+    this.ctx.storage.sql.exec("INSERT INTO assets (id, name, type, w, h, size, by, at, bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", id, name, info.type, info.w, info.h, bytes.length, by, at, bytes);
+    const meta: AssetMeta = { id, url: this.assetUrl(id), name, type: info.type, w: info.w, h: info.h, size: bytes.length, by, at };
+    this.assets.set(id, meta);
+    this.broadcast({ type: "asset", asset: meta });
+    return { ok: true, assetId: id, url: `${origin}${meta.url}`, w: info.w, h: info.h, type: info.type, size: bytes.length, next: `office_set_logo {assetId: "${id}"}` };
+  }
+
+  private async deleteAsset(id: string) {
+    if (!this.assets.has(id)) throw new ToolError(404, `no asset ${id} in this office`);
+    if (this.theme.logo === id) throw new ToolError(409, `${id} is the office logo — office_set_logo {assetId: null} (or another) first`);
+    this.ctx.storage.sql.exec("DELETE FROM assets WHERE id = ?", id);
+    this.assets.delete(id);
+    this.broadcast({ type: "asset-removed", id });
+    return { ok: true, deleted: id };
+  }
+
+  private serveAsset(req: Request, id: string): Response {
+    if (req.method !== "GET" && req.method !== "HEAD") return errorResponse(405, "assets are GET only");
+    this.rateLimit(`asset:${req.headers.get("cf-connecting-ip") ?? "local"}`, IP_RATE_MAX * 2);
+    const meta = this.assets.get(id);
+    if (!meta) return errorResponse(404, "no such asset");
+    const etag = `"${id}"`;
+    const headers: Record<string, string> = {
+      "content-type": meta.type,
+      // a day, not a year: a deleted asset (office_delete_asset) stops being served by caches soon after
+      "cache-control": "public, max-age=86400",
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; sandbox",
+      "cross-origin-resource-policy": "cross-origin",
+      "access-control-allow-origin": "*",
+      etag,
+    };
+    if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
+    const row = this.ctx.storage.sql.exec<{ bytes: ArrayBuffer }>("SELECT bytes FROM assets WHERE id = ?", id).one();
+    headers["content-length"] = String(row.bytes.byteLength);
+    return new Response(req.method === "HEAD" ? null : row.bytes, { status: 200, headers });
+  }
+
+  private async setDesigner(rawId: unknown) {
+    let id: string | null = null;
+    if (rawId !== null && rawId !== undefined && rawId !== "") {
+      if (typeof rawId !== "string") throw new ToolError(400, "designer needs {id: <agent id or name>} or {id: null} to clear");
+      id = this.findAgentRef(rawId);
+    }
+    this.designer = id;
+    if (id) await this.ctx.storage.put("designer", id);
+    else await this.ctx.storage.delete("designer");
+    this.broadcast({ type: "designer", id });
+    return { ok: true, designer: id };
   }
 
   // ---------- owner moderation ----------
@@ -651,9 +938,13 @@ export class Office extends DurableObject<Env> implements ToolHost {
     const deskOf = (a: Agent) => (a.deskId ? this.items.get(a.deskId) : undefined);
     const unread = me ? this.chat.filter((m) => m.ts > me.lastRead && m.from !== me.id && (m.to === null || m.to === me.id)).length : 0;
     const myDesk = me ? deskOf(me) : undefined;
+    const items = this.itemList();
+    const spots = allSpots(items, this.customKinds);
     return {
       office: { id: meta.id, name: meta.name, grid: meta.grid },
-      you: me ? { ...publicAgent(me), desk: myDesk ? { id: myDesk.id, x: myDesk.x, z: myDesk.z, rot: myDesk.rot } : null } : null,
+      you: me
+        ? { ...publicAgent(me), desk: myDesk ? { id: myDesk.id, x: myDesk.x, z: myDesk.z, rot: myDesk.rot } : null, designer: this.designer === me.id }
+        : null,
       agents: [...this.agents.values()].map((a) => ({
         id: a.id,
         name: a.name,
@@ -667,6 +958,10 @@ export class Office extends DurableObject<Env> implements ToolHost {
       items: [...this.items.values()].map(
         (it) => `${it.id} ${it.kind} x${it.x} z${it.z} r${it.rot}${it.text ? ` "${it.text.slice(0, 40)}"` : ""}`,
       ),
+      seats: spots.seats.map((p) => `${p.id} x${p.x} z${p.z} face${Math.round((p.yaw * 180) / Math.PI)}`),
+      stations: spots.stations.map((p) => `${p.id} ${p.activity} x${p.x} z${p.z} face${Math.round((p.yaw * 180) / Math.PI)}`),
+      design: designSummary({ grid: meta.grid, items, theme: this.theme, custom: this.customKinds }),
+      designer: this.designer,
       unreadChat: unread,
     };
   }
@@ -691,8 +986,15 @@ export class Office extends DurableObject<Env> implements ToolHost {
     const { role, sid } = ws.deserializeAttachment() as WsAttachment;
     try {
       this.rateLimit(`ws:${sid}`, WS_RATE_MAX);
-    } catch {
-      return; // flooding socket: drop silently rather than answer every frame
+    } catch (e) {
+      // flooding socket: one visible error per window, then drop quietly until it slows down
+      const now = Date.now();
+      if (now - (this.wsWarned.get(sid) ?? 0) >= RATE_WINDOW_MS) {
+        this.wsWarned.set(sid, now);
+        const retryAfter = e instanceof ToolError ? (e.extra?.retryAfter as number | undefined) : undefined;
+        send({ type: "error", error: `rate limited: max ${WS_RATE_MAX} frames per ${RATE_WINDOW_MS / 1000}s — later frames were dropped`, retryAfter });
+      }
+      return;
     }
     try {
       const raw = typeof message === "string" ? message : new TextDecoder().decode(message);
@@ -713,6 +1015,13 @@ export class Office extends DurableObject<Env> implements ToolHost {
         await this.postChat(`human:${as}`, to, f.text);
       } else if (f.type === "op") {
         await this.applyItemOp(f.op, `human:${as}`);
+      } else if (f.type === "theme") {
+        if (!f.theme && !f.brand) throw new ToolError(400, "theme frame needs `theme` and/or `brand`");
+        await this.setTheme(f.theme as ThemePatch | undefined, f.brand);
+      } else if (f.type === "designer") {
+        await this.setDesigner(f.id);
+      } else if (f.type === "delete-kind") {
+        await this.deleteKind(f.kind);
       } else {
         await this.kick(f.id, `human:${as}`);
       }

@@ -1,15 +1,18 @@
 // REST: office creation (admin) and the mirror of every MCP tool under /api/o/:office/:tool.
 import { newOfficeId, newOfficeKey, safeEqual, sha256hex } from "./auth";
-import { errorResponse, json, readJson } from "./http";
-import { resolveToolName, ToolError, type ToolName } from "./tools";
+import { BIG_BODY_MAX, errorResponse, json, readBytes, readJson } from "./http";
+import { resolveToolName, TOOL_NAMES, ToolError, type ToolName } from "./tools";
+import { ASSET_BYTES_MAX } from "./images";
 import type { CallCtx, ToolHost } from "./office";
 
 export const ADMIN_KEY_MIN = 24;
-const GET_TOOLS = new Set<ToolName>(["office_look", "office_kinds", "office_chat_read"]);
+const GET_TOOLS = new Set<ToolName>(["office_look", "office_kinds", "office_chat_read", "office_theme_get"]);
+const BIG_TOOLS = new Set<ToolName>(["office_upload", "office_define_kind"]);
+const SHORT_NAMES = TOOL_NAMES.map((n) => n.slice("office_".length)).join(", ");
 
 export async function handleRest(req: Request, host: ToolHost, ctx: CallCtx, rawTool: string): Promise<Response> {
   const name = resolveToolName(rawTool);
-  if (!name) throw new ToolError(404, `unknown tool "${rawTool}" (try kinds, look, join, status, say, chat_send, chat_read, add, remove, move, rotate, text, leave)`);
+  if (!name) throw new ToolError(404, `unknown tool "${rawTool}" (tools: ${SHORT_NAMES})`);
   let args: Record<string, unknown>;
   if (req.method === "GET") {
     if (!GET_TOOLS.has(name)) throw new ToolError(405, `${name} needs POST with a JSON body`);
@@ -17,8 +20,17 @@ export async function handleRest(req: Request, host: ToolHost, ctx: CallCtx, raw
     args = {};
     const since = q.get("since");
     if (since !== null) args.since = Number(since);
+    const kind = q.get("kind");
+    if (kind !== null) args.kind = kind;
   } else if (req.method === "POST") {
-    const body = (await readJson(req)) ?? {};
+    const type = (req.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+    if (name === "office_upload" && type !== "application/json") {
+      // raw image body: POST /api/o/:office/upload?filename=logo.png with content-type image/png
+      const bytes = await readBytes(req, ASSET_BYTES_MAX);
+      const filename = new URL(req.url).searchParams.get("filename") ?? req.headers.get("x-filename") ?? "image";
+      return json(200, await host.upload(bytes, filename, type || undefined, ctx));
+    }
+    const body = (await readJson(req, BIG_TOOLS.has(name) ? BIG_BODY_MAX : undefined)) ?? {};
     if (typeof body !== "object" || Array.isArray(body) || body === null) throw new ToolError(400, "body must be a JSON object of tool arguments");
     args = body as Record<string, unknown>;
   } else {

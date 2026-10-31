@@ -1,7 +1,12 @@
 // The tool surface, shared by MCP (/mcp) and the REST mirror (/api/o/:office/:tool): names, descriptions and
 // zod input shapes. The Office Durable Object implements them in callTool().
 import { z } from "zod";
-import { ACTIVITY_MAX, KIND_NAMES, NAME_MAX, TEXT_MAX } from "./shared/catalog";
+import { ACTIVITY_MAX, NAME_MAX, SPOOF_CHARS_RE, SPOOF_LINE_RE, TEXT_MAX } from "./shared/catalog";
+import {
+  ACCENT_WALL_MATERIALS, ACCENTS_MAX, ACTIVITIES, BOX_MATERIALS, BOXES_MAX, CUSTOM_LAYERS, DURATION_MAX, DURATION_MIN, FLOOR_MATERIALS,
+  FOOTPRINT_MAX, HEIGHT_MAX, KIND_SLUG_RE, LABEL_MAX, LIGHTING, NIGHT_WINDOWS, SEATS_MAX, STATIONS_MAX, UNITS, WALLS,
+} from "./shared/design";
+import { ASSET_BASE64_MAX, IMAGE_TYPES } from "./images";
 
 export { ACTIVITY_MAX, NAME_MAX };
 
@@ -16,13 +21,81 @@ const agentToken = z
 const itemId = z.string().min(1).max(40).describe('Item id, e.g. "desk-3" (office_look lists them)');
 const cell = z.number().int().min(0).max(255);
 const rot = z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]);
-const text = z.string().max(TEXT_MAX);
+const text = z.string().max(TEXT_MAX).refine((v) => !SPOOF_CHARS_RE.test(v), "has control or bidi-override characters");
 const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
 const emoji = z
   .string()
   .max(16)
   .refine((v) => [...graphemes.segment(v)].length === 1 && !/[\p{L}\p{N}\p{P}\s<>]/u.test(v.replace(/[\u200d\ufe0f]/g, "")), "emoji must be a single emoji");
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const kindName = z.string().min(1).max(30).describe('A built-in kind (office_kinds) or one of this office\'s custom kinds');
+const slug = z.string().regex(KIND_SLUG_RE, "lowercase a-z0-9-, starts with a letter, 2-30 chars");
+const assetId = z.string().regex(/^a[0-9a-f]{23}$/, "an asset id from office_upload");
+const rotDeg = z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]);
+const units = (max: number) => z.number().int().min(0).max(max);
+
+const themePatch = z
+  .object({
+    floor: z.object({ material: z.enum(FLOOR_MATERIALS as [string, ...string[]]).optional(), color: color.optional() }).strict().optional(),
+    walls: z
+      .object({
+        color: color.optional(),
+        trim: color.optional().describe("Wall cap / corner posts"),
+        accent: z
+          .object({
+            material: z.enum(ACCENT_WALL_MATERIALS as [string, ...string[]]).optional(),
+            color: color.optional(),
+            wall: z.enum(WALLS as [string, ...string[]]).optional(),
+          })
+          .strict()
+          .nullable()
+          .optional()
+          .describe("A statement wall (brick, plaster or wood-panels) on the back or left wall; null removes it"),
+      })
+      .strict()
+      .optional(),
+    desk: z.object({ wood: color.optional().describe("Desk top wood tone"), rail: color.optional().describe("Desk body / accent rail") }).strict().optional(),
+    accents: z.array(color).min(1).max(ACCENTS_MAX).optional().describe("Accent colours for chairs, rugs and signage (first leads)"),
+    lighting: z.enum(LIGHTING as [string, ...string[]]).optional(),
+    nightWindow: z.enum(NIGHT_WINDOWS as [string, ...string[]]).optional().describe("What the windows show at night"),
+    logo: assetId.nullable().optional().describe("Asset id from office_upload, or null for no logo (office_set_logo does the same)"),
+    logoOnSigns: z.boolean().optional(),
+  })
+  .strict();
+
+const box = z
+  .object({
+    x: units(FOOTPRINT_MAX * UNITS - 1),
+    y: units(HEIGHT_MAX - 1),
+    z: units(FOOTPRINT_MAX * UNITS - 1),
+    w: z.number().int().min(1).max(FOOTPRINT_MAX * UNITS),
+    h: z.number().int().min(1).max(HEIGHT_MAX),
+    d: z.number().int().min(1).max(FOOTPRINT_MAX * UNITS),
+    color,
+    emissive: z.boolean().optional().describe("Glows in its own colour (lamps, LEDs, neon)"),
+    material: z.enum(BOX_MATERIALS as [string, ...string[]]).optional().describe("matte (default), glossy, glass (see-through), screen (shows the logo if the kind has screen: true)"),
+  })
+  .strict();
+const local = (what: string) => z.number().min(-UNITS).max((FOOTPRINT_MAX + 1) * UNITS).describe(`${what} in local units (16 per cell); may be up to one cell outside the footprint`);
+const seatSchema = z
+  .object({ x: local("x"), z: local("z"), rot: rotDeg.optional().describe("Way the sitter faces at item rot 0 (0 = the model's front, +z)"), height: z.number().min(0).max(HEIGHT_MAX).optional().describe("Seat surface height in units (chair ≈ 7)") })
+  .strict();
+const stationSchema = z
+  .object({
+    x: local("x"),
+    z: local("z"),
+    rot: rotDeg.optional().describe("Way the agent faces at item rot 0 (180 = facing the thing from its front)"),
+    activity: z.enum(ACTIVITIES as [string, ...string[]]),
+    duration: z.number().int().min(DURATION_MIN).max(DURATION_MAX).optional().describe("Seconds spent here (default per activity)"),
+  })
+  .strict();
+const brand = z
+  .object({
+    primary: color.describe("The brand's main colour"),
+    dark: color.optional().describe("Its near-black / dark neutral"),
+    accent: color.optional().describe("A secondary / soft accent colour"),
+  })
+  .strict();
 
 export const TOOLS = {
   office_join: {
@@ -30,7 +103,7 @@ export const TOOLS = {
       "Walk into the office and sit at a desk. Call once at the start of your session. Returns your agentToken and your desk. " +
       "Everyone watching the office sees your voxel character appear.",
     shape: {
-      name: z.string().trim().min(1).max(NAME_MAX).describe("Display name shown above your character, e.g. \"Ada\" or \"claude@repo\""),
+      name: z.string().trim().min(1).max(NAME_MAX).refine((v) => !SPOOF_LINE_RE.test(v), "has control or bidi-override characters").describe("Display name shown above your character, e.g. \"Ada\" or \"claude@repo\""),
       hue: z.number().int().min(0).max(359).optional().describe("Character colour hue 0-359 (default: derived from your name)"),
       emoji: emoji.optional().describe("One emoji shown on your badge"),
       client: z.string().max(NAME_MAX).optional().describe('Which agent you are, e.g. "claude-code", "codex", "cursor"'),
@@ -55,14 +128,14 @@ export const TOOLS = {
     shape: { text: text.min(1), agentToken },
   },
   office_chat_send: {
-    description: "Send a chat message to the room, or privately to one agent (by agent id or name).",
+    description: `Send a chat message (≤${TEXT_MAX} chars) to the room, privately to one agent (by agent id or name), or to a human watching ("human:<name>").`,
     shape: {
       to: z
         .string()
         .max(64)
         .nullable()
         .optional()
-        .describe('Agent id or name, or "human:<name>" to answer a human who messaged you; omit or null for the whole room'),
+        .describe('Agent id or name, or "human:<name>" to answer a human who messaged you; omit, null or "room" for the whole room'),
       text: text.min(1),
       agentToken,
     },
@@ -77,23 +150,27 @@ export const TOOLS = {
     },
   },
   office_look: {
-    description: "Look around: who is here and what they are doing, a compact list of furniture, your desk, and unread chat count.",
+    description:
+      "Look around: who is here and what they are doing, a compact list of furniture, every seat and station (where idle agents sit or do an activity), " +
+      "a design summary (theme in one line, zones by furniture clusters, free floor incl. the largest open rectangle, seat/station counts), your desk, and unread chat count.",
     shape: { agentToken },
   },
   office_kinds: {
-    description: "The furniture catalog: every kind with its footprint (cells), layer and whether it holds text; plus grid size and placement rules.",
-    shape: {},
+    description:
+      "The furniture catalog: every built-in kind with its footprint (cells), layer, text/screen flags, seats and stations; this office's custom kinds " +
+      "(boxes summarised); grid size, limits and placement rules. Pass `kind` to get one kind in full (custom kinds include every box).",
+    shape: { kind: kindName.optional() },
   },
   office_add: {
     description:
       "Place furniture. (x, z) is the footprint's min corner on the grid; rot turns it (footprint swaps at 90/270). " +
       "Wall kinds go on a wall: rot 0 with z 0, or rot 90 with x 0. Fails clearly on overlap or out of bounds.",
     shape: {
-      kind: z.enum(KIND_NAMES as [string, ...string[]]),
+      kind: kindName,
       x: cell,
       z: cell,
       rot: rot.optional(),
-      text: text.optional().describe("For textable kinds (sign, poster, whiteboard)"),
+      text: text.optional().describe("For textable kinds (sign, poster, whiteboard, custom kinds with textable: true)"),
       color: color.optional().describe("Tint, #rrggbb"),
       agentToken,
     },
@@ -113,6 +190,58 @@ export const TOOLS = {
   office_text: {
     description: "Change the text on a sign, poster or whiteboard.",
     shape: { id: itemId, text, agentToken },
+  },
+  office_theme_get: {
+    description: "The office theme (floor, walls + accent wall, desk finish, accent colours, lighting, night windows, logo) and the uploaded assets.",
+    shape: { agentToken },
+  },
+  office_theme_set: {
+    description:
+      "Restyle the office for everyone watching. Pass `brand` {primary, dark?, accent?} to derive a whole coherent theme from brand colours, " +
+      "and/or `theme` with just the parts to change (objects merge; accents replace; walls.accent null removes the accent wall). Returns the full theme.",
+    shape: { theme: themePatch.optional(), brand: brand.optional(), agentToken },
+  },
+  office_define_kind: {
+    description:
+      "Define (or redefine) a custom furniture kind as a voxel model, then place it with office_add like any built-in. Local space: 16 units per grid cell, " +
+      "origin at the footprint's min corner, x along w, z along d, y up; the FRONT faces +z. Boxes must stay inside footprint×16 and ≤64 units tall. " +
+      "Add seats (where idle agents sit) and stations (where they stand to do an activity, usually just in front: z ≈ d*16 + 8, rot 180). " +
+      "screen: true shows the office logo on boxes with material \"screen\". Redefining updates placed copies live (refused if a new footprint would collide).",
+    shape: {
+      kind: slug.describe('Slug for this office, e.g. "arcade-cabinet"; can\'t reuse a built-in name'),
+      label: z.string().trim().min(1).max(LABEL_MAX),
+      footprint: z.object({ w: z.number().int().min(1).max(FOOTPRINT_MAX), d: z.number().int().min(1).max(FOOTPRINT_MAX) }).strict().describe("Size in grid cells at rot 0"),
+      layer: z.enum(CUSTOM_LAYERS as [string, ...string[]]).optional().describe("object (default), floor (under furniture, like a rug) or wall (hangs on a wall)"),
+      boxes: z.array(box).min(1).max(BOXES_MAX),
+      seats: z.array(seatSchema).max(SEATS_MAX).optional(),
+      stations: z.array(stationSchema).max(STATIONS_MAX).optional(),
+      textable: z.boolean().optional().describe("Holds text like a sign"),
+      screen: z.boolean().optional().describe("Shows the office logo on its screen boxes"),
+      agentToken,
+    },
+  },
+  office_delete_kind: {
+    description: "Delete a custom kind. Refused while any item of that kind is placed (remove them first).",
+    shape: { kind: slug, agentToken },
+  },
+  office_upload: {
+    description:
+      "Upload a PNG, JPEG or WebP image (≤512 KB, ≤1024×1024 px) as base64, e.g. a logo a human gave you. Returns {assetId, url}; " +
+      "then office_set_logo {assetId} puts it on the TV, every desk monitor and every screen kind. Per office ≤32 assets / 8 MB.",
+    shape: {
+      filename: z.string().trim().min(1).max(100),
+      contentType: z.enum(IMAGE_TYPES).describe("Must match the bytes"),
+      base64: z.string().min(1).max(ASSET_BASE64_MAX + 64).describe("The file's bytes, base64 (a data: URL prefix is fine)"),
+      agentToken,
+    },
+  },
+  office_set_logo: {
+    description: "Use an uploaded image as the office logo (TV, desk monitors, screen kinds; signs too with onSigns), or assetId null to remove it.",
+    shape: { assetId: assetId.nullable(), onSigns: z.boolean().optional().describe("Also print it on signs"), agentToken },
+  },
+  office_delete_asset: {
+    description: "Delete an uploaded image to free quota. Refused while it is the logo. Browsers and caches may keep serving copies for up to a day.",
+    shape: { assetId, agentToken },
   },
 } as const;
 
@@ -160,7 +289,7 @@ export function parseArgs<K extends ToolName>(name: K, args: unknown): ToolArgs<
 /** Frames a viewer holding the ownerKey may send over the WebSocket. */
 const humanName = z.string().trim().min(1).max(NAME_MAX);
 const opSchema = z.discriminatedUnion("op", [
-  z.object({ op: z.literal("add"), kind: z.enum(KIND_NAMES as [string, ...string[]]), x: cell, z: cell, rot: rot.optional(), text: text.optional(), color: color.optional() }).strict(),
+  z.object({ op: z.literal("add"), kind: kindName, x: cell, z: cell, rot: rot.optional(), text: text.optional(), color: color.optional() }).strict(),
   z.object({ op: z.literal("remove"), id: itemId }).strict(),
   z.object({ op: z.literal("move"), id: itemId, x: cell, z: cell }).strict(),
   z.object({ op: z.literal("rotate"), id: itemId, rot }).strict(),
@@ -170,6 +299,9 @@ export const ownerFrameSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("chat"), to: z.string().max(64).nullable().optional(), text: text.trim().min(1), as: humanName.optional() }).strict(),
   z.object({ type: z.literal("op"), op: opSchema, as: humanName.optional() }).strict(),
   z.object({ type: z.literal("kick"), id: z.string().min(1).max(64), as: humanName.optional() }).strict(),
+  z.object({ type: z.literal("theme"), theme: themePatch.optional(), brand: brand.optional(), as: humanName.optional() }).strict(),
+  z.object({ type: z.literal("designer"), id: z.string().min(1).max(64).nullable(), as: humanName.optional() }).strict(),
+  z.object({ type: z.literal("delete-kind"), kind: slug, as: humanName.optional() }).strict(),
 ]);
 export type OwnerFrame = z.infer<typeof ownerFrameSchema>;
 
@@ -190,3 +322,39 @@ How to be a good office-mate:
 3. Between tasks, call office_chat_read — humans and other agents talk to you there. Reply with office_chat_send (to an agent, to "human:<name>" for a person who messaged you, or the room) or office_say (speech bubble).
 4. You may decorate with office_add / office_move / office_rotate / office_text / office_remove (see office_kinds and office_look for free space). Be polite: don't move or remove other agents' desks or someone else's recent work; small tasteful edits beat redecorating the whole office.
 5. Call office_leave when your session ends — please don't skip it. If you rejoin later with the same name and client you get your old character and desk back. If you go quiet for 5 minutes you show as away; after an hour you are walked out.`;
+// INSTRUCTIONS_DESIGN (below) is appended to these in the MCP server instructions.
+
+const DESIGNER_GUIDE = `Office designer — redesign the office from a chat request:
+1. Read the room: office_look (its "design" summary is your floor plan: theme, zones, free floor, largestOpen rectangle, seats/stations) and office_kinds (built-ins + this office's custom kinds). Plan from data; you don't need screenshots.
+2. Palette: if the human names a company or brand, look up its real brand colours with your own web tools (brand guidelines, press kit, the website's CSS). Pick primary, dark and a soft accent, then office_theme_set {brand: {primary, dark, accent}} for a coherent theme. Fine-tune parts with office_theme_set {theme: {...}} (floor material/colour, walls + accent wall brick/plaster/wood-panels, desk wood + rail, accents, lighting warm/neutral/cool, nightWindow). Say which colours you used and where they came from.
+3. Zones: plan 2-4 zones in the free floor (desks stay a calm work zone; add e.g. a lounge, a coffee bar, a game corner, a huddle table). Keep walkways one cell wide; never move or remove a desk someone sits at.
+4. Furniture: place built-ins with office_add. For anything the catalog lacks (arcade cabinet, espresso bar, neon sign, huddle table), office_define_kind a voxel model: 16 units per cell, front faces +z, boxes inside the footprint, ≤64 units tall; chunky silhouettes in the theme's colours read best. Give it seats (where idle agents sit) and stations (activity: coffee, snack, read, play, water-plants, whiteboard, chat, think, watch — usually just in front: z ≈ d*16 + 8, rot 180). Then office_add it.
+5. Logo: if theme.logo is null, ask the human in chat for a square PNG logo (≤512 KB, ≤1024 px). They can drop it into the office chat; or you office_upload it (base64) and office_set_logo {assetId} — it shows on the TV, every desk monitor and every kind with screen: true.
+6. Iterate small: after each batch, office_look again and fix overlaps, blocked paths, empty zones and anything in design.unreachable (seats/stations off the floor or under furniture — move the item or the blocker). Prefer several small passes over one giant one, and ask before demolishing what people built.
+7. Talk in chat: office_chat_send with no "to" posts to the room (everyone, humans included); "human:<name>" answers the person who asked. Messages are ≤${TEXT_MAX} chars, so split long updates into a few short ones.
+8. Before going idle, run a checklist: office_look and confirm every zone the human asked for appears in design.zones (by name or in its tags) and has seats or stations, design.unreachable is empty, and the theme matches the brand. If anything is missing, build it now — don't stop at "done" until the list is checked. Then post a short summary and, if there's no logo yet, ask for one.`;
+
+export const INSTRUCTIONS_DESIGN = `
+
+Designing the office (theme, custom furniture, logo):
+- office_theme_get / office_theme_set restyle the whole office (brand colours → full theme in one call). office_define_kind makes new voxel furniture; office_upload + office_set_logo put a logo on screens.
+- Seats and stations in office_look are where idle agents sit or go for coffee, reading, games…; give new furniture some.
+- If a human asks you to redesign the office, or office_look says you are the designer, follow the "office-designer" prompt (prompts/get). In short:
+${DESIGNER_GUIDE}`;
+
+export const DESIGNER_PROMPT = {
+  name: "office-designer",
+  title: "Office designer",
+  description: "Redesign this office from a chat request: brand palette → theme, zones, custom voxel furniture, seats/stations, logo, then iterate by looking.",
+  argsSchema: {
+    request: z.string().max(2000).optional().describe('What the human asked for, e.g. "make it feel like Acme: a lounge, a coffee bar and an arcade corner"'),
+    company: z.string().max(200).optional().describe("Company or brand whose palette and logo to use"),
+  },
+  text(args: { request?: string; company?: string }): string {
+    const ask = args.request?.trim() ? `The request: ${args.request.trim()}\n` : "Ask the human in chat what they'd like (mood, zones, brand) if it isn't clear.\n";
+    const brand = args.company?.trim()
+      ? `Brand: ${args.company.trim()} — find its official colours with your web tools before touching the theme.\n`
+      : "";
+    return `You are this office's designer. Join first (office_join) if you haven't, set office_status working "redesigning the office", and keep the humans posted in chat.\n${ask}${brand}\n${DESIGNER_GUIDE}`;
+  },
+} as const;

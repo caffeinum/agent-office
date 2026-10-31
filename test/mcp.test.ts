@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { describe, expect, it } from "vitest";
 import { TOOL_NAMES } from "../src/tools";
-import { createOffice, ORIGIN, type Created } from "./helpers";
+import { b64, createOffice, fakeImage, ORIGIN, type Created } from "./helpers";
 
 const selfFetch = (input: string | URL | Request, init?: RequestInit) => SELF.fetch(input as never, init as never) as unknown as Promise<Response>;
 
@@ -32,6 +32,8 @@ describe("MCP over Streamable HTTP", () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
     expect(client.getInstructions()).toMatch(/office_join once/);
+    expect(client.getInstructions()).toMatch(/office-designer/);
+    expect(client.getServerCapabilities()?.prompts).toBeTruthy();
     expect(client.getServerVersion()?.name).toBe("agent-office");
     await client.close();
   });
@@ -90,5 +92,52 @@ describe("MCP over Streamable HTTP", () => {
     const o = await createOffice();
     await expect(connect(o, { key: o.viewKey })).rejects.toThrow();
     await expect(connect(o, { key: `${o.id}.${"A".repeat(43)}` })).rejects.toThrow();
+  });
+
+  it("office-designer prompt: prompts/list + prompts/get", async () => {
+    const o = await createOffice();
+    const { client } = await connect(o);
+    const { prompts } = await client.listPrompts();
+    expect(prompts.map((p) => p.name)).toEqual(["office-designer"]);
+    expect(prompts[0]!.arguments?.map((a) => a.name).sort()).toEqual(["company", "request"]);
+    const got = await client.getPrompt({ name: "office-designer", arguments: { company: "Acme", request: "a lounge and an arcade corner" } });
+    const text = (got.messages[0]!.content as { text: string }).text;
+    expect(text).toMatch(/Brand: Acme/);
+    expect(text).toMatch(/a lounge and an arcade corner/);
+    for (const t of ["office_theme_set", "office_define_kind", "office_upload", "office_set_logo", "office_look"]) expect(text).toContain(t);
+    const bare = await client.getPrompt({ name: "office-designer", arguments: {} });
+    expect((bare.messages[0]!.content as { text: string }).text).toMatch(/Ask the human/);
+    await client.close();
+  });
+
+  it("design tools over MCP: theme, custom kind, base64 upload, logo", async () => {
+    const o = await createOffice();
+    const { client } = await connect(o);
+    await tool(client, "office_join", { name: "Designer", client: "claude-code" });
+    const theme = await tool(client, "office_theme_set", { brand: { primary: "#e94d3d", dark: "#141414", accent: "#d28f88" } });
+    expect(theme.isError).toBe(false);
+    expect(theme.body.theme.desk.rail).toBe("#e94d3d");
+    const kind = await tool(client, "office_define_kind", {
+      kind: "huddle-table",
+      label: "Huddle table",
+      footprint: { w: 2, d: 2 },
+      boxes: [{ x: 4, y: 0, z: 4, w: 24, h: 12, d: 24, color: "#d28f88" }],
+      seats: [{ x: 16, z: -6, rot: 0 }, { x: 16, z: 38, rot: 180 }],
+      stations: [{ x: -6, z: 16, rot: 90, activity: "chat" }],
+    });
+    expect(kind.isError).toBe(false);
+    expect((await tool(client, "office_add", { kind: "huddle-table", x: 2, z: 11 })).isError).toBe(false);
+    const up = await tool(client, "office_upload", { filename: "logo.png", contentType: "image/png", base64: b64(fakeImage.png(512, 512, 2000)) });
+    expect(up.isError).toBe(false);
+    expect((await tool(client, "office_set_logo", { assetId: up.body.assetId })).body.theme.logo).toBe(up.body.assetId);
+    const bad = await tool(client, "office_upload", { filename: "x.png", contentType: "image/png", base64: b64(new TextEncoder().encode("GIF89a, not a png at all")) });
+    expect(bad.isError).toBe(true);
+    expect(bad.body.error).toMatch(/magic bytes/);
+    const look = await tool(client, "office_look");
+    expect(look.body.design.stationsByActivity.chat).toBeGreaterThanOrEqual(1);
+    expect(look.body.seats.some((s: string) => s.startsWith("huddle-table-1:s1"))).toBe(true);
+    expect((await tool(client, "office_kinds")).body.custom["huddle-table"]).toMatchObject({ boxes: 1, seats: expect.any(Array) });
+    expect((await tool(client, "office_theme_get")).body.assets).toHaveLength(1);
+    await client.close();
   });
 });
