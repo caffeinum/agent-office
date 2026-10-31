@@ -13,8 +13,9 @@ import { handleMcp } from "./mcp";
 import { handleRest } from "./api";
 
 export const MAX_CHAT = 200;
-/** The join key in plaintext, so the owner's viewer can show agents how to connect. */
+/** The join and view keys in plaintext, so the owner's viewer can share them (connect guide, copy links). */
 const JOIN_KEY_SLOT = "joinKey";
+const VIEW_KEY_SLOT = "viewKey";
 export const CHAT_READ_MAX = 50;
 export const MAX_VIEWERS = 256;
 export const AWAY_MS = 5 * 60_000;
@@ -284,11 +285,12 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   private async init(req: Request): Promise<Response> {
     if (this.meta) return errorResponse(409, "office already exists");
-    const body = (await readJson(req)) as { id: string; name: string; keys: KeyHashes; joinKey: string };
+    const body = (await readJson(req)) as { id: string; name: string; keys: KeyHashes; joinKey: string; viewKey: string };
     if (typeof body.joinKey !== "string" || (await sha256hex(body.joinKey)) !== body.keys.join) return errorResponse(400, "init needs the joinKey matching keys.join");
+    if (typeof body.viewKey !== "string" || (await sha256hex(body.viewKey)) !== body.keys.view) return errorResponse(400, "init needs the viewKey matching keys.view");
     const meta: Meta = { id: body.id, name: body.name, grid: { ...GRID }, keys: body.keys, createdAt: Date.now() };
     const items = defaultLayout(meta.createdAt);
-    const puts: Record<string, unknown> = { meta, schema: SCHEMA_VERSION, theme: DEFAULT_THEME, [JOIN_KEY_SLOT]: body.joinKey };
+    const puts: Record<string, unknown> = { meta, schema: SCHEMA_VERSION, theme: DEFAULT_THEME, [JOIN_KEY_SLOT]: body.joinKey, [VIEW_KEY_SLOT]: body.viewKey };
     this.ctx.storage.sql.exec(ASSETS_DDL);
     for (const it of items) puts[`item:${it.id}`] = it;
     await this.ctx.storage.put(puts);
@@ -952,10 +954,13 @@ export class Office extends DurableObject<Env> implements ToolHost {
     return { ok: true, kicked: id };
   }
 
-  /** What a viewer needs to bring agents in. Only the owner gets the join key back (a join viewer already holds it); offices made before it was kept have none until the owner rotates it. */
+  /** What a viewer needs to bring agents in and share the office. Only the owner gets the join key/link (a join viewer already holds it); any non-view viewer gets the watch-only link. Offices made before keys were kept get null until the owner rotates that key. */
   private async connectInfo(role: Role, origin: string) {
+    const id = this.mustMeta().id;
     const joinKey = role === "owner" ? ((await this.ctx.storage.get<string>(JOIN_KEY_SLOT)) ?? null) : null;
-    return { office: this.mustMeta().id, mcpUrl: `${origin}/mcp`, designMcpUrl: `${origin}/mcp?mode=design`, joinKey };
+    const viewKey = (await this.ctx.storage.get<string>(VIEW_KEY_SLOT)) ?? null;
+    const link = (k: string | null) => (k ? `${origin}/o/${id}#k=${encodeURIComponent(k)}` : null);
+    return { office: id, mcpUrl: `${origin}/mcp`, designMcpUrl: `${origin}/mcp?mode=design`, joinKey, joinUrl: link(joinKey), viewUrl: link(viewKey) };
   }
 
   private async rotateKeys(which: unknown, origin: string) {
@@ -972,7 +977,10 @@ export class Office extends DurableObject<Env> implements ToolHost {
       keys[r] = await sha256hex(key);
     }
     this.meta = { ...meta, keys };
-    await this.ctx.storage.put(fresh.join ? { meta: this.meta, [JOIN_KEY_SLOT]: fresh.join } : { meta: this.meta });
+    const puts: Record<string, unknown> = { meta: this.meta };
+    if (fresh.join) puts[JOIN_KEY_SLOT] = fresh.join;
+    if (fresh.view) puts[VIEW_KEY_SLOT] = fresh.view;
+    await this.ctx.storage.put(puts);
     for (const r of roles) for (const ws of this.ctx.getWebSockets(r)) ws.close(4401, "this key was rotated");
     const out: Record<string, string> = {};
     if (fresh.owner) {

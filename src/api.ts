@@ -69,7 +69,7 @@ export async function handleCreateOffice(req: Request, env: Env): Promise<Respon
   const res = await stub.fetch("https://office/internal/init", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id, name: name.trim(), keys, joinKey }),
+    body: JSON.stringify({ id, name: name.trim(), keys, joinKey, viewKey }),
   });
   if (!res.ok) return errorResponse(500, `office init failed: ${res.status} ${await res.text()}`);
   const origin = new URL(req.url).origin;
