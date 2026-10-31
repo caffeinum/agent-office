@@ -4,14 +4,43 @@ export type KindName =
   | "desk" | "chair" | "plant" | "sofa" | "lamp" | "bookshelf" | "rug" | "whiteboard" | "sign" | "fridge"
   | "coffee-machine" | "table" | "tv" | "window" | "poster" | "server-rack" | "beanbag";
 
+export type Activity = "coffee" | "snack" | "read" | "play" | "water-plants" | "whiteboard" | "chat" | "think" | "watch";
+
+/** Local model space: 16 units per cell, origin at the footprint's min corner at rot 0, front faces +z. */
+export interface Seat {
+  readonly x: number;
+  readonly z: number;
+  /** Way the sitter faces at item rot 0 (0 = +z, the model's front). */
+  readonly rot: Rot;
+  /** Seat surface height in units (16 = one cell). */
+  readonly height: number;
+}
+
+export interface Station {
+  readonly x: number;
+  readonly z: number;
+  readonly rot: Rot;
+  readonly activity: Activity;
+  /** Seconds; default per activity (ACTIVITY_DURATION in kinds.js). */
+  readonly duration?: number;
+}
+
 export interface Kind {
   readonly w: number;
   readonly d: number;
   readonly label: string;
   readonly layer: Layer;
   readonly textable?: boolean;
+  /** Desks: the assigned work seat (seatOf). */
   readonly seat?: boolean;
+  /** Shows the office logo (theme.logo) on its screen. */
+  readonly screen?: boolean;
+  readonly seats?: readonly Seat[];
+  readonly stations?: readonly Station[];
 }
+
+/** An office's custom kinds by slug (CustomKind from kinds.d.ts is assignable). */
+export type CustomKinds = Readonly<Record<string, Kind>>;
 
 export interface Item {
   id: string;
@@ -53,11 +82,14 @@ export const OPS: readonly Op["op"][];
 
 export class OfficeError extends Error {}
 
-export function kindOf(kind: unknown): Kind | undefined;
-export function footprint(item: Pick<Item, "kind" | "x" | "z" | "rot">): Footprint;
+export function kindOf(kind: unknown, custom?: CustomKinds): Kind | undefined;
+export function footprint(item: Pick<Item, "kind" | "x" | "z" | "rot">, custom?: CustomKinds): Footprint;
 export function overlaps(a: Footprint, b: Footprint): boolean;
-export function validateItem<T extends Item>(item: T, others: readonly Item[], grid?: Grid): T;
+export function validateItem<T extends Item>(item: T, others: readonly Item[], grid?: Grid, custom?: CustomKinds): T;
 export function nextId(items: readonly Item[], kind: string): string;
-export function applyOp(items: readonly Item[], op: Op, by: string, opts?: { grid?: Grid; now?: number }): OpResult;
+export function applyOp(items: readonly Item[], op: Op, by: string, opts?: { grid?: Grid; now?: number; kinds?: CustomKinds }): OpResult;
 export function seatOf(desk: Pick<Item, "kind" | "x" | "z" | "rot">): { x: number; z: number; yaw: number };
 export function defaultLayout(now?: number): Item[];
+
+export const SPOOF_CHARS_RE: RegExp;
+export const SPOOF_LINE_RE: RegExp;
