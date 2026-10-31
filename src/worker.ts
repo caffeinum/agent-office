@@ -19,7 +19,7 @@ async function route(req: Request, env: Env): Promise<Response> {
   }
   if (path === "/health") return json(200, { ok: true });
   if (path === "/api/offices") {
-    if (req.method !== "POST") return errorResponse(405, "POST /api/offices with Authorization: Bearer <ADMIN_KEY>");
+    if (req.method !== "POST") return errorResponse(405, "POST /api/offices {name} to create an office");
     return handleCreateOffice(req, env);
   }
   if (path === "/mcp") {

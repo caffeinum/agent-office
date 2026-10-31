@@ -264,3 +264,19 @@ kbd { padding: 0 4px; border-radius: 4px; background: var(--chip); }
 .dm-acts .mkdes, .dm-acts .kick { margin-left: 0 !important; height: 26px; }
 .dm-acts .mkdes.on { background: #2b2420; color: #fff; }
 #app[data-theme="night"] .dm-acts .mkdes.on { background: #f1ecf7; color: #1c1e3a; }
+.land h2 { font-size: 19px; margin: 34px 0 6px; }
+.land h3 { font-size: 14px; margin: 14px 0 8px; }
+.land .hint, .create p { color: #6d625a; font-size: 14px; }
+.create-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.create-row input { flex: 1 1 220px; min-width: 0; padding: 11px 14px; border-radius: 14px; border: 1px solid #d8cbbb; background: #fffaf3; font: inherit; font-size: 15px; }
+.create-row button { border: 0; cursor: pointer; font: inherit; font-weight: 800; }
+.create-row button:disabled { opacity: 0.6; cursor: progress; }
+.create-err { color: #b3402a; font-size: 14px; }
+#created[hidden], .create-err[hidden], .create[hidden] { display: none; }
+.keep { padding: 12px 14px; border-radius: 12px; background: #fff1d6; color: #5d4a2a; font-size: 14px; }
+.keys { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; font-size: 13px; }
+.keys dt { color: #6d625a; }
+.keys dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.keys code { user-select: all; }
+.btn.ghost { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+@media (max-width: 640px) { .cols { grid-template-columns: 1fr; } .keys { grid-template-columns: 1fr; } }

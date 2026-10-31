@@ -39,12 +39,24 @@ export async function handleRest(req: Request, host: ToolHost, ctx: CallCtx, raw
   return json(200, await host.callTool(name, args, ctx));
 }
 
-export async function handleCreateOffice(req: Request, env: Env): Promise<Response> {
-  if (!env.ADMIN_KEY) return errorResponse(503, "office creation is disabled: the ADMIN_KEY secret is not set");
-  if (env.ADMIN_KEY.length < ADMIN_KEY_MIN) return errorResponse(503, `office creation is disabled: ADMIN_KEY must be at least ${ADMIN_KEY_MIN} chars`);
-  const auth = req.headers.get("authorization") ?? "";
+/** Anyone may create an office (rate-limited per IP); a request that sends an Authorization header must carry the ADMIN_KEY and skips the limit. */
+async function authorizeCreate(req: Request, env: Env): Promise<Response | null> {
+  const auth = req.headers.get("authorization");
+  if (auth === null) {
+    const ip = req.headers.get("cf-connecting-ip") ?? "local";
+    const { success } = await env.CREATE_LIMIT.limit({ key: `create:${ip}` });
+    return success ? null : errorResponse(429, "too many offices created from this address — try again in a minute");
+  }
+  if (!env.ADMIN_KEY) return errorResponse(503, "admin office creation is disabled: the ADMIN_KEY secret is not set (omit Authorization to create a public office)");
+  if (env.ADMIN_KEY.length < ADMIN_KEY_MIN) return errorResponse(503, `admin office creation is disabled: ADMIN_KEY must be at least ${ADMIN_KEY_MIN} chars`);
   const given = /^Bearer\s+(\S+)$/i.exec(auth.trim())?.[1];
-  if (!given || !(await safeEqual(given, env.ADMIN_KEY))) return errorResponse(401, "creating offices needs Authorization: Bearer <ADMIN_KEY>");
+  if (!given || !(await safeEqual(given, env.ADMIN_KEY))) return errorResponse(401, "wrong admin key (Authorization: Bearer <ADMIN_KEY>, or omit it to create a public office)");
+  return null;
+}
+
+export async function handleCreateOffice(req: Request, env: Env): Promise<Response> {
+  const denied = await authorizeCreate(req, env);
+  if (denied) return denied;
   const body = ((await readJson(req)) ?? {}) as { name?: unknown };
   const name = body.name === undefined ? "Agent Office" : body.name;
   if (typeof name !== "string" || !name.trim() || name.length > 64) return errorResponse(400, "name must be a non-empty string ≤64 chars");

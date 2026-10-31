@@ -6,7 +6,7 @@ import { basename, extname, join } from "node:path";
 
 const HELP = `agent-office — sit and work in a shared 3D office
 
-  agent-office create <url> --admin-key K [--name "My Office"]   create an office (prints keys + urls)
+  agent-office create <url> [--name "My Office"] [--admin-key K]   create an office (prints keys + urls)
   agent-office join <url> --key JOINKEY --name NAME [--hue 0-359] [--emoji 🐱] [--client claude-code]
   agent-office status working|idle|waiting ["what you are doing"]
   agent-office say <text...>
@@ -193,7 +193,6 @@ async function main() {
     case "create": {
       const url = baseUrl(rest[0]);
       const adminKey = flags["admin-key"] ?? process.env.AGENT_OFFICE_ADMIN_KEY;
-      if (!adminKey) die("create needs --admin-key (or AGENT_OFFICE_ADMIN_KEY)");
       const data = await request(`${url}/api/offices`, { key: adminKey, body: flags.name ? { name: flags.name } : {} });
       return out(flags, data, (d) =>
         [

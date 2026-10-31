@@ -7,12 +7,27 @@ import { ADMIN, call, createOffice, join, ORIGIN } from "./helpers";
 const stubOf = (id: string) => env.OFFICE.get(env.OFFICE.idFromName(id));
 
 describe("office creation", () => {
-  it("needs the admin key", async () => {
-    const none = await SELF.fetch(`${ORIGIN}/api/offices`, { method: "POST" });
-    expect(none.status).toBe(401);
-    expect(await none.json()).toHaveProperty("error");
+  it("rejects a wrong admin key", async () => {
     const wrong = await SELF.fetch(`${ORIGIN}/api/offices`, { method: "POST", headers: { authorization: "Bearer nope" } });
     expect(wrong.status).toBe(401);
+    expect(await wrong.json()).toHaveProperty("error");
+  });
+
+  it("anyone can create an office without a key, rate-limited per IP", async () => {
+    const create = () =>
+      SELF.fetch(`${ORIGIN}/api/offices`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "cf-connecting-ip": "203.0.113.7" },
+        body: JSON.stringify({ name: "Visitor HQ" }),
+      });
+    const first = await create();
+    expect(first.status).toBe(201);
+    const o = (await first.json()) as { id: string; joinKey: string; ownerUrl: string };
+    expect(o.joinKey.startsWith(`${o.id}.`)).toBe(true);
+    expect(o.ownerUrl).toContain(`/o/${o.id}#k=`);
+    const statuses = [];
+    for (let i = 0; i < 4; i++) statuses.push((await create()).status);
+    expect(statuses).toContain(429);
   });
 
   it("returns keys and urls, stores only hashes", async () => {
