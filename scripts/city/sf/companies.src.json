@@ -911,9 +911,15 @@
   "color": "#ff3621",
   "sources": [
    {
+    "url": "https://www.databricks.com/company/newsroom/press-releases/databricks-deepens-san-francisco-investment-new-office-and-multi",
+    "kind": "occupancy",
+    "date": "2025-03-06",
+    "accessed": "2026-10-31"
+   },
+   {
     "url": "https://www.databricks.com/company/contact",
     "kind": "occupancy",
-    "date": "2026-10-31"
+    "accessed": "2026-10-31"
    }
   ],
   "verifiedAt": "2026-10-31",
@@ -922,7 +928,7 @@
    "lon": -122.3935588,
    "from": "https://nominatim.openstreetmap.org/search?q=160+Spear+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
   },
-  "note": "Rule 8: the company contact page lists HQ at 160 Spear St, 15th Floor (read 2026-10-31); the move to One Sansome is targeted for the second half of 2026.",
+  "note": "Rule 8 (publication dates only): the newest dated occupancy source for both Databricks sites is the same 2025-03-06 press release, which names One Sansome the new HQ but says Databricks keeps operating at its current Spear St office until renovations finish in 2026. No dated source confirms the move has happened; the company contact page (undated, read 2026-10-31) still gives 160 Spear St, 15th Floor. So 160 Spear stays primary hq and One Sansome ships as office.",
   "ship": true
  },
  {
@@ -938,7 +944,8 @@
    {
     "url": "https://www.databricks.com/company/newsroom/press-releases/databricks-deepens-san-francisco-investment-new-office-and-multi",
     "kind": "occupancy",
-    "date": "2025-03-06"
+    "date": "2025-03-06",
+    "accessed": "2026-10-31"
    }
   ],
   "verifiedAt": "2026-10-31",
@@ -947,7 +954,7 @@
    "lon": -122.4011683,
    "from": "https://nominatim.openstreetmap.org/search?q=1+Sansome+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
   },
-  "note": "Nine floors leased for the new HQ; renovation due 2026.",
+  "note": "Nine floors (about 150k sf) leased as the future HQ (press release 2025-03-06); move targeted for 2026, not confirmed complete by any dated source as of 2026-10-31.",
   "ship": true
  },
  {
@@ -963,7 +970,7 @@
    {
     "url": "https://wikimediafoundation.org/about/contact/",
     "kind": "occupancy",
-    "date": "2026-10-31"
+    "accessed": "2026-10-31"
    }
   ],
   "verifiedAt": "2026-10-31",
@@ -1126,7 +1133,7 @@
    },
    {
     "url": "https://www.sec.gov/Archives/edgar/data/1512673/000162828026012254/xyz-20251231.htm",
-    "kind": "occupancy",
+    "kind": "company",
     "date": "2026-02-26"
    }
   ],
@@ -1165,7 +1172,7 @@
    },
    {
     "url": "https://www.sec.gov/Archives/edgar/data/1004980/000100498026000009/pcg-20251231.htm",
-    "kind": "occupancy",
+    "kind": "company",
     "date": "2026-02-12"
    }
   ],
@@ -1174,6 +1181,12 @@
    "lat": 37.79178,
    "lon": -122.395756,
    "from": "https://nominatim.openstreetmap.org/search?q=77+Beale+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "building": {
+   "lat": 37.791794,
+   "lon": -122.3957705,
+   "from": "https://www.openstreetmap.org/way/260291405",
+   "reason": "the EAS point for 77 Beale (parcel 3711013) sits on the Beale St edge of the parcel, on a 24 m DataSF footprint; the 34-storey, ~150 m (492 ft) PG&E Building is OSM way 260291405 (height 154), whose centroid this is."
   },
   "note": "Former HQ campus; PG&E sold 77 Beale and moved to 300 Lakeside Dr, Oakland.",
   "ship": true
@@ -1325,5 +1338,35 @@
   },
   "note": "Not shipped: the job posting that named 1098 Harrison St as the SF HQ now returns 404; current postings name only San Francisco.",
   "ship": false
+ },
+ {
+  "id": "firegoat-501-2nd",
+  "companyId": "firegoat",
+  "name": "Firegoat",
+  "primary": true,
+  "address": "501 2nd St",
+  "status": "office",
+  "category": "software",
+  "color": "#ff5a1f",
+  "sources": [
+   {
+    "kind": "operator",
+    "statement": "The agent-office operator states (request relayed 2026-10-31) Firegoat's San Francisco site is 501 2nd St.",
+    "date": "2026-10-31"
+   },
+   {
+    "url": "https://firegoat.ai/",
+    "kind": "company",
+    "accessed": "2026-10-31"
+   }
+  ],
+  "verifiedAt": "2026-10-31",
+  "hint": {
+   "lat": 37.7831785,
+   "lon": -122.3929683,
+   "from": "https://nominatim.openstreetmap.org/search?q=501+2nd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1"
+  },
+  "note": "Address rests on the operator's statement: no public source found giving a street address. firegoat.ai (footer \"© 2026 2027 Inc. San Francisco, California\") and its privacy policy (updated 2026-10-16) confirm San Francisco only.",
+  "ship": true
  }
 ]

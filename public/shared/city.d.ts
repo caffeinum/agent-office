@@ -99,13 +99,17 @@ export interface Manifest {
 export declare function validateManifest(m: unknown): Manifest;
 
 export type CompanyStatus = "hq" | "office" | "former" | "landmark";
-export type SourceKind = "occupancy" | "registry" | "news" | "company";
-export type Placement = "contains" | "nearest";
+export type SourceKind = "occupancy" | "registry" | "news" | "company" | "operator";
+export type Placement = "contains" | "nearest" | "override";
 export declare const COMPANY_STATUSES: readonly CompanyStatus[];
 export declare const SOURCE_KINDS: readonly SourceKind[];
 export declare const PLACEMENTS: readonly Placement[];
 
-export interface CompanySource { url: string; kind: SourceKind; date?: string }
+/** date = when the source was published; accessed = when we read it (undated live pages). Rule 8 compares `date` only. */
+export type CompanySource =
+  | { url: string; kind: Exclude<SourceKind, "operator">; date?: string; accessed?: string }
+  /** the operator's own statement, with no URL to cite */
+  | { kind: "operator"; statement: string; date: string };
 export interface CompanySite {
   id: string;
   companyId: string;

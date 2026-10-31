@@ -252,7 +252,10 @@ test("validateManifest / validateCompanies reject bad data", () => {
   bad((x) => { x.attribution = []; }, /attribution/);
   bad((x) => { x.builtAt = "yesterday"; }, /builtAt/);
   const cbad = (fn, re) => { const x = structuredClone(companies); fn(x); assert.throws(() => validateCompanies(x, manifest), re); };
-  cbad((x) => { x.sites[0].sources = [{ url: "https://x", kind: "registry" }]; }, /occupancy source/);
+  cbad((x) => { x.sites[0].sources = [{ url: "https://x", kind: "registry" }]; }, /occupancy or operator source/);
+  cbad((x) => { x.sites[0].sources = [{ kind: "operator", date: "2026-10-31" }]; }, /statement/);
+  cbad((x) => { x.sites[0].sources = [{ url: "https://x", kind: "occupancy", accessed: "today" }]; }, /accessed/);
+  cbad((x) => { x.sites[0].placement = "guess"; }, /placement/);
   cbad((x) => { x.sites[0].status = "former"; }, /dated news or company/);
   cbad((x) => { x.sites[1].id = x.sites[0].id; }, /duplicate site id/);
   cbad((x) => { x.sites[1].companyId = x.sites[0].companyId; }, /2 primary sites/);

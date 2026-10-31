@@ -396,8 +396,8 @@ export function validateManifest(m) {
 }
 
 export const COMPANY_STATUSES = Object.freeze(["hq", "office", "former", "landmark"]);
-export const SOURCE_KINDS = Object.freeze(["occupancy", "registry", "news", "company"]);
-export const PLACEMENTS = Object.freeze(["contains", "nearest"]);
+export const SOURCE_KINDS = Object.freeze(["occupancy", "registry", "news", "company", "operator"]);
+export const PLACEMENTS = Object.freeze(["contains", "nearest", "override"]);
 const SITE_REQUIRED = [
   "id", "companyId", "name", "primary", "address", "status", "category", "color", "sources", "verifiedAt",
   "lat", "lon", "eas", "hintFrom", "buildingId", "block", "chunk", "anchor", "roofY", "heightM", "placement", "placementDistM",
@@ -405,10 +405,17 @@ const SITE_REQUIRED = [
 const SITE_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 function validateSource(s, what) {
-  keysExactly(s, ["url", "kind"], ["date"], what);
+  if (isObj(s) && s.kind === "operator") {
+    keysExactly(s, ["kind", "statement", "date"], [], what);
+    str(s.statement, `${what}.statement`);
+    if (typeof s.date !== "string" || !ISO_DATE_RE.test(s.date)) throw new Error(`${what}.date must be YYYY-MM-DD`);
+    return;
+  }
+  keysExactly(s, ["url", "kind"], ["date", "accessed"], what);
   str(s.url, `${what}.url`);
   if (!SOURCE_KINDS.includes(s.kind)) throw new Error(`${what}.kind must be one of ${SOURCE_KINDS.join("|")}, got ${s.kind}`);
   if ("date" in s && (typeof s.date !== "string" || !ISO_DATE_RE.test(s.date))) throw new Error(`${what}.date must be YYYY-MM-DD`);
+  if ("accessed" in s && (typeof s.accessed !== "string" || !ISO_DATE_RE.test(s.accessed))) throw new Error(`${what}.accessed must be YYYY-MM-DD`);
 }
 
 function validateSite(s, what, proj, manifest) {
@@ -424,8 +431,8 @@ function validateSite(s, what, proj, manifest) {
   if (!Array.isArray(s.sources) || s.sources.length === 0) throw new Error(`${what}.sources must be a non-empty array`);
   s.sources.forEach((src, i) => validateSource(src, `${what}.sources[${i}]`));
   if (typeof s.verifiedAt !== "string" || !ISO_DATE_RE.test(s.verifiedAt)) throw new Error(`${what}.verifiedAt must be YYYY-MM-DD`);
-  if ((s.status === "hq" || s.status === "office") && !s.sources.some((x) => x.kind === "occupancy")) {
-    throw new Error(`${what}: status ${s.status} needs an occupancy source`);
+  if ((s.status === "hq" || s.status === "office") && !s.sources.some((x) => x.kind === "occupancy" || x.kind === "operator")) {
+    throw new Error(`${what}: status ${s.status} needs an occupancy or operator source`);
   }
   if (s.status === "former" && !s.sources.some((x) => (x.kind === "news" || x.kind === "company") && x.date)) {
     throw new Error(`${what}: status former needs a dated news or company source`);

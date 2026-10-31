@@ -34,6 +34,12 @@ function el(tag, cls, text) {
 }
 
 function sourceLink(src, siteId) {
+  if (src.kind === "operator") {
+    const chip = el("span", "cu-src");
+    chip.title = src.statement;
+    chip.append(el("span", "cu-src-kind", "operator"), el("span", "cu-src-host", "operator statement"), el("time", "", src.date));
+    return chip;
+  }
   let url;
   try { url = new URL(src.url); } catch { throw new Error(`panel: site ${siteId} has an unparseable source url ${JSON.stringify(src.url)}`); }
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error(`panel: site ${siteId} source ${src.url} is not http(s)`);
@@ -43,6 +49,7 @@ function sourceLink(src, siteId) {
   a.rel = "noopener noreferrer";
   a.append(el("span", "cu-src-kind", src.kind), el("span", "cu-src-host", url.hostname.replace(/^www\./, "")));
   if (src.date) a.append(el("time", "", src.date));
+  else if (src.accessed) a.append(el("time", "", `read ${src.accessed}`));
   return a;
 }
 
@@ -56,6 +63,7 @@ function siteCard(s) {
   const meta = el("p", "cu-meta");
   meta.append(el("span", "", s.category), el("span", "", `verified ${s.verifiedAt}`));
   if (s.placement === "nearest") meta.append(el("span", "", `nearest building, ${s.placementDistM} m`));
+  if (s.placement === "override") meta.append(el("span", "", `placed by override, ${s.placementDistM} m from the address point`));
   card.append(meta);
   if (s.note) card.append(el("p", "cu-note", s.note));
   const srcs = el("div", "cu-srcs");

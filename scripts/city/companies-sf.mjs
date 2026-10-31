@@ -12,7 +12,7 @@ import { resolveEas } from "./lib/eas.mjs";
 import { BUDGET, BUILD_DIR, RAW_DIR } from "./sf/config.mjs";
 
 const SRC_REQUIRED = ["id", "companyId", "name", "primary", "address", "status", "category", "color", "sources", "verifiedAt", "hint", "ship"];
-const SRC_OPTIONAL = ["easId", "note"];
+const SRC_OPTIONAL = ["easId", "note", "building"];
 const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -32,6 +32,7 @@ function checkKeys(obj, what) {
   for (const k of Object.keys(obj)) if (!SRC_REQUIRED.includes(k) && !SRC_OPTIONAL.includes(k)) fail(`${what}: unknown field ${k}`);
 }
 
+/** Rule 8 compares publication dates only: `accessed` (when a page was read) never counts as a date. */
 const newestOccupancy = (e) => e.sources.filter((s) => s.kind === "occupancy" && s.date).map((s) => s.date).sort().at(-1) ?? null;
 
 /**
@@ -61,12 +62,27 @@ export function checkSource(entries) {
       fail(`${what}: hint must be {lat, lon, from}`);
     }
     if (h.from !== "scout" && !/^https:\/\//.test(h.from)) fail(`${what}: hint.from must be a https URL or "scout"`);
+    if ("building" in e) {
+      const b = e.building;
+      if (!b || typeof b !== "object" || !Number.isFinite(b.lat) || !Number.isFinite(b.lon) || typeof b.from !== "string" || !/^https:\/\//.test(b.from)
+        || typeof b.reason !== "string" || !b.reason.trim() || Object.keys(b).some((k) => !["lat", "lon", "from", "reason"].includes(k))) {
+        fail(`${what}: building override must be {lat, lon, from: https URL, reason}`);
+      }
+    }
     if (!Array.isArray(e.sources)) fail(`${what}: sources must be an array`);
     e.sources.forEach((s, j) => {
-      if (!s || typeof s.url !== "string" || !/^https:\/\//.test(s.url)) fail(`${what}.sources[${j}]: url must be https`);
-      if (!SOURCE_KINDS.includes(s.kind)) fail(`${what}.sources[${j}]: kind ${s.kind} not in ${SOURCE_KINDS.join("|")}`);
+      if (!s || !SOURCE_KINDS.includes(s.kind)) fail(`${what}.sources[${j}]: kind ${s?.kind} not in ${SOURCE_KINDS.join("|")}`);
+      if (s.kind === "operator") {
+        // the operator's own statement: no URL to cite, so it carries the statement text and the date it was made
+        if (typeof s.statement !== "string" || !s.statement.trim() || !DATE_RE.test(s.date ?? "")) fail(`${what}.sources[${j}]: an operator source needs {kind, statement, date}`);
+        for (const k of Object.keys(s)) if (!["kind", "statement", "date"].includes(k)) fail(`${what}.sources[${j}]: unknown field ${k} on an operator source`);
+        return;
+      }
+      if (typeof s.url !== "string" || !/^https:\/\//.test(s.url)) fail(`${what}.sources[${j}]: url must be https`);
       if ("date" in s && !DATE_RE.test(s.date)) fail(`${what}.sources[${j}]: date must be YYYY-MM-DD`);
-      for (const k of Object.keys(s)) if (!["url", "kind", "date"].includes(k)) fail(`${what}.sources[${j}]: unknown field ${k}`);
+      if ("accessed" in s && !DATE_RE.test(s.accessed)) fail(`${what}.sources[${j}]: accessed must be YYYY-MM-DD`);
+      if (s.date && s.accessed && s.accessed < s.date) fail(`${what}.sources[${j}]: accessed ${s.accessed} is before the publication date ${s.date}`);
+      for (const k of Object.keys(s)) if (!["url", "kind", "date", "accessed"].includes(k)) fail(`${what}.sources[${j}]: unknown field ${k}`);
     });
     if (!DATE_RE.test(e.verifiedAt)) fail(`${what}: verifiedAt must be YYYY-MM-DD`);
     if (!e.ship) {
@@ -76,8 +92,11 @@ export function checkSource(entries) {
     }
     // rule 1
     if (e.sources.length === 0) fail(`${what}: rule 1: a shipped site needs at least one source`);
-    if ((e.status === "hq" || e.status === "office") && !e.sources.some((s) => s.kind === "occupancy")) {
-      fail(`${what}: rule 1: status ${e.status} needs an occupancy source (registry alone is not enough)`);
+    if ((e.status === "hq" || e.status === "office") && !e.sources.some((s) => s.kind === "occupancy" || s.kind === "operator")) {
+      fail(`${what}: rule 1: status ${e.status} needs an occupancy or operator source (registry alone is not enough)`);
+    }
+    if (e.sources.some((s) => s.kind === "operator") && !/operator/i.test(e.note ?? "")) {
+      fail(`${what}: rule 1: a site resting on an operator statement must say so in its note`);
     }
     if (e.status === "former" && !e.sources.some((s) => (s.kind === "news" || s.kind === "company") && s.date)) {
       fail(`${what}: rule 1: status former needs a dated news or company source`);
@@ -159,14 +178,26 @@ function nearest(columnAt, bx, bz, radius, ok) {
   return best && { ...best, d: bestD };
 }
 
-/** Rules 4 and 5 on the chunk grid. block = the EAS column. → {building, placement, placementDistM, anchor} */
-export function placeOnGrid(columnAt, block, what = "site") {
+/**
+ * Rules 4 and 5 on the chunk grid. block = the EAS column. `override` = the column of a documented point inside the
+ * intended footprint (src `building`), which must be a building column within PLACE_RADIUS.
+ * → {building, placement, placementDistM, anchor}
+ */
+export function placeOnGrid(columnAt, block, what = "site", override = null) {
   const here = columnAt(block.x, block.z);
   if (!here) fail(`${what}: column ${block.x},${block.z} is outside the built city`);
   let building;
   let placement;
   let placementDistM;
-  if (here.building) {
+  if (override) {
+    const col = columnAt(override.x, override.z);
+    if (!col?.building) fail(`${what}: building override column ${override.x},${override.z} is not a building`);
+    const d = Math.hypot(override.x - block.x, override.z - block.z);
+    if (d > PLACE_RADIUS) fail(`${what}: building override is ${d.toFixed(1)} blocks from the EAS column, more than ${PLACE_RADIUS}`);
+    building = col.building;
+    placement = "override";
+    placementDistM = Math.round(d * BLOCK_M * 10) / 10;
+  } else if (here.building) {
     building = here.building;
     placement = "contains";
     placementDistM = 0;
@@ -191,7 +222,11 @@ export function placeOnGrid(columnAt, block, what = "site") {
 const round7 = (v) => Number(v.toFixed(7));
 
 function siteFor(e, eas, place, block) {
-  const notes = [e.note, eas.range ? `Address range ${eas.range}; EAS queried the first number.` : null].filter(Boolean);
+  const notes = [
+    e.note,
+    eas.range ? `Address range ${eas.range}; EAS queried the first number.` : null,
+    e.building ? `Placed by override: ${e.building.reason}` : null,
+  ].filter(Boolean);
   const { building } = place;
   return {
     id: e.id, companyId: e.companyId, name: e.name, primary: e.primary, address: e.address, status: e.status,
@@ -247,7 +282,12 @@ export async function buildCompanies({
       outside.push({ id: e.id, chunk: [cx, cz] });
       continue;
     }
-    sites.push(siteFor(e, eas, placeOnGrid(columnAt, block, `${e.id} (${e.address})`), block));
+    let override = null;
+    if (e.building) {
+      const o = lonLatToBlock(e.building.lon, e.building.lat, manifest.proj);
+      override = { x: Math.floor(o.x), z: Math.floor(o.z) };
+    }
+    sites.push(siteFor(e, eas, placeOnGrid(columnAt, block, `${e.id} (${e.address})`, override), block));
   }
   for (const o of outside) {
     const e = shipped.find((x) => x.id === o.id);
@@ -263,6 +303,7 @@ export async function buildCompanies({
     outsideBbox: outside,
     scoutHints: shipped.filter((e) => e.hint.from === "scout").map((e) => e.id),
     nearest: sites.filter((s) => s.placement === "nearest").map((s) => ({ id: s.id, placementDistM: s.placementDistM })),
+    overrides: sites.filter((s) => s.placement === "override").map((s) => ({ id: s.id, placementDistM: s.placementDistM })),
     hintDistM: Object.fromEntries([...points].map(([id, r]) => [id, Math.round(r.distM * 10) / 10])),
     bytes: Buffer.byteLength(json),
   };

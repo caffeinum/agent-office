@@ -130,8 +130,8 @@ const base = () => ({
 
 await test("rule 1: occupancy for hq/office, dated news for former, registry is never enough", () => {
   assert.equal(checkSource([base()]).shipped.length, 1);
-  assert.throws(() => checkSource([{ ...base(), sources: [{ url: "https://data.sf.gov/x", kind: "registry" }] }]), /needs an occupancy source/);
-  assert.throws(() => checkSource([{ ...base(), status: "office", sources: [{ url: "https://n.example/a", kind: "news", date: "2026-01-01" }] }]), /needs an occupancy source/);
+  assert.throws(() => checkSource([{ ...base(), sources: [{ url: "https://data.sf.gov/x", kind: "registry" }] }]), /needs an occupancy or operator source/);
+  assert.throws(() => checkSource([{ ...base(), status: "office", sources: [{ url: "https://n.example/a", kind: "news", date: "2026-01-01" }] }]), /needs an occupancy or operator source/);
   assert.throws(() => checkSource([{ ...base(), sources: [] }]), /at least one source/);
   assert.throws(() => checkSource([{ ...base(), status: "former", sources: [{ url: "https://n.example/a", kind: "news" }] }]), /dated news or company/);
   assert.equal(checkSource([{ ...base(), status: "former", sources: [{ url: "https://n.example/a", kind: "news", date: "2024-08-05" }] }]).shipped.length, 1);
@@ -157,6 +157,30 @@ await test("rules 7 and 8: one primary per company, newest occupancy is the hq",
   assert.throws(() => checkSource([{ ...base(), status: "office" }, office]), /must have status hq/);
 });
 
+await test("accessed vs date: rule 8 compares publication dates only", () => {
+  const office = { ...base(), id: "acme-2", primary: false, status: "office", sources: [{ url: "https://n.example/lease", kind: "occupancy", date: "2025-06-01" }] };
+  const readOnly = { ...base(), sources: [{ url: "https://acme.example/contact", kind: "occupancy", accessed: "2026-10-31" }] };
+  assert.equal(checkSource([readOnly]).shipped.length, 1, "an undated page read on a date is still an occupancy source");
+  assert.throws(() => checkSource([readOnly, office]), /primary acme-hq needs a dated occupancy source/);
+  assert.throws(() => checkSource([{ ...base(), sources: [{ url: "https://a.example/", kind: "occupancy", date: "2026-01-01", accessed: "2025-01-01" }] }]), /before the publication date/);
+  assert.throws(() => checkSource([{ ...base(), sources: [{ url: "https://a.example/", kind: "occupancy", accessed: "31/10/2026" }] }]), /accessed must be YYYY-MM-DD/);
+});
+
+await test("operator statements: a cited-nowhere address must be marked as the operator's word", () => {
+  const op = { kind: "operator", statement: "the operator says so", date: "2026-10-31" };
+  assert.equal(checkSource([{ ...base(), sources: [op], note: "rests on the operator's statement" }]).shipped.length, 1);
+  assert.throws(() => checkSource([{ ...base(), sources: [op] }]), /must say so in its note/);
+  assert.throws(() => checkSource([{ ...base(), sources: [{ ...op, url: "https://x.example/" }], note: "operator" }]), /unknown field url/);
+  assert.throws(() => checkSource([{ ...base(), sources: [{ kind: "operator", date: "2026-10-31" }], note: "operator" }]), /needs \{kind, statement, date\}/);
+});
+
+await test("building override: shape is checked", () => {
+  const b = { lat: 37.79, lon: -122.39, from: "https://www.openstreetmap.org/way/1", reason: "why" };
+  assert.equal(checkSource([{ ...base(), building: b }]).shipped.length, 1);
+  assert.throws(() => checkSource([{ ...base(), building: { ...b, reason: "" } }]), /building override/);
+  assert.throws(() => checkSource([{ ...base(), building: { ...b, from: "memory" } }]), /building override/);
+});
+
 // ---------- the real roster ----------
 
 await test("roster: ≥ 40 shipped sites meeting rule 1, all leads explained", () => {
@@ -168,6 +192,10 @@ await test("roster: ≥ 40 shipped sites meeting rule 1, all leads explained", (
   assert.equal(shipped.filter((e) => e.hint.from === "scout").length, 0, "no shipped site rests on a scout hint");
   const formers = shipped.filter((e) => e.status === "former").map((e) => e.companyId).sort();
   assert.deepEqual(formers, ["block", "pge", "x"]);
+  for (const e of shipped.filter((x) => x.status === "former")) {
+    for (const s of e.sources) assert.notEqual(s.kind, "occupancy", `${e.id}: a former site's sources document the departure, not occupancy (${s.url})`);
+  }
+  for (const e of shipped) for (const s of e.sources) if (s.date) assert.ok(s.date <= e.verifiedAt, `${e.id}: publication date ${s.date} after verifiedAt`);
 });
 
 await test("roster: Anthropic rule 8 decision and OpenAI campus are recorded", () => {
@@ -292,6 +320,9 @@ await test("sf: companies.json against the real chunks [post-int]", () => {
   assert.equal(openai.address, "1455 3rd St");
   const slack = doc.sites.find((s) => s.id === "slack-salesforce-tower");
   assert.equal(slack.buildingId, sf.buildingId, "415 Mission is shared by Salesforce and Slack");
+  const pge = doc.sites.find((s) => s.id === "pge-77-beale");
+  assert.equal(pge.placement, "override");
+  assert.ok(pge.heightM >= 140 && pge.heightM <= 160, `77 Beale is the ~150 m PG&E Building, got ${pge.heightM} m`);
 });
 
 console.log(`companies.check: ${passed} passed`);
