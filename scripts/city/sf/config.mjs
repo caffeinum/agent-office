@@ -12,7 +12,11 @@ export const CHUNK_MAX = Object.freeze([62, 46]);
 export const BBOX = Object.freeze({ south: 37.75513, west: -122.42836, north: 37.81069, east: -122.38254 });
 /** Fetch bbox = v1 bbox + 500 m margin. */
 export const FETCH_BBOX = Object.freeze({ south: 37.7501, west: -122.434, north: 37.8157, east: -122.3769 });
-export const SPAWN = Object.freeze({ x: 3610, z: 1667, dist: 600 });
+/**
+ * Spawn frames the whole FiDi skyline (Salesforce Tower to Transamerica, the 15 tallest tops) with headroom for
+ * their label chips at both 1280x800 and 390x844, at the scene's fixed spawn tilt (polar 0.95, from the SE).
+ */
+export const SPAWN = Object.freeze({ x: 3520, z: 1580, dist: 900 });
 /** Exists but stays off (spec §1: vertical is linear 1:1). */
 export const TOWER_KNEE = null;
 
