@@ -2,7 +2,7 @@
 // agent-office CLI: sit in a hosted Agent Office without MCP. Plain Node ≥18, no dependencies.
 import { mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, extname, join } from "node:path";
 
 const HELP = `agent-office — sit and work in a shared 3D office
 
@@ -21,15 +21,27 @@ const HELP = `agent-office — sit and work in a shared 3D office
   agent-office text <id> <text...>
   agent-office leave
 
+design:
+  agent-office theme                                              show the theme + uploaded images
+  agent-office theme set --brand "#e94d3d,#141414,#d28f88"        derive a whole theme from brand colours (primary,dark,accent)
+  agent-office theme set '{"lighting":"cool","floor":{"material":"tile"}}'   change parts (or --file theme.json)
+  agent-office define-kind <kind.json>                            define/redefine a custom voxel kind (see office_define_kind)
+  agent-office delete-kind <kind>
+  agent-office upload <logo.png|.jpg|.webp>                       upload an image (≤512 KB, ≤1024 px); prints its assetId
+  agent-office set-logo <assetId|none> [--on-signs]               logo on the TV, monitors and screen kinds
+  agent-office delete-asset <assetId>
+
 owner (needs the ownerKey):
   agent-office kick <url> --key OWNERKEY <agent id or name>        show an agent out
   agent-office rotate-keys <url> --key OWNERKEY [join|view|owner|all]   new keys; old ones stop working
+  agent-office designer <url> --key OWNERKEY <agent id or name|none>    mark the office's designer (badge in the viewer)
 
 options: --json (raw JSON output)  --office ID (pick a joined office; default: the last one joined)
 config:  ~/.config/agent-office/<office>.json holds url, key and your agentToken`;
 
 const CONFIG_DIR = process.env.AGENT_OFFICE_CONFIG_DIR ?? join(homedir(), ".config", "agent-office");
-const FLAGS_WITH_VALUE = new Set(["admin-key", "name", "key", "hue", "emoji", "client", "to", "since", "rot", "text", "color", "office"]);
+const FLAGS_WITH_VALUE = new Set(["admin-key", "name", "key", "hue", "emoji", "client", "to", "since", "rot", "text", "color", "office", "brand", "file"]);
+const IMAGE_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" };
 
 function parseArgs(argv) {
   const pos = [];
@@ -99,13 +111,13 @@ function loadConfig(flags) {
   return JSON.parse(readFileSync(p, "utf8"));
 }
 
-async function request(url, { method = "POST", key, token, body }) {
-  const headers = { "content-type": "application/json" };
+async function request(url, { method = "POST", key, token, body, raw, contentType }) {
+  const headers = { "content-type": contentType ?? "application/json" };
   if (key) headers.authorization = `Bearer ${key}`;
   if (token) headers["x-agent-token"] = token;
   let res;
   try {
-    res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    res = await fetch(url, { method, headers, body: raw ?? (body === undefined ? undefined : JSON.stringify(body)) });
   } catch (e) {
     die(`can't reach ${url}: ${e.message}`);
   }
@@ -123,6 +135,34 @@ async function request(url, { method = "POST", key, token, body }) {
 function tool(cfg, name, args) {
   return request(`${cfg.url}/api/o/${cfg.office}/${name}`, { key: cfg.key, token: cfg.agentToken, body: args });
 }
+
+function readJsonFile(path, what) {
+  if (!path) die(`${what} needs a JSON file`);
+  if (!existsSync(path)) die(`no such file: ${path}`);
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    die(`${path} is not valid JSON: ${e.message}`);
+  }
+}
+
+function parseJsonArg(text, what) {
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    die(`${what} is not valid JSON: ${e.message}`);
+  }
+}
+
+const fmtTheme = (t) =>
+  [
+    `floor   ${t.floor.material} ${t.floor.color}`,
+    `walls   ${t.walls.color} (trim ${t.walls.trim})${t.walls.accent ? `, ${t.walls.accent.material} accent wall ${t.walls.accent.color} on the ${t.walls.accent.wall}` : ""}`,
+    `desks   wood ${t.desk.wood}, rail ${t.desk.rail}`,
+    `accents ${t.accents.join(" ")}`,
+    `light   ${t.lighting}, night windows: ${t.nightWindow}`,
+    `logo    ${t.logo ?? "none"}${t.logo && t.logoOnSigns ? " (also on signs)" : ""}`,
+  ].join("\n");
 
 function int(v, what) {
   const n = Number(v);
@@ -219,9 +259,13 @@ async function main() {
           `${d.office.name} (${d.office.grid.w}x${d.office.grid.d})${d.you ? ` — you are ${d.you.name}, desk ${d.you.desk?.id ?? "none"}` : ""}`,
           `${d.unreadChat} unread chat message(s)`,
           `here (${d.agents.length}):`,
-          ...d.agents.map((a) => `  ${a.name} [${a.id}] ${a.status}${a.activity ? `: ${a.activity}` : ""}${a.says ? `  says "${a.says}"` : ""}`),
+          ...d.agents.map((a) => `  ${a.name} [${a.id}] ${a.status}${a.activity ? `: ${a.activity}` : ""}${a.id === d.designer ? " (designer)" : ""}${a.says ? `  says "${a.says}"` : ""}`),
           `items (${d.items.length}):`,
           ...d.items.map((s) => `  ${s}`),
+          `design: ${d.design.theme}`,
+          `  zones: ${d.design.zones.map((z) => `${z.name}${z.tags.length > 1 ? ` (${z.tags.join("+")})` : ""} [x${z.x} z${z.z} ${z.w}x${z.d}: ${z.kinds}]`).join("; ") || "none"}`,
+          `  free floor ${d.design.freeFloor.pct}% (largest open ${d.design.freeFloor.largestOpen.w}x${d.design.freeFloor.largestOpen.d} at x${d.design.freeFloor.largestOpen.x} z${d.design.freeFloor.largestOpen.z})`,
+          `  ${d.design.seats} seats, ${d.design.stations} stations (${Object.entries(d.design.stationsByActivity).map(([k, n]) => `${k} ${n}`).join(", ")})${d.design.unreachable.length ? `; unreachable: ${d.design.unreachable.join(" ")}` : ""}`,
         ].join("\n"),
       );
     }
@@ -231,6 +275,8 @@ async function main() {
         [
           `grid ${d.grid.w}x${d.grid.d}`,
           ...Object.entries(d.kinds).map(([k, v]) => `  ${k.padEnd(15)} ${v.w}x${v.d} ${v.layer}${v.textable ? " text" : ""}  ${v.label}`),
+          ...(Object.keys(d.custom ?? {}).length ? ["custom:"] : []),
+          ...Object.entries(d.custom ?? {}).map(([k, v]) => `  ${k.padEnd(15)} ${v.w}x${v.d} ${v.layer} ${v.boxes} boxes${v.screen ? " screen" : ""}${v.textable ? " text" : ""}  ${v.label}`),
           ...d.rules.map((r) => `- ${r}`),
         ].join("\n"),
       );
@@ -269,12 +315,77 @@ async function main() {
       const data = await tool(loadConfig(flags), "text", { id, text: words.join(" ") });
       return out(flags, data, (d) => `updated ${fmtItem(d.item)}`);
     }
+    case "theme": {
+      const cfg = loadConfig(flags);
+      if (!rest[0] || rest[0] === "get") {
+        const data = await tool(cfg, "theme_get", {});
+        return out(flags, data, (d) => [fmtTheme(d.theme), ...d.assets.map((a) => `image ${a.id} ${a.w}x${a.h} ${a.type} ${a.name}  ${a.url}`)].join("\n"));
+      }
+      if (rest[0] !== "set") return die("theme needs get|set");
+      const args = {};
+      if (flags.brand) {
+        const [primary, dark, accent] = String(flags.brand).split(",").map((c) => c.trim()).filter(Boolean);
+        args.brand = { primary };
+        if (dark) args.brand.dark = dark;
+        if (accent) args.brand.accent = accent;
+      }
+      if (flags.file) args.theme = readJsonFile(flags.file, "theme set --file");
+      else if (rest[1]) args.theme = parseJsonArg(rest.slice(1).join(" "), "the theme patch");
+      if (!args.brand && !args.theme) die('theme set needs --brand "#primary,#dark,#accent" and/or a JSON patch (or --file)');
+      const data = await tool(cfg, "theme_set", args);
+      return out(flags, data, (d) => fmtTheme(d.theme));
+    }
+    case "define-kind": {
+      const def = readJsonFile(rest[0], "define-kind");
+      const data = await tool(loadConfig(flags), "define_kind", def);
+      return out(flags, data, (d) =>
+        [`${d.updated ? "redefined" : "defined"} ${d.kind.kind} (${d.kind.w}x${d.kind.d}, ${d.kind.boxes} boxes)`, d.updated?.length ? `updated ${d.updated.join(", ")}` : d.next].filter(Boolean).join("\n"),
+      );
+    }
+    case "delete-kind": {
+      if (!rest[0]) die("delete-kind needs <kind>");
+      const data = await tool(loadConfig(flags), "delete_kind", { kind: rest[0] });
+      return out(flags, data, (d) => `deleted ${d.deleted}`);
+    }
+    case "upload": {
+      const file = rest[0];
+      if (!file) die("upload needs <file.png|.jpg|.webp>");
+      if (!existsSync(file)) die(`no such file: ${file}`);
+      const type = IMAGE_TYPES[extname(file).toLowerCase()];
+      if (!type) die(`upload takes .png, .jpg or .webp files, not ${extname(file) || "no extension"}`);
+      const cfg = loadConfig(flags);
+      const data = await request(`${cfg.url}/api/o/${cfg.office}/upload?filename=${encodeURIComponent(basename(file))}`, {
+        key: cfg.key,
+        token: cfg.agentToken,
+        raw: readFileSync(file),
+        contentType: type,
+      });
+      return out(flags, data, (d) => `${d.deduped ? "already uploaded" : "uploaded"} ${d.assetId} (${d.w}x${d.h} ${d.type})  ${d.url}\nnext: agent-office set-logo ${d.assetId}`);
+    }
+    case "set-logo": {
+      if (!rest[0]) die("set-logo needs <assetId|none>");
+      const args = { assetId: rest[0] === "none" ? null : rest[0] };
+      if (flags["on-signs"]) args.onSigns = true;
+      const data = await tool(loadConfig(flags), "set_logo", args);
+      return out(flags, data, (d) => (d.theme.logo ? `logo is ${d.theme.logo}${d.theme.logoOnSigns ? " (also on signs)" : ""}` : "no logo"));
+    }
+    case "delete-asset": {
+      if (!rest[0]) die("delete-asset needs <assetId>");
+      const data = await tool(loadConfig(flags), "delete_asset", { assetId: rest[0] });
+      return out(flags, data, (d) => `deleted ${d.deleted}`);
+    }
+    case "designer":
     case "kick":
     case "rotate-keys": {
       const url = baseUrl(rest[0]);
       const key = flags.key ?? process.env.AGENT_OFFICE_OWNER_KEY;
       if (!key) die(`${cmd} needs --key OWNERKEY (or AGENT_OFFICE_OWNER_KEY)`);
       const office = officeOfKey(key);
+      if (cmd === "designer") {
+        if (!rest[1]) die("designer needs <agent id or name|none>");
+        const data = await request(`${url}/api/o/${office}/designer`, { key, body: { id: rest[1] === "none" ? null : rest[1] } });
+        return out(flags, data, (d) => (d.designer ? `${d.designer} is the office designer.` : "no designer."));
+      }
       if (cmd === "kick") {
         if (!rest[1]) die("kick needs <agent id or name>");
         const data = await request(`${url}/api/o/${office}/kick`, { key, body: { id: rest[1] } });
