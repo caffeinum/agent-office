@@ -1,0 +1,139 @@
+{
+ "version": 1,
+ "city": "fixture",
+ "builtAt": "2026-10-31T00:00:00Z",
+ "sites": [
+  {
+   "id": "fixture-labs",
+   "companyId": "fixture-labs",
+   "name": "Fixture Labs",
+   "primary": true,
+   "address": "1 Fixture Tower",
+   "status": "hq",
+   "category": "ai-lab",
+   "color": "#d97757",
+   "sources": [
+    {
+     "url": "https://example.com/fixture-labs/office",
+     "kind": "occupancy",
+     "date": "2026-10-31"
+    }
+   ],
+   "verifiedAt": "2026-10-31",
+   "note": "synthetic fixture company",
+   "lat": 37.7895146,
+   "lon": -122.3939428,
+   "eas": {
+    "id": 900001,
+    "parcel": "FIXTURE-900001"
+   },
+   "hintFrom": "fixture",
+   "buildingId": 8,
+   "block": {
+    "x": 3697,
+    "z": 1676
+   },
+   "chunk": [
+    57,
+    26
+   ],
+   "anchor": {
+    "x": 3697,
+    "y": 1,
+    "z": 1668
+   },
+   "roofY": 101,
+   "heightM": 300,
+   "placement": "contains",
+   "placementDistM": 0
+  },
+  {
+   "id": "example-robotics",
+   "companyId": "example-robotics",
+   "name": "Example Robotics",
+   "primary": true,
+   "address": "1 Fixture Tower",
+   "status": "hq",
+   "category": "robotics",
+   "color": "#4f7cff",
+   "sources": [
+    {
+     "url": "https://example.com/example-robotics/office",
+     "kind": "occupancy",
+     "date": "2026-10-31"
+    }
+   ],
+   "verifiedAt": "2026-10-31",
+   "note": "synthetic fixture company",
+   "lat": 37.7895146,
+   "lon": -122.3938406,
+   "eas": {
+    "id": 900002,
+    "parcel": "FIXTURE-900002"
+   },
+   "hintFrom": "fixture",
+   "buildingId": 8,
+   "block": {
+    "x": 3700,
+    "z": 1676
+   },
+   "chunk": [
+    57,
+    26
+   ],
+   "anchor": {
+    "x": 3700,
+    "y": 1,
+    "z": 1668
+   },
+   "roofY": 101,
+   "heightM": 300,
+   "placement": "contains",
+   "placementDistM": 0
+  },
+  {
+   "id": "sample-bakery",
+   "companyId": "sample-bakery",
+   "name": "Sample Bakery Co",
+   "primary": true,
+   "address": "7 Slope Lane",
+   "status": "hq",
+   "category": "food",
+   "color": "#c08a3e",
+   "sources": [
+    {
+     "url": "https://example.com/sample-bakery/office",
+     "kind": "occupancy",
+     "date": "2026-10-31"
+    }
+   ],
+   "verifiedAt": "2026-10-31",
+   "note": "synthetic fixture company",
+   "lat": 37.7895689,
+   "lon": -122.3966362,
+   "eas": {
+    "id": 900003,
+    "parcel": "FIXTURE-900003"
+   },
+   "hintFrom": "fixture",
+   "buildingId": 7,
+   "block": {
+    "x": 3618,
+    "z": 1674
+   },
+   "chunk": [
+    56,
+    26
+   ],
+   "anchor": {
+    "x": 3618,
+    "y": 1,
+    "z": 1668
+   },
+   "roofY": 12,
+   "heightM": 21,
+   "placement": "contains",
+   "placementDistM": 0
+  }
+ ]
+}
