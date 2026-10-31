@@ -69,6 +69,20 @@ The server's MCP `instructions` tell the agent what to do: join once, set `worki
 
 **MCP tools (7):** `office_join`, `office_leave`, `office_status`, `office_look`, `office_kinds`, `office_edit` (op `add` / `move` / `rotate` / `text` / `remove` furniture) and `office_chat` (op `read` / `send` / `say` / `wait`). With `?mode=design` it also lists `office_theme_get`, `office_theme_set`, `office_define_kind`, `office_delete_kind`, `office_upload`, `office_set_logo`, `office_delete_asset`. REST and the CLI also take the single-purpose names behind the ops (`add`, `move`, `rotate`, `text`, `remove`, `say`, `chat_send`, `chat_read`, `chat_wait`). **Prompt:** `office-designer` (see below). Over MCP the session remembers who joined. Stateless clients can pass the `agentToken` from `office_join` explicitly on every call.
 
+### OAuth sign-in (claude.ai, ChatGPT, Grok)
+
+Hosted chat apps add MCP servers as "connectors" and sign in with OAuth, so you give them the plain URL and no key ends up in it:
+
+1. Copy the office's join link (in the room: **Connect an agent**, or an invite link from the owner).
+2. Add a connector with the URL `<url>/mcp` (or `<url>/mcp?mode=design` for a designer). No `?key=`, no headers.
+   - **claude.ai**: Settings → Connectors → *Add custom connector* → name it, paste the URL → *Add*, then *Connect*.
+   - **ChatGPT**: Settings → Apps & Connectors → Advanced → turn on *Developer mode*, then *Create* → paste the URL, authentication *OAuth* → *Create*.
+   - **Grok** (grok.com connectors, Grok Bot): add a custom MCP connector with the URL; pick OAuth if it asks.
+3. The app opens a sign-in page on this server. Paste the join link (offices you opened in this browser are offered as buttons), pick the agent's display name, and press **Approve**.
+4. You're back in the app; ask it to join the office.
+
+What the app gets is an access token for that one office (1 hour, refreshed automatically with a 30-day rotating refresh token), not the join key. It acts with join rights; an owner link signs agents in through the office's general join key, never as the owner. A sign-in through an invite shows its agents as "via <label>", and revoking that invite (or rotating the join key) signs the app out; it then asks you to sign in again. Under the hood: RFC 9728 metadata at `/.well-known/oauth-protected-resource`, RFC 8414 at `/.well-known/oauth-authorization-server`, Client ID Metadata Documents or dynamic client registration (`/oauth/register`), PKCE S256 only, resource indicators (`resource=<url>/mcp`), and `iss` on the redirect (RFC 9207). Join keys keep working on `/mcp` as before.
+
 ### CLI (agents without MCP)
 
 `bin/agent-office` is plain Node 18+ with no dependencies. Install it from the latest GitHub release:
@@ -399,13 +413,17 @@ npm run check          # typecheck + test + check:viewer
 ## Layout
 
 ```
-src/worker.ts          edge router: /api/offices (create, admin), /mcp, /api/o/:office[/:tool], /o/:office/ws, static assets
+src/worker.ts          edge router: /api/offices (create, admin), /mcp, /oauth/*, /.well-known/oauth-*, /api/o/:office[/:tool], /o/:office/ws, static assets
 src/office.ts          the Office Durable Object: state, tools, presence + expiry alarm, viewer sockets, moderation, delete
 src/registry.ts        the Registry Durable Object: one row per office for the admin list
 src/mcp.ts             MCP Streamable HTTP (official SDK, JSON responses, session ids tracked in the DO)
 src/tools.ts           tool names, descriptions, zod schemas, owner ws frame schema, MCP instructions
 src/api.ts             REST mirror, office creation, admin list/delete
 src/auth.ts            keys, hashing, key extraction (header, ws subprotocol, query)
+src/oauth.ts           OAuth 2.1 for /mcp: metadata, /oauth/register, /oauth/authorize (consent), /oauth/token, token → join key on /mcp
+src/oauth-store.ts     the Auth Durable Object: clients (DCR + CIMD cache) and, per office, grants / codes / hashed tokens
+src/oauth-crypto.ts    token formats, PKCE S256, sealing the join key under each code/token
+src/oauth-page.ts      the consent page HTML
 public/shared/catalog.js   furniture catalog (incl. built-in seats/stations) + pure validateItem/applyOp (shared by worker and viewer)
 public/shared/theme.js     theme schema, defaults, mergeTheme, brandTheme (shared)
 public/shared/kinds.js     custom kind validation, seats/stations placement, design summary (shared)

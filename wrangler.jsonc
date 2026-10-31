@@ -13,15 +13,21 @@
   "durable_objects": {
     "bindings": [
       { "name": "OFFICE", "class_name": "Office" },
-      { "name": "REGISTRY", "class_name": "Registry" }
+      { "name": "REGISTRY", "class_name": "Registry" },
+      { "name": "AUTH", "class_name": "Auth" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Office"] },
-    { "tag": "v2", "new_sqlite_classes": ["Registry"] }
+    { "tag": "v2", "new_sqlite_classes": ["Registry"] },
+    { "tag": "v3", "new_sqlite_classes": ["Auth"] }
   ],
   // keyless office creation from the landing page: per client IP
-  "ratelimits": [{ "name": "CREATE_LIMIT", "namespace_id": "1001", "simple": { "limit": 3, "period": 60 } }],
+  "ratelimits": [
+    { "name": "CREATE_LIMIT", "namespace_id": "1001", "simple": { "limit": 3, "period": 60 } },
+    // OAuth /register, /token and consent submits: per client IP and endpoint
+    { "name": "OAUTH_LIMIT", "namespace_id": "1002", "simple": { "limit": 30, "period": 60 } }
+  ],
   "observability": { "enabled": true }
   // secrets: ADMIN_KEY (wrangler secret put ADMIN_KEY; locally in .dev.vars)
 }

@@ -3,9 +3,11 @@
 import { keyFromRequest, OFFICE_ID_RE, officeOfKey } from "./auth";
 import { handleAdmin, handleCreateOffice } from "./api";
 import { CORS_HEADERS, errorResponse, HttpError, json, withCors } from "./http";
+import { bearerOf, handleOAuth, isAccessToken, isOAuthPath, mcpViaOAuth, withChallenge, withoutGrantHeader } from "./oauth";
 
 export { Office } from "./office";
 export { Registry } from "./registry";
+export { Auth } from "./oauth-store";
 
 function officeStub(env: Env, id: string): DurableObjectStub {
   return env.OFFICE.get(env.OFFICE.idFromName(id));
@@ -38,15 +40,21 @@ async function route(req: Request, env: Env): Promise<Response> {
   if (path === "/health") return json(200, { ok: true });
   if (path === "/api/offices" && req.method === "POST") return handleCreateOffice(req, env);
   if (path === "/api/offices" || path.startsWith("/api/offices/")) return withCors(await handleAdmin(req, env, path.slice("/api/offices/".length)));
+  const forward = (office: string, r: Request) => officeStub(env, office).fetch(r);
+  if (isOAuthPath(path)) return handleOAuth(req, env, forward);
   if (path === "/mcp") {
+    const bearer = bearerOf(req);
+    if (isAccessToken(bearer)) return withCors(await mcpViaOAuth(req, env, bearer, forward));
     const office = officeOfKey(keyFromRequest(req));
-    if (!office) return errorResponse(401, "MCP needs Authorization: Bearer <joinKey> (or ?key=<joinKey>)");
-    return withCors(await officeStub(env, office).fetch(req));
+    if (!office) return withCors(withChallenge(errorResponse(401, "MCP needs Authorization: Bearer <joinKey> (or ?key=<joinKey>)"), url.origin));
+    const res = await forward(office, withoutGrantHeader(req));
+    return withCors(res.status === 401 ? withChallenge(res, url.origin) : res);
   }
   if (path.startsWith("/mcp/")) {
     const keyed = keyInPath(req, path.slice("/mcp/".length).replace(/\/$/, ""));
     if (!keyed) return errorResponse(401, "the key in /mcp/<joinKey> is malformed (expected <officeId>.<secret>)");
-    return withCors(await officeStub(env, keyed.office).fetch(keyed.req));
+    const res = await forward(keyed.office, withoutGrantHeader(keyed.req));
+    return withCors(res.status === 401 ? withChallenge(res, url.origin) : res);
   }
   const api = /^\/api\/o\/([^/]+)(?:\/[a-z_-]+)?$/.exec(path);
   if (api) {

@@ -12,6 +12,7 @@ import {
 import { CORS_HEADERS, errorResponse, HttpError, json, readJson } from "./http";
 import { CHAT_WAIT_DEFAULT_SEC, isMergedTool, MERGED_ROUTES, NAME_MAX, SPOOF_LINE_RE, parseArgs, parseOwnerFrame, ToolError, type MergedTool, type Status, type ToolArgs, type ToolName, ACTIVITY_MAX } from "./tools";
 import { CHANNEL_METHOD, handleMcp } from "./mcp";
+import { grantFromRequest, type OAuthGrant } from "./oauth";
 import { handleRest } from "./api";
 import { registryStub } from "./registry";
 import { validateWebhookUrl, WebhookError, Webhooks } from "./webhook";
@@ -158,6 +159,9 @@ export interface CallCtx {
   origin: string;
   /** The invite whose join key made this request. */
   invite?: Invite | null;
+  /** Set when /mcp was authorized by an OAuth access token: one human approval, with the agent name they picked.
+   *  TODO(oauth): tie a grant to one character (office_join defaults to grant.name, rejoin by grant.id). */
+  grant?: OAuthGrant | null;
 }
 
 export interface ToolHost {
@@ -379,7 +383,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       const base = { role, token: req.headers.get("x-agent-token"), sessionId: null, ip, origin: url.origin, invite } satisfies CallCtx;
       if (url.pathname === "/mcp") {
         if (role === "view") return errorResponse(403, "a viewKey is read-only; MCP needs the joinKey");
-        return await handleMcp(req, this, base);
+        return await handleMcp(req, this, { ...base, grant: grantFromRequest(req) });
       }
       const m = /^\/api\/o\/[^/]+\/([a-z_-]+)$/.exec(url.pathname);
       if (m && m[1] === "connect") {
@@ -1388,6 +1392,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
     return {
       office: meta.id, name: meta.name, mcpUrl: `${origin}/mcp`, designMcpUrl: `${origin}/mcp?mode=design`, joinKey, joinUrl: this.keyLink(joinKey, origin), viewUrl: this.keyLink(viewKey, origin),
       as: match.invite?.label ?? null,
+      /** The invite whose join key an agent signs in with here (for the owner: the one joinKey above). */
+      inviteId: (owner ? pick?.id : match.invite?.id) ?? null,
       ...(owner ? { invites: await this.inviteList(origin), viewKeys: meta.keys.view.length } : {}),
     };
   }
