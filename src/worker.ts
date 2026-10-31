@@ -1,16 +1,22 @@
 // Edge router: office creation and admin (list, delete), /mcp, the REST mirror and the viewer socket go to the office's Durable
 // Object; everything else is the static viewer (Workers assets, SPA fallback for /o/:office).
 import { keyFromRequest, OFFICE_ID_RE, officeOfKey } from "./auth";
-import { handleAdmin, handleCreateOffice } from "./api";
+import { handleAdmin, handleCityAdmin, handleCreateOffice } from "./api";
+import { CITY_ID } from "./city/do";
 import { CORS_HEADERS, errorResponse, HttpError, json, withCors } from "./http";
 import { bearerOf, handleOAuth, isAccessToken, isOAuthPath, mcpViaOAuth, withChallenge, withoutGrantHeader } from "./oauth";
 
 export { Office } from "./office";
 export { Registry } from "./registry";
 export { Auth } from "./oauth-store";
+export { City } from "./city/do";
 
 function officeStub(env: Env, id: string): DurableObjectStub {
   return env.OFFICE.get(env.OFFICE.idFromName(id));
+}
+
+function cityStub(env: Env) {
+  return env.CITY.get(env.CITY.idFromName(CITY_ID));
 }
 
 /** /mcp/<joinKey> (for connector forms that drop query strings) becomes /mcp with that key as the bearer, query kept. */
@@ -63,6 +69,12 @@ async function route(req: Request, env: Env): Promise<Response> {
     const keyOffice = officeOfKey(keyFromRequest(req));
     if (keyOffice !== office) return errorResponse(401, "missing or wrong key for this office (Authorization: Bearer <joinKey>)");
     return withCors(await officeStub(env, office).fetch(req));
+  }
+  if (path === `/api/city/${CITY_ID}` || path === `/city/${CITY_ID}/ws`) return withCors(await cityStub(env).fetch(req));
+  const cityAdmin = /^\/api\/city\/([^/]+)\/links(?:\/([^/]+)\/([^/]+))?$/.exec(path);
+  if (cityAdmin) {
+    if (cityAdmin[1] !== CITY_ID) return errorResponse(404, `no city "${cityAdmin[1]}" (cities: ${CITY_ID})`);
+    return withCors(await handleCityAdmin(req, env, cityAdmin[2] ?? null, cityAdmin[3] ?? null));
   }
   if (path.startsWith("/api/")) return errorResponse(404, `no route ${path}`);
   const asset = /^\/o\/([^/]+)\/assets\/[^/]+$/.exec(path);

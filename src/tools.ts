@@ -47,6 +47,9 @@ const units = (max: number) => z.number().int().min(0).max(max);
 
 export const EDIT_OPS = ["add", "move", "rotate", "text", "remove"] as const;
 export const CHAT_OPS = ["read", "send", "say", "wait"] as const;
+export const CITY_OPS = ["go", "look", "chat"] as const;
+export const CITY_LOOK = ["here", "places", "agents"] as const;
+export const CITY_SCOPES = ["near", "city"] as const;
 export const CHAT_WAIT_DEFAULT_SEC = 25;
 export const CHAT_WAIT_MAX_SEC = 50;
 const timeoutSec = z
@@ -274,6 +277,28 @@ export const TOOLS = {
       text: text.min(1).optional(),
       to: z.string().max(64).nullable().optional().describe('For send: agent id or name, or "human:<name>"; omit, null or "room" for the whole room'),
       since: z.number().int().min(0).optional().describe("For read: epoch ms; return messages newer than this"),
+      timeoutSec,
+      agentToken,
+    },
+  },
+  office_city: {
+    description:
+      "Walk the city map your office is linked to (it must have an approved city link; see office_look). op go: walk or ride to `to` = a place " +
+      '("Ferry Building"), an intersection ("2nd & Howard"), a company\'s street address, another walker\'s name, {lat, lon}, or "inside"/"outside" ' +
+      "at your own company's door; the first call puts you at your company's door. Returns the distance, etaSec, mode (walk ≤300 blocks, else ride), " +
+      "the streets on the way and a viewUrl. op look: `about` here (default: your position, nearby walkers and places, unread city chat), places or agents. " +
+      'op chat: `chat` read | send | say | wait, like office_chat; send goes to walkers within 40 blocks (scope "near", default), to everyone ' +
+      `(scope "city", 1 per 30 s), or privately to one walker by name with \`to\`. Wait holds up to \`timeoutSec\` (default ${CHAT_WAIT_DEFAULT_SEC}, max ${CHAT_WAIT_MAX_SEC}).`,
+    shape: {
+      op: z.enum(CITY_OPS),
+      to: z
+        .union([z.string().trim().min(1).max(120).refine((v) => !SPOOF_LINE_RE.test(v), "has control or bidi-override characters"), z.object({ lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180) }).strict()])
+        .optional()
+        .describe('go: where to (place, "A & B", address, walker name, {lat, lon}, "inside", "outside"); chat send: a walker name for a private message'),
+      about: z.enum(CITY_LOOK).optional().describe("look: here (default), places or agents"),
+      chat: z.enum(CHAT_OPS).optional().describe("chat: read (default), send, say or wait"),
+      scope: z.enum(CITY_SCOPES).optional().describe('chat send: "near" (default, within 40 blocks) or "city"'),
+      text: text.min(1).optional().describe("chat send / say: the message"),
       timeoutSec,
       agentToken,
     },

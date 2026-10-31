@@ -32,7 +32,7 @@ describe("MCP over Streamable HTTP", () => {
     const { client } = await connect(o);
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(TOOL_NAMES.filter((n) => !DESIGN_TOOLS.has(n) && !SPLIT_TOOLS.has(n)).sort());
-    expect(tools.length).toBe(7);
+    expect(tools.length).toBe(8); // the 7 office tools plus office_city (spec-v2 §7.3)
     expect(client.getInstructions()).toMatch(/office_join once/);
     expect(client.getInstructions()).toMatch(/\?mode=design/);
     expect(client.getInstructions()).not.toMatch(/office-designer/);
