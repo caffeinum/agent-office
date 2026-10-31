@@ -14,6 +14,10 @@ export const LOD1_R = 5;
 export const HYSTERESIS = 0.5;
 export const UPLOADS_PER_FRAME = 2;
 export const WORKERS = 2;
+/** The camera keeps this many blocks of air above the heightfield under it (near plane is 1 block). */
+export const CAMERA_CLEARANCE = 3;
+/** Zoomed in, the orbit target rides up onto the roof under it: it stays within dist × this of the roof top. */
+export const TARGET_ROOF_REACH = 0.5;
 const WATER_MARGIN = 6000;
 
 /** Chebyshev distance in chunks from a point (in chunk units) to the centre of chunk cx,cz. */
@@ -261,6 +265,19 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     const c = column(x, z);
     return c ? c.chunk.ground[c.i] : 0;
   }
+  /** Highest solid y of the column under a block position: building top, deck slab or ground; 0 on water / unloaded. */
+  function surfaceTop(x, z) {
+    const c = column(x, z);
+    if (!c) return 0;
+    const b = c.chunk.bldg[c.i];
+    return b ? c.chunk.buildings[b - 1].top : Math.max(c.chunk.ground[c.i], Math.abs(c.chunk.deck[c.i]));
+  }
+  /** Highest surfaceTop over the (2r+1)² columns around a block position. */
+  function surfaceTopNear(x, z, r) {
+    let top = 0;
+    for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) top = Math.max(top, surfaceTop(x + dx, z + dz));
+    return top;
+  }
   function buildingAt(x, z) {
     const c = column(x, z);
     if (!c) return null;
@@ -303,15 +320,22 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
       camera.lookAt(controls.target);
       if (k >= 1) camAnim.active = false;
     }
-    // clamp the target to the city and glide its height over the terrain
+    // clamp the target to the city and glide its height over the terrain; close in, lift it toward the roof
+    // under it so orbiting a tower pivots on the tower, not on a point buried in it
     const t = controls.target;
     const cx = THREE.MathUtils.clamp(t.x, bbox.x0, bbox.x1), cz = THREE.MathUtils.clamp(t.z, bbox.z0, bbox.z1);
-    const gy = groundAt(cx, cz);
+    const gy = Math.max(groundAt(cx, cz), surfaceTop(cx, cz) - camera.position.distanceTo(t) * TARGET_ROOF_REACH);
     const cy = camAnim.active ? t.y : t.y + (gy - t.y) * Math.min(1, dt * 4);
     if (cx !== t.x || cz !== t.z || cy !== t.y) {
       const dx = cx - t.x, dy = cy - t.y, dz = cz - t.z;
       t.set(cx, cy, cz);
       camera.position.x += dx; camera.position.y += dy; camera.position.z += dz;
+    }
+    // never inside a building: the camera stays CAMERA_CLEARANCE above the heightfield around it
+    const floor = surfaceTopNear(camera.position.x, camera.position.z, 1) + CAMERA_CLEARANCE;
+    if (camera.position.y < floor) {
+      camera.position.y = floor;
+      camera.lookAt(t);
     }
     const dist = camera.position.distanceTo(t);
     scene.fog.near = Math.min(dist * 1.5, camera.far);
