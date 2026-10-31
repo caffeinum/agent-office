@@ -22,7 +22,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 code, kbd, pre { font-family: var(--mono); font-size: 12px; }
 a { color: var(--accent); }
 
-#app { position: fixed; inset: 0; overflow: hidden; color: var(--ink); }
+#app { --side-w: clamp(250px, 26vw, 320px); position: fixed; inset: 0; overflow: hidden; color: var(--ink); }
 #app[hidden] { display: none; }
 .stage { position: absolute; inset: 0; }
 .stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
@@ -74,7 +74,7 @@ a { color: var(--accent); }
 
 /* ── sidebar ─────────────────────────────────────────────────────────────────────── */
 
-.side { position: absolute; left: 14px; top: 14px; bottom: 14px; width: 300px; display: flex; flex-direction: column; overflow: hidden; z-index: 5; }
+.side { position: absolute; left: 14px; top: 14px; bottom: 14px; width: var(--side-w); display: flex; flex-direction: column; overflow: hidden; z-index: 5; }
 .side-head { padding: 14px 16px 10px; }
 .brand { display: flex; align-items: center; font-weight: 800; font-size: 13px; letter-spacing: 0.02em; color: var(--ink-2); text-decoration: none; }
 .oname { margin-top: 6px; font-size: 19px; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -83,12 +83,12 @@ a { color: var(--accent); }
 .conn[data-state="live"] i { background: var(--working); box-shadow: 0 0 0 3px rgba(79, 191, 122, 0.2); }
 .conn[data-state="not-found"] i, .conn[data-state="unauthorized"] i, .conn[data-state="error"] i { background: #e0614f; }
 
-.tabs { display: flex; gap: 4px; margin: 0 12px; padding: 3px; border-radius: 12px; background: var(--chip); }
-.tabs button { flex: 1; padding: 6px 8px; border: 0; border-radius: 9px; background: transparent; font-weight: 700; font-size: 12.5px; color: var(--ink-2); }
-.tabs button.on { background: var(--glass); color: var(--ink); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08); }
-.tabs .count { color: var(--ink-3); font-weight: 600; }
-.tabs .unread { display: inline-block; min-width: 16px; padding: 0 5px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10.5px; }
-.tabs .unread[hidden] { display: none; }
+.side .tabs { width: auto; max-width: none; flex-wrap: nowrap; display: flex; gap: 4px; margin: 0 12px; padding: 3px; border-radius: 12px; background: var(--chip); }
+.side .tabs button { min-height: 0; flex: 1; padding: 6px 8px; border: 0; border-radius: 9px; background: transparent; font-weight: 700; font-size: 12.5px; color: var(--ink-2); }
+.side .tabs button.on { background: var(--glass); color: var(--ink); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08); }
+.side .tabs .count { color: var(--ink-3); font-weight: 600; }
+.side .tabs .unread { display: inline-block; min-width: 16px; padding: 0 5px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10.5px; }
+.side .tabs .unread[hidden], .side .tabs[hidden] { display: none; }
 
 .pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .pane[hidden] { display: none; }
@@ -145,7 +145,7 @@ a { color: var(--accent); }
 
 /* ── edit mode ───────────────────────────────────────────────────────────────────── */
 
-.palette { position: absolute; left: 330px; right: 220px; bottom: 14px; padding: 10px 12px 12px; z-index: 6; }
+.palette { position: absolute; left: calc(var(--side-w) + 30px); right: 220px; bottom: 14px; padding: 10px 12px 12px; z-index: 6; }
 .palette[hidden] { display: none; }
 .pal-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; font-size: 12px; color: var(--ink-2); }
 .pal-head b { color: var(--ink); font-size: 13px; }
@@ -178,8 +178,18 @@ kbd { padding: 0 4px; border-radius: 4px; background: var(--chip); }
 .toast { padding: 8px 14px; border-radius: 12px; background: rgba(43, 36, 32, 0.88); color: #fff; font-size: 13px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2); transition: opacity 0.4s, transform 0.4s; }
 .toast.err { background: #c4442f; }
 .toast.out { opacity: 0; transform: translateY(-6px); }
-.empty { position: absolute; left: 50%; bottom: 80px; transform: translateX(-50%); max-width: 460px; padding: 14px 18px; display: flex; flex-direction: column; gap: 4px; text-align: center; z-index: 4; font-size: 13px; }
+.empty { position: absolute; left: calc(50% + (var(--side-w) + 14px) / 2); bottom: 80px; transform: translateX(-50%); width: max-content; max-width: min(460px, calc(100% - var(--side-w) - 56px)); padding: 14px 18px; display: flex; flex-direction: column; gap: 4px; text-align: center; z-index: 4; font-size: 13px; }
 .empty[hidden] { display: none; }
+#app.side-off .palette { left: 14px; }
+#app.side-off .empty { left: 50%; max-width: min(460px, calc(100% - 32px)); }
+.side[hidden] { display: none; }
+.side-head { position: relative; }
+.side-hide { position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; border: 0; border-radius: 9px; background: var(--chip); color: var(--ink-2); font-size: 18px; font-weight: 800; line-height: 1; }
+.side-hide:hover { color: var(--ink); }
+.side-show { position: absolute; left: 14px; top: 14px; z-index: 5; display: flex; align-items: center; gap: 6px; height: 40px; padding: 0 12px; border: 0; font-size: 15px; font-weight: 800; color: var(--ink); }
+.side-show[hidden] { display: none; }
+.side-show-n:empty { display: none; }
+.side-show-n { min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 11px; }
 .empty span { color: var(--ink-2); }
 .screen { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 40%, #fbf3e8, #e7dccd); z-index: 30; }
 .screen[hidden] { display: none; }
@@ -190,6 +200,8 @@ kbd { padding: 0 4px; border-radius: 4px; background: var(--chip); }
 
 @media (max-width: 760px) {
   .side { top: auto; height: 42%; left: 8px; right: 8px; bottom: 8px; width: auto; }
+  .side-show { left: 8px; top: auto; bottom: 8px; }
+  .side-hide { transform: rotate(-90deg); }
   .dm { left: 8px; right: 8px; width: auto; top: 8px; bottom: auto; height: 46%; }
   .ctrls { bottom: auto; top: 8px; right: 8px; flex-direction: column; }
   .palette { left: 8px; right: 8px; bottom: calc(42% + 16px); }

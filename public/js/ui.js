@@ -15,11 +15,12 @@ export function imageFrom(dt) {
   return null;
 }
 
-export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom, onEdit, onKick, onDesigner, onImage }) {
+export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom, onEdit, onKick, onDesigner, onImage, onSide }) {
   root.insertAdjacentHTML("beforeend", `
     <aside class="side glass">
       <header class="side-head">
         <a class="brand" href="/" title="agent office"><span class="logo"></span>agent office</a>
+        <button class="side-hide" title="hide the panel" aria-label="hide the panel">‹</button>
         <div class="oname"></div>
         <div class="conn"><i></i><span>connecting…</span></div>
       </header>
@@ -40,6 +41,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
         <div class="ro" hidden>Read-only view. Open the owner link to chat and edit.</div>
       </footer>
     </aside>
+    <button class="side-show glass" title="show the panel" aria-label="show the panel" hidden>☰ <span class="side-show-n"></span></button>
     <section class="dm glass" hidden>
       <header class="dm-head"></header>
       <div class="log dm-log"></div>
@@ -62,11 +64,24 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
   `);
   const $ = (s) => root.querySelector(s);
   const side = $(".side"), dm = $(".dm");
-  let state = null, canWrite = false, dmAgent = null, tab = "agents", roomSeen = 0;
+  let state = null, role = null, canWrite = false, dmAgent = null, tab = "agents", roomSeen = 0;
 
   const asInput = $(".as-input");
   try { asInput.value = localStorage.getItem("office.as") ?? ""; } catch { /* storage blocked: ask each time */ }
   asInput.addEventListener("change", () => { try { localStorage.setItem("office.as", asInput.value.trim()); } catch { /* fine */ } });
+
+  function setSide(open) {
+    root.classList.toggle("side-off", !open);
+    side.hidden = !open;
+    $(".side-show").hidden = open;
+    try { localStorage.setItem("office.side", open ? "on" : "off"); } catch { /* fine: not remembered */ }
+    onSide();
+  }
+  $(".side-hide").addEventListener("click", () => setSide(false));
+  $(".side-show").addEventListener("click", () => setSide(true));
+  let sideStored = null;
+  try { sideStored = localStorage.getItem("office.side"); } catch { /* default: open */ }
+  if (sideStored === "off") { root.classList.add("side-off"); side.hidden = true; $(".side-show").hidden = false; }
 
   root.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
   function setTab(t) {
@@ -146,6 +161,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
     const list = [...state.agents].sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9) || a.name.localeCompare(b.name));
     $(".agents").innerHTML = list.length ? list.map(agentRow).join("") : `<div class="none">Nobody's in yet.</div>`;
     $(".count").textContent = String(list.length);
+    $(".side-show-n").textContent = list.length ? String(list.length) : "";
   }
   $(".agents").addEventListener("click", (e) => {
     const b = e.target.closest(".agent");
@@ -225,7 +241,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
   }
 
   function renderDm() {
-    if (!dmAgent) { dm.hidden = true; return; }
+    if (!dmAgent || role === "view") { dm.hidden = true; return; }
     const a = state.agents.find((x) => x.id === dmAgent);
     if (!a) { dm.querySelector(".dm-head").innerHTML = `<div class="who"><b>${esc(dmAgent)}</b><small>left the office</small></div><button class="x" title="close">×</button>`; }
     else {
@@ -260,7 +276,9 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
     updateUnread();
     const empty = $(".empty");
     empty.hidden = state.agents.length > 0;
-    if (!empty.hidden) empty.innerHTML = `<b>The office is open — nobody's in yet.</b><span>Connect any agent over MCP (<code>${esc(location.origin)}/mcp</code> with the office's join key) or the CLI, and it will walk in and take a desk.</span>`;
+    if (!empty.hidden) empty.innerHTML = `<b>The office is open — nobody's in yet.</b>${role === "view"
+      ? `<span>This is a watch-only link. The owner can share a join key to bring agents in.</span>`
+      : `<span>Connect any agent over MCP or the CLI, and it will walk in and take a desk.</span>${role === "owner" || role === "join" ? `<button class="cx-open cx-empty" data-connect><span class="cx-plus">+</span>Connect an agent</button>` : ""}`}`;
   }
 
   // refresh relative times now and then
@@ -284,6 +302,17 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
       $(".ro").hidden = w;
       $('[data-act="edit"]').hidden = !w;
       if (state) renderDm();
+    },
+    setRole(r) {
+      role = r;
+      const watchOnly = r === "view";
+      $(".side .tabs").hidden = watchOnly;
+      if (watchOnly && tab === "room") setTab("agents");
+      $(".ro").textContent = r === "view"
+        ? "Watch-only link: you can see the office but not chat, edit or bring agents in. The owner can share a join key."
+        : r === "join" ? "Join link: you can connect agents. Open the owner link to chat and edit."
+        : "Read-only view. Open the owner link to chat and edit.";
+      if (state) render();
     },
     setDm(id) { dmAgent = id; if (state) { renderDm(); renderAgents(); } },
     setConn(st, detail) {

@@ -7,6 +7,7 @@ import { createScene } from "./scene.js";
 import { createOverlay } from "./overlay.js";
 import { createUi, imageFrom } from "./ui.js";
 import { createEditor } from "./editor.js";
+import { createConnect } from "./connect.js";
 import { connectDemo, connectLive } from "./source.js";
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -14,12 +15,15 @@ const params = new URLSearchParams(location.search);
 const demo = params.get("demo") === "1";
 const officeMatch = /^\/o\/([^/]+)\/?$/.exec(location.pathname);
 
-/** The office key arrives in the link's #k= (or legacy ?k=); keep it in sessionStorage and scrub it from the address bar. */
+const keySlot = (office) => `office.key.${office}`;
+
+/** The office key arrives in the link's #k= (or legacy ?k=). Remember it in this browser (a newer #k= replaces it) and scrub it from the address bar. */
 function takeKey(office) {
   const hash = new URLSearchParams(location.hash.slice(1));
   const given = hash.get("k") || params.get("k");
-  const slot = `office.key.${office}`;
+  const slot = keySlot(office);
   if (given) {
+    try { localStorage.setItem(slot, given); } catch { /* storage blocked: try the tab's storage */ }
     try { sessionStorage.setItem(slot, given); } catch { /* storage blocked: the key lives only in this page */ }
     hash.delete("k");
     const search = new URLSearchParams(location.search);
@@ -28,7 +32,14 @@ function takeKey(office) {
     history.replaceState(null, "", `${location.pathname}${q ? `?${q}` : ""}${h ? `#${h}` : ""}`);
     return given;
   }
+  try { const k = localStorage.getItem(slot); if (k) return k; } catch { /* fall back to the tab */ }
   try { return sessionStorage.getItem(slot); } catch { return null; }
+}
+
+/** The server refused the remembered key: forget it so the next visit asks for a fresh link. */
+function forgetKey(office) {
+  try { localStorage.removeItem(keySlot(office)); } catch { /* nothing stored */ }
+  try { sessionStorage.removeItem(keySlot(office)); } catch { /* nothing stored */ }
 }
 
 function initialTheme() {
@@ -49,6 +60,7 @@ function boot() {
   let source = null;
   let selectedAgent = null;
   let role = null;
+  let fitInsets = null;
 
   const ui = createUi(root, {
     onSelectAgent: (id) => selectAgent(id),
@@ -63,6 +75,7 @@ function boot() {
       source.send({ type: "designer", id, as: asName() });
     },
     onImage: (file, to) => { shareImage(file, to).catch((e) => ui.toast(e.message, "err")); },
+    onSide: () => fitInsets?.(),
   });
 
   /** Owner dropped/pasted an image into a chat box: upload it, then tell the agent (DM, else the designer, else the room) its asset id. */
@@ -106,9 +119,10 @@ function boot() {
     uploadLogo: (file) => uploadLogo(file).catch((e) => ui.toast(e.message, "err")),
     setLogo: (id) => source.setLogo(id).then(() => ui.toast(id ? "Logo set" : "Logo removed")).catch((e) => ui.toast(e.message, "err")),
   });
+  const connect = key ? createConnect(root, { office, key, toast: ui.toast }) : null;
   scene.onFrame(() => overlay.update(scene.anchors()));
   const sideEl = root.querySelector(".side");
-  const fitInsets = () => {
+  fitInsets = () => {
     const wide = window.innerWidth > 760;
     const dm = root.querySelector(".dm");
     scene.setInsets(wide ? sideEl.getBoundingClientRect().right : 0, wide && dm && !dm.hidden ? window.innerWidth - dm.getBoundingClientRect().left : 0);
@@ -144,6 +158,8 @@ function boot() {
       role = frame.role ?? null;
       const write = role === "owner";
       ui.setWrite(write);
+      ui.setRole(connect ? role : null);
+      connect?.setRole(role);
       if (!write && role === null) console.warn("office: snapshot carries no role; treating this view as read-only");
     }
     try {
@@ -175,6 +191,7 @@ function boot() {
       ui.screen(`<div class="card"><div class="big">404</div><h1>No office here</h1><p>There's no office called <code>${esc(office)}</code>. Check the link, or ask whoever set it up for a fresh one.</p><p><a href="/">agent office</a> · <a href="/o/demo?demo=1">see the demo</a></p></div>`);
       source?.close();
     } else if (st === "unauthorized") {
+      forgetKey(office);
       ui.screen(`<div class="card"><div class="big">🔒</div><h1>That key doesn't open this office</h1><p>${esc(detail)}</p><p>Use the view link (read-only) or the owner link you were given.</p></div>`);
       source?.close();
     }
