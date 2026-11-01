@@ -5,7 +5,7 @@ import { BIG_BODY_MAX, errorResponse, json, readBytes, readJson } from "./http";
 import { resolveToolName, TOOL_NAMES, ToolError, type ToolName } from "./tools";
 import { ASSET_BYTES_MAX } from "./images";
 import type { CallCtx, ToolHost } from "./office";
-import { CITY_ID, LINK_ACTIONS, LINK_STATES, type CityResult, type LinkAction, type LinkRow, type LinkState } from "./city/do";
+import { CITY_ID, LINK_ACTIONS, LINK_STATES, type City, type CityResult, type LinkAction, type LinkRow, type LinkState } from "./city/do";
 
 export const ADMIN_KEY_MIN = 24;
 const GET_TOOLS = new Set<ToolName>(["office_look", "office_kinds", "office_chat_read", "office_chat_wait", "office_theme_get"]);
@@ -143,7 +143,8 @@ export async function handleCityAdmin(req: Request, env: Env, officeId: string |
   if (refused) return refused;
   const city = env.CITY.get(env.CITY.idFromName(CITY_ID));
   if (officeId === null) {
-    if (req.method !== "GET") return errorResponse(405, `GET /api/city/${CITY_ID}/links?state=pending lists link requests`);
+    if (req.method === "POST") return rejectPendingLinks(req, city);
+    if (req.method !== "GET") return errorResponse(405, `GET /api/city/${CITY_ID}/links?state=pending lists link requests; POST {action: "reject", siteId} rejects every pending one for a site`);
     const state = url.searchParams.get("state");
     if (state !== null && !(LINK_STATES as readonly string[]).includes(state)) return errorResponse(400, `state must be one of ${LINK_STATES.join(", ")}`);
     return json(200, { links: await city.listLinks(state as LinkState | null) });
@@ -154,6 +155,16 @@ export async function handleCityAdmin(req: Request, env: Env, officeId: string |
   const res = (await city.decideLink(officeId, action as LinkAction)) as CityResult<LinkRow>;
   if (!res.ok) return errorResponse(res.status, res.error, res.extra);
   return json(200, { ok: true, link: res.value });
+}
+
+async function rejectPendingLinks(req: Request, city: DurableObjectStub<City>): Promise<Response> {
+  const body = (await readJson(req)) as Record<string, unknown> | null;
+  if (!body || body.action !== "reject" || typeof body.siteId !== "string" || !body.siteId) {
+    return errorResponse(400, `POST /api/city/${CITY_ID}/links takes {action: "reject", siteId}: it rejects every pending link request for that site`);
+  }
+  const res = (await city.rejectPending(body.siteId)) as CityResult<LinkRow[]>;
+  if (!res.ok) return errorResponse(res.status, res.error, res.extra);
+  return json(200, { ok: true, rejected: res.value });
 }
 
 async function adminOffice(req: Request, stub: DurableObjectStub, usage: string): Promise<Response> {

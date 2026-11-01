@@ -292,9 +292,12 @@ export function createLiveState({ graph = null } = {}) {
       case "say":
         need(frame);
         exactKeys(frame, ["type", "id", "text", "ts"], "say frame");
-        if (!tracks.has(frame.id)) throw new Error(`live: say from unknown walker ${frame.id}`);
         if (typeof frame.text !== "string") throw new Error("say.text must be a string");
         num(frame.ts, "say.ts");
+        if (!tracks.has(frame.id)) {
+          console.warn(`live: say from walker ${frame.id}, which this view doesn't show (gone or inside); ignored`);
+          return;
+        }
         says.set(frame.id, { text: frame.text, until: frame.ts + SAY_MS });
         emit("say");
         return;

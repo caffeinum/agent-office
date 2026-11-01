@@ -17,13 +17,25 @@ export const GRAPH_CHECK_MS = 60_000;
 export const NEAR_BLOCKS = 40;
 export const LOOK_PLACES_BLOCKS = 100;
 export const LOOK_PLACES_MAX = 20;
-export const MAX_PATH_POINTS = 64;
+/** A walk frame carries at most this many path points; a longer route goes out as consecutive legs. */
+export const MAX_PATH_POINTS = 256;
+/** Interior points closer than this (blocks, 3-D) to the line through their neighbours carry no shape. */
+export const SIMPLIFY_EPS = 0.01;
 export const CHAT_RING = 500;
 export const CHAT_TAIL = 50;
 export const CHAT_READ_MAX = 50;
 export const MAX_CITY_AGENTS = 300;
 export const MAX_OFFICE_WALKERS = 20;
 export const MAX_CITY_VIEWERS = 500;
+export const MAX_VIEWERS_PER_IP = 8;
+/** GET /api/city/sf and WS upgrades per client IP, the Office DO's ip: budget. */
+export const PUBLIC_IP_LIMITS: readonly Window[] = [{ max: 120, ms: 10_000 }];
+export const SNAPSHOT_CACHE_MS = 1000;
+export const PENDING_TTL_MS = 7 * 24 * 60 * 60_000;
+export const REVOKED_COOLDOWN_MS = 24 * 60 * 60_000;
+/** After a failed city data load the alarm retries no sooner than this, doubling up to GRAPH_RETRY_MAX_MS. */
+export const GRAPH_RETRY_MS = 5_000;
+export const GRAPH_RETRY_MAX_MS = 5 * 60_000;
 export const MAX_PENDING_PER_SITE = 5;
 export const MAX_PENDING_LINKS = 200;
 /** A {lat, lon} target farther than this from every walk node is refused. */
@@ -84,23 +96,44 @@ function offSegment(p: Pt, a: Pt, b: Pt): number {
   return segLen(p, [a[0] + d[0]! * t, a[1] + d[1]! * t, a[2] + d[2]! * t]);
 }
 
-/** Drops the interior point that deviates least from its neighbours until at most `max` remain (ends kept). */
-export function capPath(path: readonly Pt[], max = MAX_PATH_POINTS): Pt[] {
-  if (max < 2) throw new Error(`capPath: max must be ≥ 2, got ${max}`);
-  const out = path.map((p) => [...p] as Pt);
-  while (out.length > max) {
-    let best = 1;
-    let bestErr = Infinity;
-    for (let i = 1; i < out.length - 1; i++) {
-      const err = offSegment(out[i]!, out[i - 1]!, out[i + 1]!);
-      if (err < bestErr) {
-        bestErr = err;
-        best = i;
-      }
-    }
-    out.splice(best, 1);
+/** Drops only interior points that lie on the line through their kept neighbours: the route's shape and length stay. */
+export function simplifyPath(path: readonly Pt[], eps = SIMPLIFY_EPS): Pt[] {
+  const out: Pt[] = [];
+  for (const p of path) {
+    while (out.length >= 2 && offSegment(out.at(-1)!, out.at(-2)!, p) < eps) out.pop();
+    out.push([...p] as Pt);
   }
   return out;
+}
+
+export interface Leg {
+  index: number;
+  /** path[from..to] inclusive; consecutive legs share their boundary point */
+  from: number;
+  to: number;
+  /** when the walker leaves path[from] */
+  t0: number;
+  last: boolean;
+}
+
+/** The ≤ `max`-point leg a walker on `path` (left path[0] at t0) is on at `now`; past the end, the last leg. */
+export function legAt(path: readonly Pt[], speed: number, t0: number, now: number, max = MAX_PATH_POINTS): Leg {
+  if (max < 2) throw new Error(`legAt: max must be ≥ 2, got ${max}`);
+  if (speed <= 0) throw new Error(`legAt: speed must be > 0, got ${speed}`);
+  if (path.length === 0) throw new Error("legAt: empty path");
+  const step = max - 1;
+  const count = Math.max(1, Math.ceil((path.length - 1) / step));
+  const travelled = Math.max(0, ((now - t0) / 1000) * speed);
+  let index = 0;
+  let start = 0;
+  for (let i = 1; i < count; i++) {
+    const at = start + pathLength(path.slice((i - 1) * step, i * step + 1));
+    if (travelled < at) break;
+    index = i;
+    start = at;
+  }
+  const from = index * step;
+  return { index, from, to: Math.min(path.length - 1, from + step), t0: t0 + (start / speed) * 1000, last: index === count - 1 };
 }
 
 /** Case- and punctuation-blind form used for name collisions and agent lookups. */
@@ -108,13 +141,13 @@ export function normName(s: string): string {
   return s.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
-/** The office numbering rule ("claude@paw 2") against the names in `taken` (lowercased). */
+/** The office numbering rule ("claude@paw 2") against the names in `taken` (as normName keys). */
 export function uniqueName(name: string, taken: ReadonlySet<string>): string {
-  if (!taken.has(name.toLowerCase())) return name;
+  if (!taken.has(normName(name))) return name;
   for (let n = 2; ; n++) {
     const suffix = ` ${n}`;
     const candidate = name.slice(0, NAME_MAX - suffix.length) + suffix;
-    if (!taken.has(candidate.toLowerCase())) return candidate;
+    if (!taken.has(normName(candidate))) return candidate;
   }
 }
 
@@ -135,6 +168,11 @@ export class Windows {
     recent.push(now);
     this.hits.set(key, recent);
     return 0;
+  }
+
+  /** Drops keys with no hit in the last `olderThanMs` (longer than every window in use). */
+  prune(now: number, olderThanMs = 60_000): void {
+    for (const [k, hits] of [...this.hits]) if (!hits.length || now - hits.at(-1)! >= olderThanMs) this.hits.delete(k);
   }
 
   forget(prefix: string): void {

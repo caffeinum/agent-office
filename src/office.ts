@@ -548,7 +548,13 @@ export class Office extends DurableObject<Env> implements ToolHost {
   private async wipe(reason: string): Promise<{ ok: true; deleted: string }> {
     const id = this.mustMeta().id;
     await registryStub(this.env).remove(id);
-    if (this.cityLink) await this.cityStub().officeGone(id);
+    if (this.cityLink) {
+      try {
+        await this.cityStub().officeGone(id);
+      } catch (e) {
+        console.error(`office ${id}: telling the city it is gone failed; its city link, walkers and presence stay until an admin revokes them`, e);
+      }
+    }
     for (const ws of this.ctx.getWebSockets()) {
       try {
         ws.close(WS_CLOSE_DELETED, reason);
@@ -1656,16 +1662,21 @@ export class Office extends DurableObject<Env> implements ToolHost {
     await this.saveAgent(a);
   }
 
+  /** A rejected or revoked link pushes nothing: the city would drop it; a new link request (PUT) starts pushes again. */
+  private cityLinkLive(): boolean {
+    return this.cityLink !== null && (this.cityLink.state === "pending" || this.cityLink.state === "approved");
+  }
+
   /** Roster or status changed: push to the city now, or at the end of the debounce window (alarm). */
   private markCityDirty(): void {
-    if (!this.cityLink) return;
+    if (!this.cityLinkLive()) return;
     this.cityDirty = true;
     if (Date.now() - this.cityPushedAt >= CITY_PUSH_MS) this.ctx.waitUntil(this.pushCity());
     else this.ctx.waitUntil(this.scheduleAlarm());
   }
 
   private cityPushDue(): number | null {
-    if (!this.cityLink) return null;
+    if (!this.cityLink || !this.cityLinkLive()) return null;
     if (this.cityDirty) return this.cityPushedAt + CITY_PUSH_MS;
     if (this.cityLink.state === "approved" && this.agents.size) return this.cityPushedAt + CITY_HEARTBEAT_MS;
     return null;
@@ -1673,7 +1684,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   /** Name, hue, status and out only: no activity, no chat. The City DO drops it unless the link is approved. */
   private async pushCity(): Promise<void> {
-    if (!this.meta || !this.cityLink) return;
+    if (!this.meta || !this.cityLink || !this.cityLinkLive()) return;
     this.cityDirty = false;
     this.cityPushedAt = Date.now();
     const agents: BridgeAgent[] = [...this.agents.values()].map((a) => ({ agentId: a.id, name: a.name, hue: a.hue, status: a.status, out: a.inCity === true }));
@@ -1687,10 +1698,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
         this.cityLink = { ...this.cityLink, state };
         await this.ctx.storage.put("cityLink", this.cityLink);
       }
-      if (state === "approved") {
-        const out = new Set(live);
-        for (const a of this.agents.values()) if (!!a.inCity !== out.has(a.id)) await this.setInCity(a, out.has(a.id));
-      }
+      const out = new Set(live);
+      for (const a of this.agents.values()) if (!!a.inCity !== out.has(a.id)) await this.setInCity(a, out.has(a.id));
     } catch (e) {
       console.error(`office ${this.meta.id}: city presence push failed`, e);
     }

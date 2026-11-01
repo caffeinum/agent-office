@@ -75,14 +75,18 @@ export async function flushOffice(o: Created): Promise<void> {
   await runDurableObjectAlarm(officeStub(o));
 }
 
-export async function publicCity(): Promise<any> {
-  const res = await SELF.fetch(`${ORIGIN}/api/city/sf`);
+let viewerSeq = 0;
+/** A fresh client address per public request: the City DO limits GETs and sockets per CF-Connecting-IP. */
+export const viewerIp = () => `198.18.${Math.floor(++viewerSeq / 250) % 250}.${viewerSeq % 250}`;
+
+export async function publicCity(ip = viewerIp()): Promise<any> {
+  const res = await SELF.fetch(`${ORIGIN}/api/city/sf`, { headers: { "cf-connecting-ip": ip } });
   if (res.status !== 200) throw new Error(`GET /api/city/sf: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
-export async function openCityWs() {
-  const res = await SELF.fetch(`${ORIGIN}/city/sf/ws`, { headers: { upgrade: "websocket" } });
+export async function openCityWs(ip = viewerIp()) {
+  const res = await SELF.fetch(`${ORIGIN}/city/sf/ws`, { headers: { upgrade: "websocket", "cf-connecting-ip": ip } });
   if (res.status !== 101) throw new Error(`city ws: ${res.status} ${await res.text()}`);
   const ws = res.webSocket!;
   const frames: any[] = [];

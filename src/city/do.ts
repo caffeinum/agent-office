@@ -15,10 +15,11 @@ import { route as walkRoute, ROUTE_MAX_EXPANSIONS, type RouteResult } from "./ro
 import { resolvePlace, type PlaceContext } from "./places";
 import { CHAT_WAIT_DEFAULT_SEC } from "../tools";
 import {
-  BLOCK_M, CHAT_READ_MAX, CHAT_RING, CHAT_TAIL, CITY_AWAY_MS, CITY_CHAT_LIMITS, CITY_REMOVE_MS, capPath, FLUSH_MS, GO_LIMITS, GRAPH_CHECK_MS,
-  LOOK_LIMITS, LOOK_PLACES_BLOCKS, LOOK_PLACES_MAX, MAX_CITY_AGENTS, MAX_CITY_VIEWERS, MAX_OFFICE_WALKERS, MAX_PENDING_LINKS, MAX_PENDING_PER_SITE,
-  modeFor, NEAR_BLOCKS, nearestNode, nodePoint, normName, pathLength, positionAt, PRESENCE_TTL_MS, round1, SNAP_MAX_BLOCKS, travelMs, uniqueName,
-  Windows, type Pt, type WalkMode,
+  BLOCK_M, CHAT_READ_MAX, CHAT_RING, CHAT_TAIL, CITY_AWAY_MS, CITY_CHAT_LIMITS, CITY_REMOVE_MS, FLUSH_MS, GO_LIMITS, GRAPH_CHECK_MS, GRAPH_RETRY_MAX_MS,
+  GRAPH_RETRY_MS, legAt, LOOK_LIMITS, LOOK_PLACES_BLOCKS, LOOK_PLACES_MAX, MAX_CITY_AGENTS, MAX_CITY_VIEWERS, MAX_OFFICE_WALKERS, MAX_PENDING_LINKS,
+  MAX_PENDING_PER_SITE, MAX_VIEWERS_PER_IP, modeFor, NEAR_BLOCKS, nearestNode, nodePoint, normName, pathLength, PENDING_TTL_MS, positionAt,
+  PRESENCE_TTL_MS, PUBLIC_IP_LIMITS, REVOKED_COOLDOWN_MS, round1, simplifyPath, SNAP_MAX_BLOCKS, SNAPSHOT_CACHE_MS, travelMs, uniqueName, Windows,
+  type Leg, type Pt, type WalkMode,
 } from "./walkers";
 
 export const CITY_ID = "sf";
@@ -162,6 +163,14 @@ export class City extends DurableObject<Env> {
   private graph: Graph | null = null;
   private loading: Promise<Graph> | null = null;
   private graphCheckedAt = 0;
+  private graphFailures = 0;
+  /** After a failed data load: walker deadlines wait for this (no alarm in the past while the graph is missing). */
+  private graphRetryAt = 0;
+  /** The leg index each moving walker's last queued walk frame carried. */
+  private legShown = new Map<string, number>();
+  /** Bumped on every queued frame: the cached GET snapshot is reused only while it matches. */
+  private version = 0;
+  private snapCache: { version: number; at: number; body: string } | null = null;
   private links = new Map<string, LinkRow>();
   private walkers = new Map<string, Walker>();
   private presence = new Map<string, PresenceRow>();
@@ -292,6 +301,8 @@ export class City extends DurableObject<Env> {
   /** Puts every walker on its `at` in the current graph; with `cancel`, in-flight paths end with `arrive` (§7.7). */
   private snapAll(cancel: boolean): void {
     const g = this.mustGraph();
+    this.version++;
+    this.dropVanishedSites(g);
     for (const w of [...this.walkers.values()]) {
       try {
         w.node = this.nodeOfAt(g, w.at);
@@ -304,8 +315,27 @@ export class City extends DurableObject<Env> {
         w.path = null;
         w.speed = 0;
         this.saveWalker(w);
-        this.queue(`w:${w.pid}`, { type: "arrive", walker: this.publicWalker(w, this.clock()) });
+        this.queueWalker(w, "arrive", this.clock());
       }
+    }
+  }
+
+  /** A data rebuild can drop a company site: its presence rows and walkers go; the link row stays for the admin to see. */
+  private dropVanishedSites(g: Graph): void {
+    for (const l of this.links.values()) {
+      if (g.siteById.has(l.siteId)) continue;
+      console.error(`city: ${l.state} link of office ${l.officeId} points at site ${l.siteId}, which is not in companies.json (builtAt ${g.builtAt}); its walkers and presence are dropped`);
+    }
+    for (const w of [...this.walkers.values()]) {
+      if (g.siteById.has(w.siteId)) continue;
+      console.error(`city: walker ${w.pid} (office ${w.officeId}) belongs to vanished site ${w.siteId}; removing it`);
+      this.dropWalker(w);
+    }
+    for (const p of [...this.presence.values()]) {
+      if (g.siteById.has(p.siteId)) continue;
+      console.error(`city: presence of office ${p.officeId} is for vanished site ${p.siteId}; dropping it`);
+      this.ctx.storage.sql.exec("DELETE FROM presence WHERE officeId = ?", p.officeId);
+      this.presence.delete(p.officeId);
     }
   }
 
@@ -339,10 +369,20 @@ export class City extends DurableObject<Env> {
       const g = await this.ensureGraph();
       if (!g.siteById.has(siteId)) throw new CityError(400, `unknown siteId "${siteId}": it must be a shipped site in companies.json`);
       const now = this.clock();
+      this.sweepPending(now);
       const cur = this.links.get(officeId);
       if (cur?.state === "approved") {
         if (cur.siteId === siteId) return { ok: true, value: cur };
         throw new CityError(409, `this office already has an approved link to ${cur.siteId}; an admin must revoke it first`);
+      }
+      if (cur?.state === "rejected") throw new CityError(409, "link was rejected; ask the city admin");
+      if (cur?.state === "revoked") {
+        if (cur.decidedAt === null) throw new Error(`city: revoked link of office ${officeId} has no decidedAt`);
+        const wait = cur.decidedAt + REVOKED_COOLDOWN_MS - now;
+        if (wait > 0) {
+          const retryAfter = Math.ceil(wait / 1000);
+          throw new CityError(429, `link was revoked; a new request is possible in ${Math.ceil(wait / 3_600_000)} h (or ask the city admin)`, { retryAfter });
+        }
       }
       const pending = [...this.links.values()].filter((l) => l.state === "pending" && l.officeId !== officeId);
       if (pending.filter((l) => l.siteId === siteId).length >= MAX_PENDING_PER_SITE) throw new CityError(429, `too many pending link requests for ${siteId}`);
@@ -360,28 +400,56 @@ export class City extends DurableObject<Env> {
   }
 
   async listLinks(state: LinkState | null): Promise<LinkRow[]> {
+    this.sweepPending(this.clock());
     return [...this.links.values()].filter((l) => state === null || l.state === state).sort((a, b) => a.requestedAt - b.requestedAt);
   }
 
   /** Admin decision. Reject/revoke take effect on the next call and drop the office's walkers and presence at once. */
   async decideLink(officeId: string, action: LinkAction): Promise<CityResult<LinkRow>> {
     try {
+      this.sweepPending(this.clock());
       const cur = this.links.get(officeId);
       if (!cur) throw new CityError(404, `no link request from office ${officeId}`);
-      const state = LINK_ACTIONS[action];
-      if (action === "approve" && cur.state !== "pending") throw new CityError(409, `link is ${cur.state}; only a pending link can be approved`);
-      if (action === "reject" && cur.state !== "pending") throw new CityError(409, `link is ${cur.state}; only a pending link can be rejected`);
-      if (action === "revoke" && cur.state !== "approved") throw new CityError(409, `link is ${cur.state}; only an approved link can be revoked`);
-      const row: LinkRow = { ...cur, state, decidedAt: this.clock() };
-      this.ctx.storage.sql.exec("UPDATE links SET state = ?, decidedAt = ? WHERE officeId = ?", state, row.decidedAt, officeId);
-      this.links.set(officeId, row);
-      if (state !== "approved") this.dropOffice(officeId);
+      const row = this.decide(cur, action);
       this.afterChange();
-      const office = this.env.OFFICE.get(this.env.OFFICE.idFromName(officeId));
-      this.ctx.waitUntil(office.cityLinkDecided(row.siteId, state).catch((e: unknown) => console.error(`city: telling office ${officeId} about its link failed`, e)));
       return { ok: true, value: row };
     } catch (e) {
       return wrapError(e);
+    }
+  }
+
+  /** Admin bulk reject: every pending request for `siteId`. */
+  async rejectPending(siteId: string): Promise<CityResult<LinkRow[]>> {
+    try {
+      this.sweepPending(this.clock());
+      const rows = [...this.links.values()].filter((l) => l.state === "pending" && l.siteId === siteId).map((l) => this.decide(l, "reject"));
+      this.afterChange();
+      return { ok: true, value: rows };
+    } catch (e) {
+      return wrapError(e);
+    }
+  }
+
+  private decide(cur: LinkRow, action: LinkAction): LinkRow {
+    const state = LINK_ACTIONS[action];
+    if (action === "approve" && cur.state !== "pending") throw new CityError(409, `link is ${cur.state}; only a pending link can be approved`);
+    if (action === "reject" && cur.state !== "pending") throw new CityError(409, `link is ${cur.state}; only a pending link can be rejected`);
+    if (action === "revoke" && cur.state !== "approved") throw new CityError(409, `link is ${cur.state}; only an approved link can be revoked`);
+    const row: LinkRow = { ...cur, state, decidedAt: this.clock() };
+    this.ctx.storage.sql.exec("UPDATE links SET state = ?, decidedAt = ? WHERE officeId = ?", state, row.decidedAt, cur.officeId);
+    this.links.set(cur.officeId, row);
+    if (state !== "approved") this.dropOffice(cur.officeId);
+    const office = this.env.OFFICE.get(this.env.OFFICE.idFromName(cur.officeId));
+    this.ctx.waitUntil(office.cityLinkDecided(row.siteId, state).catch((e: unknown) => console.error(`city: telling office ${cur.officeId} about its link failed`, e)));
+    return row;
+  }
+
+  /** Pending requests older than PENDING_TTL_MS are deleted: the office may ask again. */
+  private sweepPending(now: number): void {
+    for (const l of [...this.links.values()]) {
+      if (l.state !== "pending" || now - l.requestedAt < PENDING_TTL_MS) continue;
+      this.ctx.storage.sql.exec("DELETE FROM links WHERE officeId = ? AND state = 'pending'", l.officeId);
+      this.links.delete(l.officeId);
     }
   }
 
@@ -415,9 +483,21 @@ export class City extends DurableObject<Env> {
   async officePresence(officeId: string, agents: BridgeAgent[]): Promise<{ state: LinkState | null; live: string[] }> {
     const link = this.links.get(officeId);
     if (!link || link.state !== "approved") return { state: link?.state ?? null, live: [] };
-    await this.ensureGraph();
+    const g = await this.ensureGraph();
+    if (!g.siteById.has(link.siteId)) {
+      console.error(`city: presence from office ${officeId} for site ${link.siteId}, which is not in companies.json (builtAt ${g.builtAt}); ignored`);
+      return { state: link.state, live: [] };
+    }
     const now = this.clock();
-    const clean: BridgeAgent[] = agents.map((a) => ({ agentId: a.agentId, name: a.name, hue: a.hue, status: a.status, out: a.out === true }));
+    const clean: BridgeAgent[] = [];
+    for (const a of agents) {
+      const name = this.bridgeName(a.name, g, link.siteId);
+      if (name === null) {
+        console.error(`city: office ${officeId} agent ${a.agentId}: "${a.name}" looks like a company or place even renamed; left out of presence`);
+        continue;
+      }
+      clean.push({ agentId: a.agentId, name, hue: a.hue, status: a.status, out: a.out === true });
+    }
     const row: PresenceRow = { officeId, siteId: link.siteId, agents: clean, ts: now };
     this.ctx.storage.sql.exec(
       "INSERT INTO presence (officeId, siteId, agents, ts) VALUES (?, ?, ?, ?) ON CONFLICT(officeId) DO UPDATE SET siteId = excluded.siteId, agents = excluded.agents, ts = excluded.ts",
@@ -437,7 +517,7 @@ export class City extends DurableObject<Env> {
       w.status = a.status;
       w.hue = a.hue;
       this.saveWalker(w);
-      if (changed && !w.inside) this.queue(`w:${w.pid}`, { type: "walk", walker: this.publicWalker(w, now) });
+      if (changed && !w.inside) this.queueWalker(w, "walk", now);
     }
     this.afterChange();
     return { state: link.state, live };
@@ -457,6 +537,7 @@ export class City extends DurableObject<Env> {
     try {
       const link = this.approved(officeId);
       const g = await this.ensureGraph();
+      if (!g.siteById.has(link.siteId)) throw new CityError(503, `your office's site ${link.siteId} is no longer on the city map; ask the city admin`);
       const w = await this.walkerFor(officeId, link.siteId, caller, g);
       let value: unknown;
       if (args.op === "go") value = await this.go(w, args.to, g);
@@ -473,6 +554,7 @@ export class City extends DurableObject<Env> {
 
   private async walkerFor(officeId: string, siteId: string, caller: CityCaller, g: Graph): Promise<Walker> {
     const id = `${officeId}:${caller.agentId}`;
+    const pid = await publicId(id);
     const now = this.clock();
     const existing = this.walkers.get(id);
     if (existing) {
@@ -482,7 +564,7 @@ export class City extends DurableObject<Env> {
       existing.status = caller.status;
       existing.lastSeen = now;
       this.saveWalker(existing);
-      if (statusChanged && !existing.inside) this.queue(`w:${existing.pid}`, { type: "walk", walker: this.publicWalker(existing, now) });
+      if (statusChanged && !existing.inside) this.queueWalker(existing, "walk", now);
       return existing;
     }
     if ([...this.walkers.values()].filter((w) => w.officeId === officeId).length >= MAX_OFFICE_WALKERS) {
@@ -491,29 +573,43 @@ export class City extends DurableObject<Env> {
     if (this.walkers.size >= MAX_CITY_AGENTS) throw new CityError(429, `the city is full: ${MAX_CITY_AGENTS} walkers (MAX_CITY_AGENTS)`);
     const door = this.sitePlace(g, siteId);
     const w: Walker = {
-      id, pid: await publicId(id), officeId, agentId: caller.agentId, name: this.cityName(caller.name, g, siteId, id), hue: caller.hue, siteId,
+      id, pid, officeId, agentId: caller.agentId, name: this.cityName(caller.name, g, siteId, id), hue: caller.hue, siteId,
       path: null, t0: now, speed: 0, mode: "walk", at: { place: door.id }, goal: door.name, inside: false, lastSeen: now, status: caller.status, lastRead: this.seq, node: door.node,
     };
     this.walkers.set(id, w);
     this.saveWalker(w);
-    this.queue(`w:${w.pid}`, { type: "walk", walker: this.publicWalker(w, now) });
+    this.queueWalker(w, "walk", now);
     return w;
   }
 
   /** The office name, refused if it reads as another company or a place, numbered if a present walker has it. */
   private cityName(name: string, g: Graph, siteId: string, selfId: string): string {
+    const like = this.lookAlike(name, g, siteId);
+    if (like !== null) throw new CityError(400, `name looks like ${like}; pick another`);
+    const taken = new Set([...this.walkers.values()].filter((w) => w.id !== selfId).map((w) => normName(w.name)));
+    return uniqueName(name, taken);
+  }
+
+  /** A bridged (office-only) agent's public name: as is, or "<name> (agent)" when it reads as a company or place; null if that does too. */
+  private bridgeName(name: string, g: Graph, siteId: string): string | null {
+    if (this.lookAlike(name, g, siteId) === null) return name;
+    const renamed = `${name} (agent)`;
+    return this.lookAlike(renamed, g, siteId) === null ? renamed : null;
+  }
+
+  /** The company or place `name` reads as (other than the caller's own company), or null. */
+  private lookAlike(name: string, g: Graph, siteId: string): string | null {
     const n = normName(name);
     const own = g.siteById.get(siteId);
     for (const s of g.sites) {
       if (own && s.companyId === own.companyId) continue;
-      if (normName(s.name) === n) throw new CityError(400, `name looks like ${s.name}; pick another`);
+      if (normName(s.name) === n) return s.name;
     }
     for (const p of g.places.places) {
       if (p.kind === "company" && p.siteId && own && g.siteById.get(p.siteId)?.companyId === own.companyId) continue;
-      if ([p.name, ...p.aliases].some((a) => normName(a) === n)) throw new CityError(400, `name looks like ${p.name}; pick another`);
+      if ([p.name, ...p.aliases].some((a) => normName(a) === n)) return p.name;
     }
-    const taken = new Set([...this.walkers.values()].filter((w) => w.id !== selfId).map((w) => w.name.toLowerCase()));
-    return uniqueName(name, taken);
+    return null;
   }
 
   private posOf(w: Walker, now: number): { p: Pt; moving: boolean } {
@@ -550,7 +646,7 @@ export class City extends DurableObject<Env> {
         }
       } else if (w.inside) {
         w.inside = false;
-        this.queue(`w:${w.pid}`, { type: "walk", walker: this.publicWalker(w, now) });
+        this.queueWalker(w, "walk", now);
       }
       this.saveWalker(w);
       return { to: { kind: to, name: site?.name ?? w.siteId, x: round1(here.p[0]), z: round1(here.p[1]) }, distanceM: 0, etaSec: 0, mode: "walk" as WalkMode, via: [], viewUrl };
@@ -570,7 +666,7 @@ export class City extends DurableObject<Env> {
     for (const p of path) if (p.length !== 3 || !p.every(Number.isFinite)) throw new Error(`route returned a path point without x, z, y: ${JSON.stringify(p)}`);
     const start = here.p;
     if (here.moving && (path.length === 0 || Math.hypot(path[0]![0] - start[0], path[0]![1] - start[1]) > 0.01)) path = [start, ...path];
-    path = capPath(path);
+    path = simplifyPath(path);
     const length = pathLength(path);
     const { mode, speed } = modeFor(length);
     w.inside = false;
@@ -582,11 +678,11 @@ export class City extends DurableObject<Env> {
     if (length > 0) {
       w.path = path;
       w.speed = speed;
-      this.queue(`w:${w.pid}`, { type: "walk", walker: this.publicWalker(w, now) });
+      this.queueWalker(w, "walk", now);
     } else {
       w.path = null;
       w.speed = 0;
-      this.queue(`w:${w.pid}`, { type: "arrive", walker: this.publicWalker(w, now) });
+      this.queueWalker(w, "arrive", now);
     }
     this.saveWalker(w);
     return {
@@ -745,6 +841,7 @@ export class City extends DurableObject<Env> {
     }
     const text = args.text?.trim();
     if (!text) throw new CityError(400, `office_city chat ${op} needs \`text\``);
+    if (op === "say" && w.inside) throw new CityError(400, 'you are inside your building, where nobody on the street sees a speech bubble; go {to: "outside"} first');
     const now = this.clock();
     const at = this.posOf(w, now).p;
     let scope: ChatRow["scope"] = args.scope ?? "near";
@@ -778,7 +875,10 @@ export class City extends DurableObject<Env> {
     );
     this.ctx.storage.sql.exec("DELETE FROM chat WHERE seq <= ?", row.seq - CHAT_RING);
     if (scope !== "dm") {
-      if (row.say) this.send({ type: "say", id: w.pid, text, ts: now });
+      if (row.say) {
+        this.flushWalker(w);
+        this.send({ type: "say", id: w.pid, text, ts: now });
+      }
       this.send({ type: "chat", msg: this.publicChat(row) });
     }
     for (const [id, wake] of [...this.waiters]) {
@@ -801,14 +901,38 @@ export class City extends DurableObject<Env> {
   private dropWalker(w: Walker): void {
     this.ctx.storage.sql.exec("DELETE FROM walkers WHERE id = ?", w.id);
     this.walkers.delete(w.id);
-    this.limits.forget(`go:${w.id}`);
+    this.legShown.delete(w.id);
+    for (const k of ["go", "look", "citychat"]) this.limits.forget(`${k}:${w.id}`);
     this.waiters.get(w.id)?.("gone");
     this.queue(`w:${w.pid}`, { type: "left", id: w.pid });
   }
 
+  /** The leg of a moving walker's route viewers get at `now` (a frame carries ≤ MAX_PATH_POINTS points); null when standing. */
+  private legOf(w: Walker, now: number): Leg | null {
+    return w.path && w.speed > 0 ? legAt(w.path, w.speed, w.t0, now) : null;
+  }
+
   private publicWalker(w: Walker, now: number) {
-    const path = w.path && w.speed > 0 ? w.path : [nodePoint(this.mustGraph().walk.nodes, w.node)];
-    return { id: w.pid, name: w.name, hue: w.hue, status: this.statusOf(w, now), site: w.siteId, path, t0: w.t0, speed: w.path ? w.speed : 0, mode: w.mode };
+    const leg = this.legOf(w, now);
+    const path = leg ? w.path!.slice(leg.from, leg.to + 1) : [nodePoint(this.mustGraph().walk.nodes, w.node)];
+    return { id: w.pid, name: w.name, hue: w.hue, status: this.statusOf(w, now), site: w.siteId, path, t0: leg ? leg.t0 : w.t0, speed: leg ? w.speed : 0, mode: w.mode };
+  }
+
+  private queueWalker(w: Walker, type: "walk" | "arrive", now: number): void {
+    const leg = this.legOf(w, now);
+    if (leg) this.legShown.set(w.id, leg.index);
+    else this.legShown.delete(w.id);
+    this.queue(`w:${w.pid}`, { type, walker: this.publicWalker(w, now) });
+  }
+
+  /** When the walker's next leg starts (or now, if viewers never got its current one); null when no leg frame is due. */
+  private nextLegAt(w: Walker, now: number): number | null {
+    if (w.inside) return null;
+    const leg = this.legOf(w, now);
+    if (!leg) return null;
+    if (this.legShown.get(w.id) !== leg.index) return now;
+    if (leg.last) return null;
+    return leg.t0 + travelMs(w.path!.slice(leg.from, leg.to + 1), w.speed);
   }
 
   private siteSummaries(g: Graph) {
@@ -820,8 +944,15 @@ export class City extends DurableObject<Env> {
     }
     const inside = new Map<string, number>();
     for (const w of this.walkers.values()) if (w.inside) inside.set(w.siteId, (inside.get(w.siteId) ?? 0) + 1);
-    const ids = new Set([...bySite.keys(), ...inside.keys()]);
-    return [...ids].sort().map((siteId) => this.siteSummary(g, siteId, bySite.get(siteId) ?? [], inside.get(siteId) ?? 0));
+    const ids = [...new Set([...bySite.keys(), ...inside.keys()])].filter((siteId) => this.knownSite(g, siteId));
+    return ids.sort().map((siteId) => this.siteSummary(g, siteId, bySite.get(siteId) ?? [], inside.get(siteId) ?? 0));
+  }
+
+  /** false (and logged) for a site a data rebuild dropped: one stale row must not fail every snapshot. */
+  private knownSite(g: Graph, siteId: string): boolean {
+    if (g.siteById.has(siteId)) return true;
+    console.error(`city: presence or walkers for site ${siteId}, which is not in companies.json (builtAt ${g.builtAt}); left out`);
+    return false;
   }
 
   private siteSummary(g: Graph, siteId: string, agents: { name: string; hue: number; status: string }[], inside: number) {
@@ -844,11 +975,21 @@ export class City extends DurableObject<Env> {
 
   /** walk/arrive/left (per walker) and presence (per site) frames coalesce; latest wins; flushed at most once per FLUSH_MS. */
   private queue(key: string, frame: Record<string, unknown>): void {
+    this.version++;
     this.pending.set(key, frame);
   }
 
   private queuePresence(siteId: string): void {
-    this.pending.set(`p:${siteId}`, { type: "presence", siteId });
+    this.queue(`p:${siteId}`, { type: "presence", siteId });
+  }
+
+  /** Sends this walker's queued frame now, so a say never reaches viewers before the walker it belongs to. */
+  private flushWalker(w: Walker): void {
+    const key = `w:${w.pid}`;
+    const frame = this.pending.get(key);
+    if (!frame) return;
+    this.pending.delete(key);
+    this.send(frame);
   }
 
   private send(frame: Record<string, unknown>): void {
@@ -872,6 +1013,7 @@ export class City extends DurableObject<Env> {
       if (f.type === "presence") {
         if (!g) continue;
         const siteId = f.siteId as string;
+        if (!this.knownSite(g, siteId)) continue;
         const agents = [...this.presence.values()].filter((p) => p.siteId === siteId).flatMap((p) => p.agents.filter((a) => !a.out).map((a) => ({ name: a.name, hue: a.hue, status: a.status })));
         const inside = [...this.walkers.values()].filter((w) => w.inside && w.siteId === siteId).length;
         this.send({ type: "presence", site: this.siteSummary(g, siteId, agents, inside) });
@@ -892,14 +1034,19 @@ export class City extends DurableObject<Env> {
     const at = (t: number | null) => {
       if (t !== null && (next === null || t < next)) next = t;
     };
+    // walker deadlines need the graph: while it is missing after a failed load they wait for the retry
+    const floor = this.graph ? -Infinity : this.graphRetryAt;
+    const walkerAt = (t: number | null) => at(t === null ? null : Math.max(t, floor));
+    const now = this.clock();
     for (const w of this.walkers.values()) {
-      at(this.arrivalAt(w));
-      at(w.lastSeen + CITY_REMOVE_MS);
-      if (w.status !== "away") at(w.lastSeen + CITY_AWAY_MS);
+      walkerAt(this.arrivalAt(w));
+      if (this.graph) walkerAt(this.nextLegAt(w, now));
+      walkerAt(w.lastSeen + CITY_REMOVE_MS);
+      if (w.status !== "away") walkerAt(w.lastSeen + CITY_AWAY_MS);
     }
     for (const p of this.presence.values()) at(p.ts + PRESENCE_TTL_MS);
     if (this.pending.size) at(this.lastFlush + FLUSH_MS);
-    if (this.walkers.size) at(this.graphCheckedAt + GRAPH_CHECK_MS);
+    if (this.walkers.size) walkerAt(this.graphCheckedAt + GRAPH_CHECK_MS);
     return next;
   }
 
@@ -918,12 +1065,17 @@ export class City extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     this.alarmAt = null;
     const now = this.clock();
-    if (this.walkers.size && now - this.graphCheckedAt >= GRAPH_CHECK_MS) {
+    this.sweepPending(now);
+    this.limits.prune(now);
+    if (!this.graph || (this.walkers.size && now - this.graphCheckedAt >= GRAPH_CHECK_MS)) {
       try {
         await this.ensureGraph();
+        this.graphFailures = 0;
+        this.graphRetryAt = 0;
       } catch (e) {
-        console.error("city: graph check failed", e);
-        this.graphCheckedAt = now;
+        this.graphFailures++;
+        this.graphRetryAt = now + Math.min(GRAPH_RETRY_MAX_MS, GRAPH_RETRY_MS * 2 ** (this.graphFailures - 1));
+        console.error(`city: loading city data failed (${this.graphFailures} in a row); walkers wait until ${new Date(this.graphRetryAt).toISOString()}`, e);
       }
     }
     if (this.graph) {
@@ -940,12 +1092,15 @@ export class City extends DurableObject<Env> {
           w.speed = 0;
           changed = true;
           this.saveWalker(w);
-          if (!w.inside) this.queue(`w:${w.pid}`, { type: "arrive", walker: this.publicWalker(w, now) });
+          if (!w.inside) this.queueWalker(w, "arrive", now);
+        } else if (!w.inside) {
+          const leg = this.legOf(w, now);
+          if (leg && this.legShown.get(w.id) !== leg.index) this.queueWalker(w, "walk", now);
         }
         if (idle >= CITY_AWAY_MS && w.status !== "away") {
           w.status = "away";
           this.saveWalker(w);
-          if (!w.inside) this.queue(`w:${w.pid}`, { type: changed ? "arrive" : "walk", walker: this.publicWalker(w, now) });
+          if (!w.inside) this.queueWalker(w, changed ? "arrive" : "walk", now);
         }
       }
     }
@@ -964,18 +1119,24 @@ export class City extends DurableObject<Env> {
   override async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     try {
-      const g = await this.ensureGraph();
-      this.afterChange();
+      const ip = req.headers.get("cf-connecting-ip");
+      if (!ip) throw new CityError(400, "city: the request has no CF-Connecting-IP header");
       if (url.pathname === `/api/city/${CITY_ID}`) {
         if (req.method !== "GET") return Response.json({ error: `GET /api/city/${CITY_ID}` }, { status: 405 });
-        return Response.json({ ...this.snapshot(g), graph: { nodes: g.walk.nodes.length / 3, edges: g.walk.edges.length / 5, decodeMs: round1(g.loadMs) } });
+        this.publicRate(ip);
+        return new Response(await this.cachedSnapshot(), { headers: { "content-type": "application/json" } });
       }
       if (url.pathname === `/city/${CITY_ID}/ws`) {
         if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return Response.json({ error: "expected a WebSocket upgrade" }, { status: 426 });
+        this.publicRate(ip);
         if (this.ctx.getWebSockets().length >= MAX_CITY_VIEWERS) return Response.json({ error: `too many city viewers (${MAX_CITY_VIEWERS})` }, { status: 503 });
+        const tag = `ip:${ip}`;
+        if (this.ctx.getWebSockets(tag).length >= MAX_VIEWERS_PER_IP) return Response.json({ error: `too many city viewers from one address (${MAX_VIEWERS_PER_IP})` }, { status: 429 });
+        const g = await this.ensureGraph();
+        this.afterChange();
         const pair = new WebSocketPair();
         const [client, server] = [pair[0], pair[1]];
-        this.ctx.acceptWebSocket(server, ["viewer"]);
+        this.ctx.acceptWebSocket(server, ["viewer", tag]);
         server.serializeAttachment({ since: this.clock() });
         const chatTail = this.rows("WHERE scope != 'dm' AND seq > ?", this.seq - CHAT_RING).slice(-CHAT_TAIL).map((r) => this.publicChat(r));
         server.send(JSON.stringify({ type: "snapshot", ...this.snapshot(g), chatTail }));
@@ -983,9 +1144,27 @@ export class City extends DurableObject<Env> {
       }
       return Response.json({ error: `no route ${url.pathname}` }, { status: 404 });
     } catch (e) {
-      const r = wrapError(e) as { status: number; error: string };
-      return Response.json({ error: r.error }, { status: r.status });
+      const r = wrapError(e) as { status: number; error: string; extra: Record<string, unknown> };
+      const headers = typeof r.extra.retryAfter === "number" ? { "retry-after": String(r.extra.retryAfter) } : undefined;
+      return Response.json({ error: r.error, ...r.extra }, { status: r.status, headers });
     }
+  }
+
+  private publicRate(ip: string): void {
+    const [w] = PUBLIC_IP_LIMITS;
+    this.rate(`ip:${ip}`, PUBLIC_IP_LIMITS, `max ${w!.max} city requests per ${w!.ms / 1000}s from one address`);
+  }
+
+  /** GET /api/city/sf body, rebuilt (and the alarm re-armed) only when something changed or SNAPSHOT_CACHE_MS passed. */
+  private async cachedSnapshot(): Promise<string> {
+    const now = this.clock();
+    const c = this.snapCache;
+    if (c && c.version === this.version && now - c.at < SNAPSHOT_CACHE_MS) return c.body;
+    const g = await this.ensureGraph();
+    this.afterChange();
+    const body = JSON.stringify({ ...this.snapshot(g), graph: { nodes: g.walk.nodes.length / 3, edges: g.walk.edges.length / 5, decodeMs: round1(g.loadMs) } });
+    this.snapCache = { version: this.version, at: now, body };
+    return body;
   }
 
   override async webSocketMessage(ws: WebSocket, _message: string | ArrayBuffer): Promise<void> {
