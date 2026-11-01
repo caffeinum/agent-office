@@ -1,6 +1,6 @@
 San Francisco voxel city data (public/city/sf/)
 
-The data files under public/city/** (manifest.json, chunks/*.bin, landmask.bin, landmarks.bin, walk.bin,
+The data files under public/city/** (manifest.json, chunks/*.bin, landmask.bin, landmarks.bin, street.bin, walk.bin,
 places.json, companies.json, report.json) are a Derived Database of OpenStreetMap and are released under the
 Open Database License (ODbL) 1.0: https://opendatacommons.org/licenses/odbl/1-0/
 
@@ -25,6 +25,8 @@ Sources:
 - osm-points-west: https://overpass-api.de/api/interpreter?data=%5Bout%3Ajson%5D%5Btimeout%3A300%5D%5Bmaxsize%3A1073741824%5D%3B(node%5B%22tower%3Atype%22%3D%22lighting%22%5D(37.779%2C-122.4916%2C37.8175%2C-122.4228)%3Bnode%5B%22man_made%22~%22%5E(mast%7Ctower%7Cflagpole)%24%22%5D(37.779%2C-122.4916%2C37.8175%2C-122.4228)%3B)%3Bout%3B (ODbL-1.0)
 - osm-roads: https://overpass-api.de/api/interpreter?data=%5Bout%3Ajson%5D%5Btimeout%3A300%5D%5Bmaxsize%3A1073741824%5D%3Bway%5B%22highway%22%5D(37.7501%2C-122.434%2C37.8157%2C-122.3769)%3Bout%20geom%20tags%3B (ODbL-1.0)
 - osm-roads-west: https://overpass-api.de/api/interpreter?data=%5Bout%3Ajson%5D%5Btimeout%3A300%5D%5Bmaxsize%3A1073741824%5D%3Bway%5B%22highway%22%5D(37.779%2C-122.4916%2C37.8175%2C-122.4228)%3Bout%20geom%20tags%3B (ODbL-1.0)
+- osm-street: https://overpass-api.de/api/interpreter?data=%5Bout%3Ajson%5D%5Btimeout%3A300%5D%5Bmaxsize%3A1073741824%5D%3B(node%5B%22highway%22~%22%5E(traffic_signals%7Ccrossing%7Cstreet_lamp%7Cbus_stop)%24%22%5D(37.7501%2C-122.434%2C37.8157%2C-122.3769)%3Bnode%5B%22public_transport%22%3D%22platform%22%5D(37.7501%2C-122.434%2C37.8157%2C-122.3769)%3Bnode%5B%22amenity%22~%22%5E(bench%7Cwaste_basket)%24%22%5D(37.7501%2C-122.434%2C37.8157%2C-122.3769)%3Bnode%5B%22emergency%22%3D%22fire_hydrant%22%5D(37.7501%2C-122.434%2C37.8157%2C-122.3769)%3Bway%5B%22railway%22~%22%5E(tram%7Clight_rail)%24%22%5D(37.7501%2C-122.434%2C37.8157%2C-122.3769)%3B)%3Bout%20geom%3B (ODbL-1.0)
+- osm-street-west: https://overpass-api.de/api/interpreter?data=%5Bout%3Ajson%5D%5Btimeout%3A300%5D%5Bmaxsize%3A1073741824%5D%3B(node%5B%22highway%22~%22%5E(traffic_signals%7Ccrossing%7Cstreet_lamp%7Cbus_stop)%24%22%5D(37.779%2C-122.4916%2C37.8175%2C-122.4228)%3Bnode%5B%22public_transport%22%3D%22platform%22%5D(37.779%2C-122.4916%2C37.8175%2C-122.4228)%3Bnode%5B%22amenity%22~%22%5E(bench%7Cwaste_basket)%24%22%5D(37.779%2C-122.4916%2C37.8175%2C-122.4228)%3Bnode%5B%22emergency%22%3D%22fire_hydrant%22%5D(37.779%2C-122.4916%2C37.8175%2C-122.4228)%3Bway%5B%22railway%22~%22%5E(tram%7Clight_rail)%24%22%5D(37.779%2C-122.4916%2C37.8175%2C-122.4228)%3B)%3Bout%20geom%3B (ODbL-1.0)
 - osm-trees: https://overpass-api.de/api/interpreter?data=%5Bout%3Ajson%5D%5Btimeout%3A300%5D%5Bmaxsize%3A1073741824%5D%3Bnode%5B%22natural%22%3D%22tree%22%5D(37.7501%2C-122.434%2C37.8157%2C-122.3769)%3Bout%3B (ODbL-1.0)
 - osm-trees-west: https://overpass-api.de/api/interpreter?data=%5Bout%3Ajson%5D%5Btimeout%3A300%5D%5Bmaxsize%3A1073741824%5D%3Bnode%5B%22natural%22%3D%22tree%22%5D(37.779%2C-122.4916%2C37.8175%2C-122.4228)%3Bout%3B (ODbL-1.0)
 - terrain: https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png (Terrain Tiles on AWS Open Data; per-source terms in the joerd attribution)

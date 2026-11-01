@@ -16,7 +16,15 @@ export const DPR_LOW = 1.0;
 export const FPS_FLOOR = 45;
 export const SHADOW_HALF = 128;
 export const SHADOW_MAP = 2048;
-export const CAMERA = { fov: 30, near: 1, far: 6000, minPolar: 0.32, maxPolar: 1.42, minDist: 30, maxDist: 2500 };
+export const CAMERA = { fov: 30, near: 1, far: 6000, minPolar: 0.32, maxPolar: 1.42, minDist: 2.5, maxDist: 2500 };
+/** Close in the camera may look along the street: the tilt limits ease from the orbit range (≥ STREET_FAR blocks
+ * out) to eye level (≤ STREET_NEAR), where the camera is also kept at least STREET_MIN_POLAR off the vertical. */
+export const STREET_NEAR = 12, STREET_FAR = 80, STREET_MAX_POLAR = 1.56, STREET_MIN_POLAR = 1.05;
+const streetMix = (dist) => Math.min(1, Math.max(0, (STREET_FAR - dist) / (STREET_FAR - STREET_NEAR)));
+/** Pure. Largest polar (tilt from vertical) allowed at orbit distance dist. */
+export const maxPolarFor = (dist) => CAMERA.maxPolar + (STREET_MAX_POLAR - CAMERA.maxPolar) * streetMix(dist);
+/** Pure. Smallest polar allowed at orbit distance dist: zooming in tilts the camera toward the street. */
+export const minPolarFor = (dist) => CAMERA.minPolar + (STREET_MIN_POLAR - CAMERA.minPolar) * streetMix(dist) ** 2;
 
 export const THEMES = {
   day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0, threshold: 0.95, exposure: 1.0, windows: 0 },
@@ -162,8 +170,8 @@ export function createStage(container, { theme = "day" } = {}) {
     if (now.dist > 1 && pair.dist > 1) sph.radius *= pair.dist / now.dist;
     sph.theta -= Math.atan2(Math.sin(now.angle - pair.angle), Math.cos(now.angle - pair.angle));
     sph.phi -= ((now.midY - pair.midY) / state.size.h) * Math.PI * 0.8;
-    sph.phi = THREE.MathUtils.clamp(sph.phi, CAMERA.minPolar, CAMERA.maxPolar);
     sph.radius = THREE.MathUtils.clamp(sph.radius, CAMERA.minDist, CAMERA.maxDist);
+    sph.phi = THREE.MathUtils.clamp(sph.phi, minPolarFor(sph.radius), maxPolarFor(sph.radius));
     offset.setFromSpherical(sph);
     camera.position.copy(controls.target).add(offset);
     camera.lookAt(controls.target);
@@ -220,6 +228,9 @@ export function createStage(container, { theme = "day" } = {}) {
     state.last = now;
     renderer.info.reset();
     const keyed = stepKeys(dt);
+    const d = camera.position.distanceTo(controls.target);
+    controls.minPolarAngle = minPolarFor(d);
+    controls.maxPolarAngle = maxPolarFor(d);
     controls.update(dt);
     for (const fn of state.frameCbs) fn(now, dt, keyed);
     placeSun();

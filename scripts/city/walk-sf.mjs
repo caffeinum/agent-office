@@ -10,7 +10,8 @@ import {
 import { buildWalk } from "./lib/walk.mjs";
 import { BUILD_DIR, OUT_DIR, RAW_DIR } from "./sf/config.mjs";
 
-export const MAX_WALK_GZ_BYTES = 150 * 1024;
+/** 160 KB (spec-v2 said 150): OSM `lanes` widths since the street-detail pass vary halfWidth along a street. */
+export const MAX_WALK_GZ_BYTES = 160 * 1024;
 const PLACES_SRC = "scripts/city/sf/places.src.json";
 
 const readJson = (p) => {

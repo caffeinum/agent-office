@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
 import {
-  BLOCK_M, CHUNK, CITY_VERSION, LANDMASK_CELL, SURFACE, blockToLonLat, chunkKey, encodeChunk, encodeLandmask,
+  BLOCK_M, CHUNK, CITY_VERSION, LANDMASK_CELL, MAX_STREET_GZ_BYTES, SURFACE, blockToLonLat, isRoadSurface, chunkKey, encodeChunk, encodeLandmask, encodeStreet,
   PALETTE_INDEX, lonLatToBlock, osmColourToHex, osmMaterial, paletteFor, validateManifest,
 } from "../../public/shared/city.js";
 import { readSources } from "./lib/http.mjs";
@@ -26,6 +26,7 @@ import { applyLandmarks } from "./lib/landmarks.mjs";
 import { calibrateSkyline } from "./lib/skyline.mjs";
 import { buildLandmarkMesh } from "./lib/meshlayer.mjs";
 import { renderTopdown } from "./lib/topdown.mjs";
+import { buildStreet } from "./lib/street.mjs";
 import { areaSources, coarseTerrainTiles, terrainTiles } from "./fetch-sf.mjs";
 import {
   AREAS, ATTRIBUTION, BUDGET, BUILD_DIR, CACHE_BUILDINGS, CITY, COARSE_TERRAIN_ZOOM, DROP_BUILDINGS, GRID, HILL_GROUND, HILL_SLOPE,
@@ -709,6 +710,63 @@ function stampBuildings(raster, merged, datasf, report) {
   } };
 }
 
+/** Default ground (no landcover) beside a street and amid buildings is paved: plazas, turnarounds, forecourts. */
+const PAVE_STREET_R = 4;
+const PAVE_BUILT_R = 3;
+const PAVE_BUILT_SHARE = 0.25;
+/** …or, with at least PAVE_MIN_BUILT built, where streets cover PAVE_STREET_SHARE of the street box (wide gaps). */
+const PAVE_MIN_BUILT = 0.08;
+const PAVE_STREET_SHARE = 0.3;
+/** …or, whatever is built, where streets cover half the street box (leftover islands at wide intersections). */
+const PAVE_ISLAND_SHARE = 0.5;
+
+/** Summed-area table of `want(i)` over the raster. → count(x0, z0, x1, z1) inclusive, clipped */
+function areaCounter(raster, want) {
+  const { w, h } = raster;
+  const sat = new Int32Array((w + 1) * (h + 1));
+  for (let z = 0; z < h; z++) {
+    let row = 0;
+    for (let x = 0; x < w; x++) {
+      row += want(z * w + x) ? 1 : 0;
+      sat[(z + 1) * (w + 1) + x + 1] = sat[z * (w + 1) + x + 1] + row;
+    }
+  }
+  return (x0, z0, x1, z1) => {
+    x0 = Math.max(0, x0); z0 = Math.max(0, z0); x1 = Math.min(w - 1, x1); z1 = Math.min(h - 1, z1);
+    if (x1 < x0 || z1 < z0) return 0;
+    const W = w + 1;
+    return sat[(z1 + 1) * W + x1 + 1] - sat[z0 * W + x1 + 1] - sat[(z1 + 1) * W + x0] + sat[z0 * W + x0];
+  };
+}
+
+/**
+ * Default terrain ground (still the GRASS / HILL the terrain pass gave it) that touches a street within
+ * PAVE_STREET_R and stands among buildings (≥ PAVE_BUILT_SHARE of the (2·PAVE_BUILT_R+1)² box) becomes PLAZA,
+ * so downtown gaps (the Powell St cable-car turnaround, forecourts) are paved instead of lawn. Back yards away
+ * from the street stay green.
+ */
+function paveStreetGaps(raster, terrainSurface, report) {
+  const { w, h, surface, owner, ground } = raster;
+  const street = areaCounter(raster, (i) => owner[i] < 0 && (isRoadSurface(surface[i]) || surface[i] === SURFACE.SIDEWALK || surface[i] === SURFACE.PLAZA));
+  const built = areaCounter(raster, (i) => owner[i] >= 0);
+  const box = (2 * PAVE_BUILT_R + 1) ** 2, streetBox = (2 * PAVE_STREET_R + 1) ** 2;
+  const paved = [];
+  for (let z = 0; z < h; z++) {
+    for (let x = 0; x < w; x++) {
+      const i = z * w + x;
+      if (owner[i] >= 0 || ground[i] <= 0 || raster.deck[i] !== 0 || surface[i] !== terrainSurface[i]) continue;
+      if (surface[i] !== SURFACE.GRASS && surface[i] !== SURFACE.HILL) continue;
+      const streets = street(x - PAVE_STREET_R, z - PAVE_STREET_R, x + PAVE_STREET_R, z + PAVE_STREET_R);
+      if (!streets) continue;
+      const b = built(x - PAVE_BUILT_R, z - PAVE_BUILT_R, x + PAVE_BUILT_R, z + PAVE_BUILT_R);
+      if (b < box * PAVE_BUILT_SHARE && (b < box * PAVE_MIN_BUILT || streets < streetBox * PAVE_STREET_SHARE) && streets < streetBox * PAVE_ISLAND_SHARE) continue;
+      paved.push(i);
+    }
+  }
+  for (const i of paved) surface[i] = SURFACE.PLAZA;
+  report.pavedGaps = paved.length;
+}
+
 const TREE_NATURAL = new Set([SURFACE.GRASS, SURFACE.PARK, SURFACE.HILL, SURFACE.FOREST]);
 const TREE_STREET = new Set([SURFACE.SIDEWALK, SURFACE.PLAZA]);
 const STREET_TREE_SPACING = 3;
@@ -831,7 +889,7 @@ function licenseText(sources) {
   return [
     "San Francisco voxel city data (public/city/sf/)",
     "",
-    "The data files under public/city/** (manifest.json, chunks/*.bin, landmask.bin, landmarks.bin, walk.bin,",
+    "The data files under public/city/** (manifest.json, chunks/*.bin, landmask.bin, landmarks.bin, street.bin, walk.bin,",
     "places.json, companies.json, report.json) are a Derived Database of OpenStreetMap and are released under the",
     "Open Database License (ODbL) 1.0: https://opendatacommons.org/licenses/odbl/1-0/",
     "",
@@ -900,6 +958,7 @@ export async function buildSf() {
   lap(`raster ${range.min}..${range.max}, ${inArea.size} area chunks`);
   const land = landPolygons();
   const water = stampTerrainAndMask(raster, land, inArea, report);
+  const terrainSurface = raster.surface.slice();
   lap("terrain + mask");
   const rails = stampLandcover(raster, report);
   lap("landcover");
@@ -935,6 +994,7 @@ export async function buildSf() {
   report.shallowColumns = stampShallow(raster);
   applyLandmarks(raster, ctx);
   calibrateSkyline(raster, ctx);
+  paveStreetGaps(raster, terrainSurface, report);
   addStreetTrees(raster, streetTrees, report);
   lap("hooks");
   unresolvedTowers(raster, placed, report);
@@ -942,6 +1002,15 @@ export async function buildSf() {
   for (let cz = range.min[1]; cz <= range.max[1]; cz++) {
     for (let cx = range.min[0]; cx <= range.max[0]; cx++) if (!inArea.has(`${cx},${cz}`)) resetChunkToSea(raster, cx, cz);
   }
+  const street = buildStreet({
+    raster, roads: readOsm("roads"), street: readOsm("street"), toBlock,
+    isDeck: (t, line) => deckKind(t, polylineLengthBlocks(line) * BLOCK_M, highwayClass(t.highway)) !== null,
+    inArea: (x, z) => inArea.has(`${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`),
+  });
+  report.street = street.report;
+  const streetGz = gz(encodeStreet(street.doc, GRID));
+  if (streetGz.length > MAX_STREET_GZ_BYTES) throw new Error(`street.bin ${streetGz.length} bytes gz > ${MAX_STREET_GZ_BYTES}`);
+  lap(`street (${street.doc.lines.length} lines, ${street.doc.points.length} points, ${streetGz.length} B gz)`);
   const parents = mergeParents(raster.parents, report.parents ?? {});
   const { chunks, water: waterChunks } = rasterToChunks(raster, parents);
   const waterList = waterChunks.filter(([cx, cz]) => inArea.has(`${cx},${cz}`));
@@ -995,6 +1064,7 @@ export async function buildSf() {
     areas: AREAS.map(({ id, west, south, east, north }) => ({ id, west, south, east, north })),
     landmask: "landmask.bin",
     landmarks: "landmarks.bin",
+    street: "street.bin",
     walk: "walk.bin",
     places: "places.json",
     parents,
@@ -1009,6 +1079,7 @@ export async function buildSf() {
   writeFileSync(join(OUT_DIR, "manifest.json"), manifestJson);
   writeFileSync(join(OUT_DIR, "landmask.bin"), landmaskGz);
   writeFileSync(join(OUT_DIR, "landmarks.bin"), landmarksGz);
+  writeFileSync(join(OUT_DIR, "street.bin"), streetGz);
   writeFileSync(join(OUT_DIR, "LICENSE.txt"), licenseText(sources));
   report.seconds = (Date.now() - t0) / 1000;
   report.heapMB = Math.round(process.memoryUsage().rss / 1e6);
@@ -1017,7 +1088,7 @@ export async function buildSf() {
   const files = filesIn(OUT_DIR);
   const pending = ["walk.bin", "places.json", "companies.json"].filter((f) => !existsSync(join(OUT_DIR, f)));
   const totalBytes = files.reduce((s, f) => s + statSync(f).size, 0);
-  const output = { chunks: list.length, water: waterList.length, chunkBytes, totalBytes, maxChunk, files: files.length, pendingFiles: pending, landmaskBytes: landmaskGz.length, landmarksBytes: landmarksGz.length, manifestBytes: manifestJson.length };
+  const output = { chunks: list.length, water: waterList.length, chunkBytes, totalBytes, maxChunk, files: files.length, pendingFiles: pending, landmaskBytes: landmaskGz.length, landmarksBytes: landmarksGz.length, streetBytes: streetGz.length, manifestBytes: manifestJson.length };
   console.log(`  output: ${JSON.stringify(output)}`);
   if (totalBytes > BUDGET.totalBytes) throw new Error(`public/city/sf: ${totalBytes} bytes > ${BUDGET.totalBytes}`);
   if (files.length + pending.length > BUDGET.files) throw new Error(`public/city/sf: ${files.length} files (+${pending.length} pending) > ${BUDGET.files}`);

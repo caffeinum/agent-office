@@ -5,13 +5,19 @@
 //    unbuilt-land mesh and the instanced landmark layer, frustum-culls every mesh by its bounding box at 1280×800,
 //    and counts triangles and draw calls (main pass + sun shadow pass for casters inside the shadow box + the
 //    output pass). Gate: ≤ 1.5M triangles after culling and ≤ 90 draw calls. With --gate a miss exits non-zero.
+//    LOD0 chunks carry their street.bin detail (decals, furniture, parked cars), and cameras within TRAFFIC_DIST add
+//    the three instanced traffic meshes at their caps (main + shadow). A third preset stands at street level on
+//    2nd St at Howard.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 import {
-  CHUNK, REGION, chunkKey, chunkOf, decodeChunk, decodeLandmarks, decodeLandmask, lonLatToBlock, regionOf, validateManifest,
+  CHUNK, REGION, chunkKey, chunkOf, decodeChunk, decodeLandmarks, decodeLandmask, decodeStreet, lonLatToBlock, regionOf, validateManifest,
 } from "../../public/shared/city.js";
+import { binStreet } from "../../public/js/city/streetmesh.js";
+import { CABLE_CAR_BOXES, CAR_BOXES, DECAL_DIST, STREETCAR_BOXES } from "../../public/js/city/streetkit.js";
+import { MAX_CARS, TRAFFIC_DIST } from "../../public/js/city/traffic.js";
 import { meshChunk, meshRegion, meshUnbuilt } from "../../public/js/city/mesher.js";
 import { landmarkTriangles } from "../../public/js/city/meshlayer.js";
 import { createUnmapped } from "../../public/js/city/unmapped.js";
@@ -30,6 +36,11 @@ const WATER_PLANE_CALLS = 1;
 const DEFAULT_POLAR = 0.95;
 /** Presidio overview camera target, roughly over the Main Post (a viewpoint, not map data). */
 const PRESIDIO = { lon: -122.4662, lat: 37.7989, dist: 1500, polar: 0.9 };
+/** Street-level camera on 2nd St looking north toward Howard (a viewpoint, not map data). */
+const STREET = { lon: -122.39826, lat: 37.78655, dist: 16, polar: 1.36, az: 0.15 };
+/** Traffic at its caps: cars, cable cars, streetcars (12 triangles per box). */
+const TRAFFIC_TRIANGLES = 12 * (MAX_CARS * CAR_BOXES.length + 8 * CABLE_CAR_BOXES.length + 8 * STREETCAR_BOXES.length);
+const TRAFFIC_MESHES = 3;
 
 function load(city) {
   const dir = join(ROOT, "public/city", city);
@@ -43,7 +54,8 @@ function load(city) {
   }
   const mask = decodeLandmask(new Uint8Array(gunzipSync(readFileSync(join(dir, manifest.landmask)))), manifest.chunks.grid);
   const boxes = decodeLandmarks(new Uint8Array(gunzipSync(readFileSync(join(dir, manifest.landmarks)))), manifest.chunks.grid);
-  return { manifest, mask, boxes, get: (cx, cz) => chunks.get(chunkKey(cx, cz)) ?? null };
+  const street = binStreet(decodeStreet(new Uint8Array(gunzipSync(readFileSync(join(dir, manifest.street)))), manifest.chunks.grid));
+  return { manifest, mask, boxes, street, get: (cx, cz) => chunks.get(chunkKey(cx, cz)) ?? null };
 }
 
 function time(fn) {
@@ -110,7 +122,7 @@ function bounds(m) {
 }
 
 /** The scene.js LOD set for a camera target, meshed. → [{what, mesh, shadow}] */
-function frameMeshes(city, target) {
+function frameMeshes(city, target, dist = 0) {
   const { manifest, get, mask } = city;
   const unmapped = createUnmapped(manifest, mask);
   const [tcx, tcz] = chunkOf(Math.floor(target.x), Math.floor(target.z));
@@ -120,8 +132,8 @@ function frameMeshes(city, target) {
     if (Math.max(Math.abs(cx - tcx), Math.abs(cz - tcz)) > LOD0_R) continue;
     lod0.add(chunkKey(cx, cz));
     const nb = (x, z, side) => get(x, z) ?? unmapped.neighbour(x, z, side);
-    const m = meshChunk(get(cx, cz), { n: nb(cx, cz - 1, "n"), s: nb(cx, cz + 1, "s"), e: nb(cx + 1, cz, "e"), w: nb(cx - 1, cz, "w") });
-    for (const [k, mesh] of Object.entries(m)) out.push({ what: `lod0 ${cx},${cz} ${k}`, mesh, shadow: true });
+    const m = meshChunk(get(cx, cz), { n: nb(cx, cz - 1, "n"), s: nb(cx, cz + 1, "s"), e: nb(cx + 1, cz, "e"), w: nb(cx - 1, cz, "w") }, city.street.get(chunkKey(cx, cz)) ?? null);
+    for (const [k, mesh] of Object.entries(m)) if (k !== "decals" || dist < DECAL_DIST) out.push({ what: `lod0 ${cx},${cz} ${k}`, mesh, shadow: k !== "decals" });
   }
   const regions = new Map();
   for (const [cx, cz] of manifest.chunks.list) {
@@ -138,13 +150,13 @@ function frameMeshes(city, target) {
     if (!chunks.length) continue;
     out.push({ what: `region ${key} lod ${lod}`, mesh: meshRegion(chunks, skip, lod).opaque, shadow: false });
   }
-  out.push({ what: "unbuilt", mesh: meshUnbuilt(mask, manifest.chunks.list.map(([cx, cz]) => [cx, cz]), manifest.water).opaque, shadow: false });
+  out.push({ what: "unbuilt", mesh: meshUnbuilt(mask, manifest.chunks.list.map(([cx, cz]) => [cx, cz]), manifest.water, manifest.proj).opaque, shadow: false });
   return out;
 }
 
 /** → {triangles, calls, mainCalls, shadowCalls, meshes, culledMeshes} for one camera. */
 export function frameBudget(city, cam) {
-  const meshes = frameMeshes(city, cam);
+  const meshes = frameMeshes(city, cam, cam.dist);
   const clip = cameraClip({ ...cam, y: cam.y ?? 0 });
   let triangles = 0, mainCalls = 0, shadowCalls = 0, culledMeshes = 0;
   const shadowMin = [cam.x - SHADOW_HALF * 2, -Infinity, cam.z - SHADOW_HALF * 2], shadowMax = [cam.x + SHADOW_HALF * 2, Infinity, cam.z + SHADOW_HALF * 2];
@@ -162,6 +174,11 @@ export function frameBudget(city, cam) {
     mainCalls += groups;
     shadowCalls += groups;
   }
+  if (cam.dist < TRAFFIC_DIST) {
+    triangles += TRAFFIC_TRIANGLES;
+    mainCalls += TRAFFIC_MESHES;
+    shadowCalls += TRAFFIC_MESHES;
+  }
   return { triangles, calls: mainCalls + shadowCalls + OUTPUT_PASS_CALLS + WATER_PLANE_CALLS, mainCalls, shadowCalls, meshes: meshes.length, culledMeshes };
 }
 
@@ -175,7 +192,12 @@ function presets(manifest) {
   const presidio = inGrid
     ? { x: p.x, z: p.z, dist: PRESIDIO.dist, az: manifest.spawn.az, polar: PRESIDIO.polar }
     : { x: manifest.spawn.x, z: manifest.spawn.z, dist: PRESIDIO.dist, az: manifest.spawn.az, polar: PRESIDIO.polar, note: "no Presidio in this city: far overview of the spawn" };
-  return { spawn, presidio };
+  const st = lonLatToBlock(STREET.lon, STREET.lat, manifest.proj);
+  const [sx, sz] = chunkOf(Math.floor(st.x), Math.floor(st.z));
+  const street = manifest.chunks.list.some(([x, z]) => x === sx && z === sz)
+    ? { x: st.x, z: st.z, dist: STREET.dist, az: STREET.az, polar: STREET.polar, y: 1 }
+    : { x: manifest.spawn.x, z: manifest.spawn.z, dist: STREET.dist, az: STREET.az, polar: STREET.polar, note: "no 2nd St in this city: street level at the spawn" };
+  return { spawn, presidio, street };
 }
 
 /** → Promise<{lod0Ms, lod0Tris, lod1Ms, lod2Ms, frames: {spawn, presidio}, ok}> */
@@ -186,15 +208,15 @@ export async function perf({ city = "sf", gate = false } = {}) {
   const c = get(cx, cz);
   if (!c) throw new Error(`city:perf: ${city} has no chunk ${cx},${cz}`);
   const nb = { n: get(cx, cz - 1), s: get(cx, cz + 1), e: get(cx + 1, cz), w: get(cx - 1, cz) };
-  const lod0 = time(() => meshChunk(c, nb));
-  const lod0Tris = tris(lod0.out.opaque) + tris(lod0.out.walls) + tris(lod0.out.props);
+  const lod0 = time(() => meshChunk(c, nb, loaded.street.get(chunkKey(cx, cz)) ?? null));
+  const lod0Tris = tris(lod0.out.opaque) + tris(lod0.out.walls) + tris(lod0.out.props) + tris(lod0.out.decals);
   const [rx, rz] = regionOf(cx, cz);
   const regionChunks = [];
   for (let z = rz * REGION; z < rz * REGION + REGION; z++) for (let x = rx * REGION; x < rx * REGION + REGION; x++) if (get(x, z)) regionChunks.push(get(x, z));
   const lod1 = time(() => meshRegion(regionChunks, [], 1));
   const lod2 = time(() => meshRegion(regionChunks, [], 2));
   console.log(`city:perf (${city})`);
-  console.log(`  LOD0 chunk ${cx},${cz}: ${fmt(lod0)}, ${lod0Tris} triangles (opaque ${tris(lod0.out.opaque)}, walls ${tris(lod0.out.walls)}, props ${tris(lod0.out.props)}) — target ≤ ${TARGET_MS} ms: ${lod0.median <= TARGET_MS ? "ok" : "OVER"}`);
+  console.log(`  LOD0 chunk ${cx},${cz}: ${fmt(lod0)}, ${lod0Tris} triangles (opaque ${tris(lod0.out.opaque)}, walls ${tris(lod0.out.walls)}, props ${tris(lod0.out.props)}, decals ${tris(lod0.out.decals)}) — target ≤ ${TARGET_MS} ms: ${lod0.median <= TARGET_MS ? "ok" : "OVER"}`);
   console.log(`  LOD1 region ${rx},${rz} (${regionChunks.length} chunks): ${fmt(lod1)}, ${tris(lod1.out.opaque)} triangles`);
   console.log(`  LOD2 region ${rx},${rz}: ${fmt(lod2)}, ${tris(lod2.out.opaque)} triangles`);
   const frames = {};

@@ -2,7 +2,7 @@
 // columns W2 already stamped for it (build-sf calls it after stampBuildings, before finishDecks). Ballpark and
 // arena geometry generators live here too; the landmark recipes (lib/landmarks.mjs) use them for Oracle Park and
 // Chase Center.
-import { BLOCK_M, CAP, FACADE, PALETTE_INDEX, STRUCTURE_KINDS, SURFACE } from "../../../public/shared/city.js";
+import { BLOCK_M, CAP, FACADE, PALETTE_INDEX, STRUCTURE_KINDS, SURFACE, isRoadSurface } from "../../../public/shared/city.js";
 import { pointInPolygon, scanPolygon } from "./geo.mjs";
 import { landmarkKeys, loadLandmarks } from "./landmarks.mjs";
 import { rasterIndex } from "./raster.mjs";
@@ -325,7 +325,7 @@ export function applyStructures(raster, ctx, opts = {}) {
         }
         const towerH = Math.max(H + 2, Math.round(ds.maxM / BLOCK_M));
         const ax = principalAxis(cols);
-        const street = (s) => s === SURFACE.ROAD || s === SURFACE.SIDEWALK;
+        const street = (s) => isRoadSurface(s) || s === SURFACE.SIDEWALK;
         const end = endScore(raster, ax, 1, street) >= endScore(raster, ax, -1, street) ? 1 : -1;
         const wantU = end > 0 ? ax.u1 - 1 : ax.u0 + 1, wantV = (ax.v0 + ax.v1) / 2;
         const [tu, tv] = cols.map(([x, z]) => localUV(ax, x, z)).sort((a, b) => Math.hypot(a[0] - wantU, a[1] - wantV) - Math.hypot(b[0] - wantU, b[1] - wantV))[0];

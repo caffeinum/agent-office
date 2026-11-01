@@ -195,8 +195,9 @@ export function landmarkMeshBoxes(ctx, landmarks = loadLandmarks(), skyline = lo
       if (S.mesh.length === 0) continue;
       const base = siteBase(S, ctx);
       for (const op of S.mesh) {
-        if (op.kind !== "crown_lattice") throw new Error(`mesh kind ${op.kind} has no generator`);
-        latticeVoxels(op, S, base, vox);
+        if (op.kind === "crown_lattice") latticeVoxels(op, S, base, vox);
+        else if (op.kind === "clock_faces") for (const [x, z] of op.cells) vox.add(x, z, base + op.y0, base + op.y1, op.palette, op.emissive ? 1 : 0);
+        else throw new Error(`mesh kind ${op.kind} has no generator`);
       }
     }
   }

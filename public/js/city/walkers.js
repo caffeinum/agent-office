@@ -148,6 +148,7 @@ export function createWalkers(city, live, root, { doc = document, onChipPick = (
   if (!THREE) throw new Error("createWalkers: city.THREE is missing");
   const camera = city.stage?.camera;
   if (!camera) throw new Error("createWalkers: city.stage.camera is missing");
+  if (typeof city.standY !== "function") throw new Error("createWalkers: city.standY(x, y, z) is missing (curb-lowered carriageway)");
 
   const bodyGeo = pinGeometry(THREE);
   limbAttribute(THREE, bodyGeo);
@@ -230,6 +231,7 @@ export function createWalkers(city, live, root, { doc = document, onChipPick = (
       const w = t.walker;
       if (w.inside) continue;
       const p = live.position(w.id, localNow);
+      p.y = city.standY(p.x, p.y, p.z);
       const dist = camera.position.distanceTo(v.set(p.x, p.y, p.z));
       const mode = drawMode(dist);
       const riding = w.mode === "ride";

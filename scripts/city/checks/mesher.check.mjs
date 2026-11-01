@@ -10,12 +10,16 @@ import { gunzipSync } from "node:zlib";
 import {
   ACCENT_NONE, BUILDING_PALETTE, CAP, CHUNK, CITY_VERSION, COLUMNS, FACADE, PALETTE_INDEX, SF_PROJ, SURFACE, SURFACE_COLORS,
   UNBUILT_COLORS, chunkKey, decodeChunk, decodeLandmarks, decodeLandmask, lonLatToBlock, regionOf, validateChunk, validateManifest,
+  CROSSWALK_STYLE, ROAD_FLAG, STREET_LINE, STREET_POINT, STREET_Q, TRACK_FLAG, decodeStreet, rotByte,
 } from "../../../public/shared/city.js";
 import {
   ARCADE_HEIGHT, CANOPY_CELL, HILL_CONTOUR, PROP_QUADS, SLOPE_FLAT, canopyHeight, capColorId, handleMeshRequest, hillShade, linearBytes, meshChunk,
   meshRegion, meshUnbuilt, slopeLevel, slopeShade, srgbToLinear,
 } from "../../../public/js/city/mesher.js";
 import { landmarkInstances, landmarkTriangles } from "../../../public/js/city/meshlayer.js";
+import { binStreet, pointQuads } from "../../../public/js/city/streetmesh.js";
+import { CURB } from "../../../public/js/city/streetkit.js";
+import { buildNetwork, laneOffsets, pointOn, polyline } from "../../../public/js/city/traffic.js";
 import { createUnmapped } from "../../../public/js/city/unmapped.js";
 import { northVector, screenNorthDeg } from "../../../public/js/city/compass.js";
 import { FRAME_BUDGET, cameraClip, culled, frameBudget } from "../perf.mjs";
@@ -258,19 +262,24 @@ test("fixture: worker request/reply shape with transferables", () => {
   assert.ok(reply.opaque && reply.walls);
   assert.ok(transfer.every((b) => b instanceof ArrayBuffer));
   assert.equal(new Set(transfer).size, transfer.length);
-  assert.equal(transfer.length, 15, "positions, normals, colors, uvs, indices × 2 meshes + positions, normals, colors, glow, indices of props");
+  assert.equal(transfer.length, 19, "positions, normals, colors, uvs, indices × 2 meshes + positions, normals, colors, glow, indices of props + positions, normals, colors, indices of decals");
   const r = handleMeshRequest({ id: "r", kind: "region", lod: 2, chunks: [...city.store.values()], skip: [[57, 25]] });
   assert.equal(r.reply.id, "r");
   assert.equal(r.reply.walls, undefined);
   assert.equal(r.transfer.length, 5, "positions, normals, colors, glow, indices");
 });
 
-test("mesher.js and mesher.worker.js import only shared/city.js (no three, no importmap)", () => {
-  for (const f of ["mesher.js", "mesher.worker.js"]) {
+test("mesher.js, streetmesh.js, streetkit.js and mesher.worker.js import only relative plain modules (no three, no importmap)", () => {
+  const allowed = {
+    "mesher.js": ["../../shared/city.js", "./streetkit.js", "./streetmesh.js"],
+    "streetmesh.js": ["../../shared/city.js", "./streetkit.js"],
+    "streetkit.js": [],
+    "mesher.worker.js": ["./mesher.js"],
+  };
+  for (const [f, want] of Object.entries(allowed)) {
     const src = readFileSync(join(ROOT, "public/js/city", f), "utf8");
     const specs = [...src.matchAll(/\bimport\s*(?:[^"';]*?\bfrom\s*)?["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']/g)].map((m) => m[1] ?? m[2]);
-    const allowed = f === "mesher.js" ? ["../../shared/city.js"] : ["./mesher.js"];
-    assert.deepEqual([...new Set(specs)], allowed, `${f} imports ${specs.join(", ")}`);
+    assert.deepEqual([...new Set(specs)], want, `${f} imports ${specs.join(", ")}`);
   }
 });
 
@@ -600,7 +609,8 @@ test("perf frustum: boxes in front of the orbit camera survive, boxes behind it 
   const fixture = loadCity(FIXTURE);
   const mask = loadMask(FIXTURE, fixture.manifest);
   const boxes = decodeLandmarks(new Uint8Array(gunzipSync(readFileSync(join(FIXTURE, fixture.manifest.landmarks)))), fixture.manifest.chunks.grid);
-  const f = frameBudget({ ...fixture, mask, boxes }, { ...fixture.manifest.spawn, polar: DEFAULT_POLAR_PERF });
+  const street = binStreet(decodeStreet(new Uint8Array(gunzipSync(readFileSync(join(FIXTURE, fixture.manifest.street)))), fixture.manifest.chunks.grid));
+  const f = frameBudget({ ...fixture, mask, boxes, street }, { ...fixture.manifest.spawn, polar: DEFAULT_POLAR_PERF });
   assert.ok(f.triangles > 0 && f.triangles <= FRAME_BUDGET.triangles && f.calls <= FRAME_BUDGET.calls, JSON.stringify(f));
 });
 
@@ -638,19 +648,122 @@ test("slope hillshade: flat is exactly 1, sun-facing slopes are lighter, slopes 
   assert.equal(slopeLevel(50, -50), 15);
 });
 
-test("tree canopy: FOREST columns get a 2–4 block leaf crown shared per clump; buildings, decks and grass do not", () => {
+test("tree canopy: LOD0 draws one trunk-and-crown tree per FOREST clump (props), LOD1/2 a 2–4 block leaf crown", () => {
   const c = flatChunk(2, 2, 3);
   for (let k = 0; k < 64 * 8; k++) c.surface[k] = SURFACE.FOREST;
   c.deck[5] = 9;
-  const { opaque } = meshChunk(c, around(c));
+  const { opaque, props } = meshChunk(c, around(c));
   const tops = quads(opaque).filter((q) => q.normal[1] === 1);
-  const crown = tops.filter((q) => q.min[2] < 8 && q.min[1] > 3 && q.min[1] !== 9);
-  assert.ok(crown.length > 0, "canopy tops above the ground");
-  for (const q of crown) assert.ok(q.min[1] >= 5 && q.min[1] <= 7, `crown top ${q.min[1]} is ground 3 + 2..4`);
-  assert.ok(!tops.some((q) => q.min[2] >= 8 && q.min[1] > 3 && q.min[1] < 9), "grass rows stay flat");
+  assert.ok(!tops.some((q) => q.min[1] > 3 && q.min[1] !== 9), "LOD0 terrain stays flat under the trees");
+  // world-aligned 3×3 clumps over rows 0..7 of chunk (2, 2): x 128..191, z 128..135 → clumps with ≥ 2 forest columns
+  let clumps = 0;
+  for (let cz = Math.floor(128 / CANOPY_CELL); cz <= Math.floor(135 / CANOPY_CELL); cz++) {
+    for (let cx = Math.floor(128 / CANOPY_CELL); cx <= Math.floor(191 / CANOPY_CELL); cx++) {
+      let n = 0;
+      for (let z = cz * 3; z < cz * 3 + 3; z++) for (let x = cx * 3; x < cx * 3 + 3; x++) {
+        const lx = x - 128, lz = z - 128;
+        if (lx >= 0 && lx < 64 && lz >= 0 && lz < 8 && !(lz === 0 && lx === 5)) n++;
+      }
+      if (n >= 2) clumps++;
+    }
+  }
+  assert.equal(props.indices.length / 6, clumps * 3 * PROP_QUADS, "trunk + two crown boxes per clump");
+  const ys = Array.from({ length: props.positions.length / 3 }, (_, v) => props.positions[v * 3 + 1]);
+  assert.ok(Math.min(...ys) >= 3 && Math.max(...ys) <= 3 + 4 + 0.35 + 1e-6, `trees between ground 3 and 3 + 4.35, got ${Math.min(...ys)}..${Math.max(...ys)}`);
+  const region = meshRegion([c], [], 1).opaque;
+  const crown = quads(region).filter((q) => q.normal[1] === 1 && q.min[2] >= 128 && q.min[2] < 136 && q.min[1] > 3 && q.min[1] < 9);
+  assert.ok(crown.length > 0, "LOD1 keeps the leaf crown columns");
   for (let x = 0; x < 30; x++) {
     const h = canopyHeight(x, 7);
     assert.ok(h >= 2 && h <= 4);
     assert.equal(h, canopyHeight(Math.floor(x / CANOPY_CELL) * CANOPY_CELL, 7 - (7 % CANOPY_CELL)), "one height per clump");
   }
+});
+
+// ---------- street level: curbs, street.bin decals and furniture, binning, traffic ----------
+
+/** A chunk with a 4-wide road (rows 30–33) between 1-wide sidewalks, everything at ground g. */
+function streetChunk(cx, cz, g = 5) {
+  const c = flatChunk(cx, cz, g, SURFACE.GRASS);
+  for (let lz = 29; lz <= 34; lz++) for (let lx = 0; lx < 64; lx++) c.surface[lz * 64 + lx] = lz === 29 || lz === 34 ? SURFACE.SIDEWALK : SURFACE.ROAD;
+  return c;
+}
+
+test("curb: LOD0 road tops sit CURB below the sidewalk, with a CURB-high face along every non-road edge", () => {
+  const c = streetChunk(4, 4);
+  const nb = around(c, (x, z) => streetChunk(x, z));
+  const { opaque } = meshChunk(c, nb);
+  const up = quads(opaque).filter((q) => q.normal[1] === 1);
+  const roadTops = up.filter((q) => q.min[2] >= 30 && q.max[2] <= 34);
+  assert.ok(roadTops.length > 0 && roadTops.every((q) => Math.abs(q.min[1] - (5 - CURB)) < 1e-6), "road tops at ground − CURB");
+  assert.ok(up.filter((q) => q.max[2] <= 30).every((q) => q.min[1] === 5), "sidewalk and grass stay at ground");
+  const curbs = quads(opaque).filter((q) => q.normal[1] === 0 && Math.abs(q.max[1] - q.min[1] - CURB) < 1e-6);
+  assert.equal(curbs.length, 2 * 64, "one curb face per road column on each kerb");
+  assert.ok(curbs.every((q) => q.max[1] === 5), "curb faces reach the sidewalk top");
+  assert.ok(curbs.some((q) => q.normal[2] === 1) && curbs.some((q) => q.normal[2] === -1), "they face into the road");
+  const lod1 = meshRegion([c], [], 1).opaque;
+  assert.ok(!quads(lod1).some((q) => q.normal[1] === 1 && !Number.isInteger(q.min[1])), "LOD1/2 keep integer tops");
+});
+
+test("street.bin on a chunk: paint and rails on the road only, furniture on its columns, lamp heads glow", () => {
+  const c = streetChunk(4, 4);
+  const x4 = (x) => (4 * 64 + x) * STREET_Q, z4 = (z) => (4 * 64 + z) * STREET_Q;
+  const street = {
+    lines: [
+      { kind: STREET_LINE.ROAD, flags: ROAD_FLAG.DOUBLE_YELLOW | ROAD_FLAG.MAJOR, width4: 16, lanes: 4, pts: Int16Array.from([x4(-5), z4(32), x4(70), z4(32)]) },
+      { kind: STREET_LINE.CROSSWALK, flags: CROSSWALK_STYLE.LADDER, width4: 4, lanes: 0, pts: Int16Array.from([x4(20.5), z4(28.5), x4(20.5), z4(35.5)]) },
+      { kind: STREET_LINE.TRACK, flags: TRACK_FLAG.CABLE, width4: 1, lanes: 0, pts: Int16Array.from([x4(0), z4(31), x4(64), z4(31)]) },
+    ],
+    points: [
+      { kind: STREET_POINT.LAMP, rot: rotByte(0), x4: x4(10.5), z4: z4(29.6) },
+      { kind: STREET_POINT.CAR, rot: rotByte(Math.PI / 2), x4: x4(40.5), z4: z4(33.5) },
+      { kind: STREET_POINT.BENCH, rot: 0, x4: x4(70), z4: z4(29) },
+    ],
+  };
+  const { decals, props } = meshChunk(c, around(c, (x, z) => streetChunk(x, z)), street);
+  assert.ok(decals.indices.length > 0, "decals drawn");
+  for (let v = 0; v < decals.positions.length / 3; v++) {
+    const x = decals.positions[v * 3], y = decals.positions[v * 3 + 1], z = decals.positions[v * 3 + 2];
+    assert.ok(x >= -1 && x <= 65, `decal vertex x ${x} stays in the chunk`);
+    assert.ok(y > 5 - CURB && y < 5 - CURB + 0.05, `decal y ${y} just over the sunk road top`);
+    assert.ok(z > 29.5 && z < 34.5, `decal z ${z} on the carriageway`);
+  }
+  const quadsOf = (m) => m.indices.length / 6;
+  assert.equal(quadsOf(props), pointQuads(STREET_POINT.LAMP) + pointQuads(STREET_POINT.CAR), "the out-of-chunk bench is not drawn");
+  const glowing = [];
+  for (let v = 0; v < props.glow.length; v++) if (props.glow[v] === 255) glowing.push(props.positions[v * 3 + 1]);
+  assert.ok(glowing.length >= 4 && glowing.every((y) => y > 5 + 2), "the lamp head glows, high on its pole");
+  const carYs = [];
+  for (let v = 0; v < props.positions.length / 3; v++) if (props.positions[v * 3] > 39 && props.positions[v * 3] < 42) carYs.push(props.positions[v * 3 + 1]);
+  assert.ok(Math.abs(Math.min(...carYs) - (5 - CURB)) < 1e-6, "parked car wheels on the sunk road");
+  assert.throws(() => meshChunk(c, NONE, { lines: [] }), /street must be \{lines, points\}/);
+});
+
+test("binStreet: lines go to every chunk they cross (padded by width), points to their own chunk", () => {
+  const q = (v) => v * STREET_Q;
+  const bins = binStreet({
+    lines: [{ kind: STREET_LINE.ROAD, flags: 0, width4: 16, lanes: 0, pts: Int16Array.from([q(10), q(10), q(200), q(10)]) }],
+    points: [{ kind: STREET_POINT.HYDRANT, rot: 0, x4: q(130), z4: q(70) }],
+  });
+  assert.deepEqual([...bins.keys()].sort(), ["0_0", "1_0", "2_0", "3_0", "2_1"].sort());
+  assert.equal(bins.get("2_1").points.length, 1);
+  assert.equal(bins.get("0_0").lines.length, 1);
+});
+
+test("traffic: lanes keep right of travel inside the carriageway; ways chain through shared vertices", () => {
+  const road = (flags, width, lanes, pts) => ({ kind: STREET_LINE.ROAD, flags, width4: width * 4, lanes, pts: Int16Array.from(pts.map((v) => v * 4)) });
+  const two = laneOffsets(road(0, 4, 2, [0, 0, 10, 0]));
+  assert.ok(two.length === 1 && two[0] > 0.3 && two[0] < 2 - 0.3, `two-way lane ${two}`);
+  const one = laneOffsets(road(ROAD_FLAG.ONEWAY, 6, 3, [0, 0, 10, 0]));
+  assert.equal(one.length, 3);
+  assert.ok(one.every((o) => Math.abs(o) < 3 - 0.3), `one-way lanes ${one} inside the kerbs`);
+  assert.ok(one[0] < one[1] && one[1] < one[2]);
+  const pl = polyline(Int16Array.from([0, 0, 40, 0, 40, 40]));
+  assert.equal(pl.total, 20);
+  const p = pointOn(pl, 15);
+  assert.deepEqual([p.x, p.z, p.dx, p.dz], [10, 5, 0, 1]);
+  const net = buildNetwork([road(0, 4, 2, [0, 0, 10, 0]), road(ROAD_FLAG.ONEWAY, 4, 1, [10, 0, 10, 10]), { ...road(0, 1, 0, [0, 0, 0, 5]), kind: STREET_LINE.CROSSWALK }], (l) => l.kind === STREET_LINE.ROAD, laneOffsets);
+  assert.equal(net.ways.length, 2);
+  assert.equal(net.ways[1].oneway, true);
+  assert.equal(net.at.get("40,0").length, 2, "both ways meet at 10,0");
 });

@@ -12,8 +12,10 @@ import {
   edgeHalfWidth10, edgeIsDeck, encodeChunk, encodeLandmarks, encodeLandmask, encodeWalk, fitProjection, hashId, isGzip,
   landmaskHeight, lonLatToBlock, osmColourToHex, osmMaterial, packEdgeWidth, paletteFor, pickId, regionOf, validateChunk,
   validateCompanies, validateLandmarks, validateManifest, validatePlaces, validateWalk,
+  CROSSWALK_STYLE, ROAD_FLAG, STREET_LINE, STREET_POINT, STREET_Q, TRACK_FLAG, decodeStreet, encodeStreet, isRoadSurface, rotByte, rotRad,
+  streetQ, validateStreet,
 } from "../../../public/shared/city.js";
-import { FIXTURE_DIR, FIXTURE_GRID, FIXTURE_PARENTS, generateFixture } from "../fixture.mjs";
+import { FIXTURE_DIR, FIXTURE_GRID, FIXTURE_PARENTS, fixtureStreet, generateFixture } from "../fixture.mjs";
 import { createRaster, rasterToChunks } from "../lib/raster.mjs";
 import { TOPDOWN_SURFACE } from "../lib/topdown.mjs";
 import { createBuildCtx } from "../lib/ctx.mjs";
@@ -279,6 +281,54 @@ test("landmarks.bin: roundtrip, bounds, size cap, guards", () => {
   assert.throws(() => decodeLandmarks(new Uint8Array([0x53, 0x46, 0x4c, 0x32, 1, 0, 0, 0, 0, 0, 0, 0])), /magic/);
 });
 
+test("street.bin: roundtrip byte-identical, quarter-block coordinates, rot bytes, guards", () => {
+  const doc = fixtureStreet();
+  const bytes = encodeStreet(doc, FIXTURE_GRID);
+  const verts = doc.lines.reduce((n, l) => n + l.pts.length / 2, 0);
+  assert.equal(bytes.length, 16 + doc.lines.length * 8 + verts * 4 + doc.points.length * 6);
+  const back = decodeStreet(bytes, FIXTURE_GRID);
+  assert.deepEqual(back, doc);
+  assert.deepEqual(encodeStreet(back, FIXTURE_GRID), bytes);
+  assert.deepEqual(decodeStreet(bytes.subarray(0)), doc, "decodes without a grid too");
+  assert.deepEqual(decodeStreet(encodeStreet({ lines: [], points: [] })), { lines: [], points: [] });
+  const onDisk = decodeStreet(new Uint8Array(gunzipSync(readFileSync(join(FIXTURE_DIR, "street.bin")))), FIXTURE_GRID);
+  assert.deepEqual(onDisk, doc, "the committed fixture street.bin");
+  assert.equal(STREET_Q, 4);
+  assert.equal(streetQ(10.13), 41);
+  assert.equal(rotByte(0), 0);
+  assert.equal(rotByte(Math.PI), 128);
+  assert.equal(rotByte(-Math.PI / 2), 192);
+  assert.equal(rotByte(2 * Math.PI), 0);
+  assert.ok(Math.abs(rotRad(64) - Math.PI / 2) < 1e-12);
+  const kinds = new Set(doc.lines.map((l) => l.kind));
+  assert.deepEqual([...kinds].sort(), Object.values(STREET_LINE).sort(), "the fixture carries every line kind");
+  assert.deepEqual([...new Set(doc.points.map((p) => p.kind))].sort((a, b) => a - b), Object.values(STREET_POINT).sort((a, b) => a - b), "and every point kind");
+  const line = (o) => ({ lines: [{ ...doc.lines[0], ...o }], points: [] });
+  const point = (o) => ({ lines: [], points: [{ ...doc.points[0], ...o }] });
+  const bad = (d, re) => assert.throws(() => validateStreet(d, FIXTURE_GRID), re);
+  bad(line({ kind: 9 }), /unknown kind 9/);
+  bad(line({ flags: 16 }), /flags must be an integer in 0\.\.15/);
+  bad(line({ kind: STREET_LINE.CROSSWALK, flags: 3 }), /flags/);
+  bad(line({ kind: STREET_LINE.TRACK, flags: TRACK_FLAG.CABLE | TRACK_FLAG.MEDIAN | 4 }), /flags/);
+  bad(line({ width4: 0 }), /width4/);
+  bad(line({ lanes: 16 }), /lanes/);
+  bad(line({ pts: new Int16Array([1, 2]) }), /≥ 2 x4,z4 pairs/);
+  bad(line({ pts: [1, 2, 3, 4] }), /Int16Array/);
+  bad(line({ pts: new Int16Array([0, 0, FIXTURE_GRID[0] * CHUNK * 4, 0]) }), /outside the reserved grid/);
+  bad(line({ extra: 1 }), /unknown field "extra"/);
+  bad(point({ kind: 0 }), /unknown kind 0/);
+  bad(point({ rot: 256 }), /rot/);
+  bad(point({ x4: -1 }), /x4/);
+  bad(point({ z4: FIXTURE_GRID[1] * CHUNK * 4 }), /outside the reserved grid/);
+  bad({ lines: [] }, /missing "points"/);
+  assert.throws(() => decodeStreet(bytes.subarray(0, bytes.length - 1)), /expected|truncated/);
+  assert.throws(() => decodeStreet(new Uint8Array([...bytes.subarray(0, 4), 2, 0, ...bytes.subarray(6)])), /street version 2, this viewer reads 1/);
+  assert.throws(() => decodeStreet(new Uint8Array([0x53, 0x46, 0x53, 0x32, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])), /magic/);
+  assert.throws(() => decodeStreet(gzipSync(bytes)), /still gzipped/);
+  assert.equal(ROAD_FLAG.ONEWAY | ROAD_FLAG.MAJOR | ROAD_FLAG.CENTRE | ROAD_FLAG.DOUBLE_YELLOW, 15);
+  assert.deepEqual(Object.values(CROSSWALK_STYLE), [0, 1, 2]);
+});
+
 test("landmask.bin: roundtrip, grid size, height lookup", () => {
   const grid = [2, 1];
   const mask = { cellsX: 32, cellsZ: 16, cells: new Uint8Array(32 * 16) };
@@ -398,7 +448,11 @@ test("palette: groups, ~25% glass above 30 blocks, colour/material/structure opt
 });
 
 test("surfaces: v2 ids, every surface has a colour, a terrain side and a topdown colour", () => {
-  assert.deepEqual([SURFACE.DIRT, SURFACE.COURT, SURFACE.TRACK, SURFACE.POOL], [14, 15, 16, 17]);
+  assert.deepEqual([SURFACE.DIRT, SURFACE.COURT, SURFACE.TRACK, SURFACE.POOL, SURFACE.ROAD_MAJOR], [14, 15, 16, 17, 18]);
+  assert.deepEqual(Object.values(SURFACE).filter(isRoadSurface), [SURFACE.ROAD, SURFACE.ROAD_MAJOR], "carriageway: ROAD and ROAD_MAJOR only");
+  const lum = (hex) => [1, 3, 5].reduce((s, k) => s + parseInt(hex.slice(k, k + 2), 16), 0);
+  assert.ok(lum(SURFACE_COLORS[SURFACE.ROAD_MAJOR]) < lum(SURFACE_COLORS[SURFACE.ROAD]), "arterial asphalt is darker");
+  assert.ok(lum(SURFACE_COLORS[SURFACE.SIDEWALK]) > lum(SURFACE_COLORS[SURFACE.ROAD]), "the sidewalk is lighter than asphalt");
   assert.deepEqual([SURFACE_COLORS[14], SURFACE_COLORS[15], SURFACE_COLORS[16], SURFACE_COLORS[17]], ["#a8754d", "#7d8c7a", "#b5523b", "#6fa8c0"]);
   for (const s of Object.values(SURFACE)) {
     assert.match(SURFACE_COLORS[s], /^#[0-9a-f]{6}$/, `colour ${s}`);
@@ -506,14 +560,15 @@ test("fixture: manifest validates; listed chunks exist and decode; no stray file
   assert.equal(chunks.size, 15);
   assert.deepEqual(manifest.water, [[59, 27]], "the all-water chunk is listed as water, not written");
   assert.deepEqual(manifest.parents, Object.fromEntries(Object.entries(FIXTURE_PARENTS)));
-  assert.deepEqual(readdirSync(FIXTURE_DIR).sort(), ["chunks", "companies.json", "landmarks.bin", "landmask.bin", "manifest.json", "places.json", "topdown.png", "walk.bin"]);
+  assert.deepEqual(readdirSync(FIXTURE_DIR).sort(), ["chunks", "companies.json", "landmarks.bin", "landmask.bin", "manifest.json", "places.json", "street.bin", "topdown.png", "walk.bin"]);
 });
 
 test("validateManifest rejects each rule (one mutation per rule)", () => {
   const bad = (fn, re) => { const x = structuredClone(manifest); fn(x); assert.throws(() => validateManifest(x), re); };
   bad((x) => { x.version = 1; }, /version 1, this viewer reads 2/);
   bad((x) => { x.extra = 1; }, /unknown field "extra"/);
-  for (const k of ["water", "areas", "landmask", "landmarks", "walk", "places", "parents", "terrainExaggeration"]) bad((x) => { delete x[k]; }, new RegExp(`missing "${k}"`));
+  for (const k of ["water", "areas", "landmask", "landmarks", "street", "walk", "places", "parents", "terrainExaggeration"]) bad((x) => { delete x[k]; }, new RegExp(`missing "${k}"`));
+  bad((x) => { x.street = "street.txt"; }, /manifest.street must be a file name/);
   bad((x) => { delete x.proj.rotDeg; }, /missing "rotDeg"/);
   bad((x) => { x.proj.frames = []; }, /unknown field "frames"/);
   bad((x) => { x.proj.x0 = 3457; }, /x0 must be a multiple of 64/);

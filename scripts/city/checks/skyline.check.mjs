@@ -9,7 +9,7 @@ import { gunzipSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  BLOCK_M, CHUNK, CITY_VERSION, MAX_LANDMARKS_BYTES, PALETTE_INDEX, SF_GRID, SF_PROJ, SURFACE, chunkOf, decodeChunk, decodeLandmarks, encodeChunk,
+  ACCENT_NONE, BLOCK_M, CHUNK, CITY_VERSION, MAX_LANDMARKS_BYTES, PALETTE_INDEX, SF_GRID, SF_PROJ, SURFACE, chunkOf, decodeChunk, decodeLandmarks, encodeChunk,
   lonLatToBlock, pickId,
 } from "../../../public/shared/city.js";
 import { createBuildCtx } from "../lib/ctx.mjs";
@@ -18,6 +18,7 @@ import {
   minAreaRect, siteHeightM, siteTop,
 } from "../lib/landmarks.mjs";
 import { buildLandmarkMesh, landmarkMeshBoxes } from "../lib/meshlayer.mjs";
+import { RAISE_SLACK, matchEvidence } from "../lib/skyline.mjs";
 import { createRaster, rasterIndex, rasterToChunks } from "../lib/raster.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -257,7 +258,7 @@ await test("Transamerica: top-width profile is non-increasing, width at y60 ≤ 
   assert.equal(Math.max(...cols.map((c) => c.top)), 87);
 });
 
-await test("Ferry Building: clock tower ≥ 24, shed at 5 ±1, both pick as one parent; white flagpole and a clock-face band", () => {
+await test("Ferry Building: clock tower ≥ 24, shed at 5 ±1, both pick as one parent; white flagpole and four lit clock faces", () => {
   const { raster } = stamped.get("Ferry Building");
   const cols = columnsOf(raster);
   const tower = cols.filter((c) => c.entry.cap === 3), shed = cols.filter((c) => c.entry.facade === 4);
@@ -265,8 +266,17 @@ await test("Ferry Building: clock tower ≥ 24, shed at 5 ±1, both pick as one 
   for (const c of shed) assert.ok(Math.abs(c.top - c.base - 5) <= 1, `shed column at ${c.top - c.base}`);
   assert.equal(pickId(tower[0].entry), pickId(shed[0].entry));
   assert.equal(raster.props.length, 1, "one white flagpole");
-  const faces = cols.filter((c) => c.entry.accent === PALETTE_INDEX["steel-dark"]);
-  assert.ok(faces.length > 0 && faces.every((c) => c.entry.accentFrom - c.base === 17 && c.top - c.base === 19), "clock faces: a dark band from 17 on the 5×5 stage");
+  const stage = cols.filter((c) => c.top - c.base === 19);
+  assert.ok(stage.length > 0 && stage.every((c) => c.entry.accentFrom === ACCENT_NONE), "the 5×5 clock stage has no dark band");
+  const ferry = landmarks.filter((l) => l.name === "Ferry Building");
+  const faces = landmarkMeshBoxes(syntheticCtx(), ferry, skyline);
+  assert.ok(faces.length >= 4, `${faces.length} clock-face boxes`);
+  for (const f of faces) {
+    assert.equal(f.color, PALETTE_INDEX["transit-white"]);
+    assert.equal(f.flags, 1, "clock faces are lit at night");
+    assert.ok(f.y1 - f.y0 === 2 && f.y0 === GROUND + 16, `face box y ${f.y0}..${f.y1}`);
+    assert.ok(!stage.some((c) => c.x >= f.x && c.x < f.x + f.sx && c.z >= f.z && c.z < f.z + f.sz), "faces sit outside the stage columns");
+  }
 });
 
 await test("Coit Tower: footprint ≤ 25 columns, top 21", () => {
@@ -357,6 +367,17 @@ await test("footprints: OSM-keyed landmarks within ±2 blocks of their OSM polyg
 
 // ---------- [post-int] real build ----------
 
+await test("skyline: a coordinate match counts only with a name, an address or the floor count", () => {
+  const row = { name: "140 New Montgomery", floors: 26 };
+  assert.equal(matchEvidence({ tags: { name: "140 New Montgomery" } }, row), "name");
+  assert.equal(matchEvidence({ tags: { "addr:housenumber": "140", "addr:street": "New Montgomery" } }, row), "address");
+  assert.equal(matchEvidence({ tags: { "addr:housenumber": "415", "addr:street": "Natoma Street" } }, { name: "415 Natoma Street", floors: 25 }), "address");
+  assert.equal(matchEvidence({ tags: { building: "yes", "building:levels": "25" } }, { name: "415 Natoma Street", floors: 25 }), "floors");
+  assert.equal(matchEvidence({ tags: { building: "yes", "building:levels": "5" } }, { name: "415 Natoma Street", floors: 25 }), null);
+  assert.equal(matchEvidence({ tags: { building: "yes" } }, row), null);
+  assert.equal(RAISE_SLACK, 2);
+});
+
 await test("[post-int] skyline: top 50 rows within ±2 blocks of the snapshot on the real build", () => {
   const manifestPath = join(ROOT, "public/city/sf/manifest.json");
   if (!existsSync(manifestPath)) return console.log("     skipped: public/city/sf not built yet");
@@ -372,7 +393,16 @@ await test("[post-int] skyline: top 50 rows within ±2 blocks of the snapshot on
     return chunkCache.get(k);
   };
   const failures = [];
+  const log = JSON.parse(readFileSync(join(ROOT, "public/city/sf/report.json"), "utf8")).skyline ?? [];
+  const dropped = new Set(log.filter((e) => e.mode === "dropped").map((e) => e.rank));
+  for (const e of log) {
+    if (e.mode === "dropped") assert.equal(e.match, "coordinate", `#${e.rank} dropped only for a coordinate-only match`);
+    if (e.mode === "stamped") assert.notEqual(e.match, "coordinate", `#${e.rank} stamped on a coordinate-only match`);
+    if (e.mode === "raised") assert.ok(e.toBlocks - e.fromBlocks <= 2, `#${e.rank} ${e.name} raised ${e.fromBlocks}→${e.toBlocks}: more than the slack must be a spire`);
+    if (e.mode === "spire") assert.ok(e.spire && e.spire.toBlocks === e.toBlocks && e.roofBlocks === e.fromBlocks, `#${e.rank} ${e.name}: massing at the roof, a spire to the top`);
+  }
   for (const row of skyline.rows.slice(0, 50)) {
+    if (dropped.has(row.rank)) continue;
     const c = lonLatToBlock(row.lon, row.lat, manifest.proj);
     let best = 0;
     for (let dz = -6; dz <= 6; dz++) for (let dx = -6; dx <= 6; dx++) {

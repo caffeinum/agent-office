@@ -14,9 +14,9 @@ const overpassUrl = (q) => `${ENDPOINTS.overpass}?data=${encodeURIComponent(q)}`
 
 /** v1 file names of the east area's sources (kept so the cache carries over). */
 const EAST_FILES = Object.freeze({ footprints: "datasf/footprints.geojson", roads: "osm/osm-roads.json", land: "osm/osm-land.json", buildings: "osm/osm-buildings.json" });
-export const OSM_KINDS = Object.freeze(["roads", "land", "buildings", "extra", "points", "trees"]);
+export const OSM_KINDS = Object.freeze(["roads", "land", "buildings", "extra", "points", "trees", "street"]);
 
-/** → {footprints, roads, land, buildings, extra, points, trees}: each {id, url, license, file, cooldownH?} for one area. */
+/** → {footprints, roads, land, buildings, extra, points, trees, street}: each {id, url, license, file, cooldownH?} for one area. */
 export function areaSources(area) {
   const q = overpassQueries(area.fetch);
   const file = (kind, id, dir, ext) => (area.id === "east" && EAST_FILES[kind]) || `${dir}/${id}.${ext}`;

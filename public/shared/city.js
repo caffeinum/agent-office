@@ -137,7 +137,12 @@ export const SURFACE = Object.freeze({
   TRACK: 16,
   /** fountains, ponds, layer ≥ 1 water on land: keeps its ground, is not a water surface. */
   POOL: 17,
+  /** arterial asphalt (trunk / primary / secondary): darker than ROAD. */
+  ROAD_MAJOR: 18,
 });
+
+/** true for the carriageway surfaces (the viewer sinks them a curb below the sidewalk). */
+export const isRoadSurface = (s) => s === SURFACE.ROAD || s === SURFACE.ROAD_MAJOR;
 
 export const SURFACE_COLORS = Object.freeze({
   [SURFACE.WATER]: "#3d7fb3",
@@ -157,6 +162,7 @@ export const SURFACE_COLORS = Object.freeze({
   [SURFACE.COURT]: "#7d8c7a",
   [SURFACE.TRACK]: "#b5523b",
   [SURFACE.POOL]: "#6fa8c0",
+  [SURFACE.ROAD_MAJOR]: "#3c3f44",
 });
 
 const SURFACE_IDS = new Set(Object.values(SURFACE));
@@ -182,10 +188,20 @@ export const TERRAIN_SIDE_COLORS = Object.freeze({
   [SURFACE.COURT]: "#9f9a92",
   [SURFACE.TRACK]: "#9f9a92",
   [SURFACE.POOL]: "#b3a998",
+  [SURFACE.ROAD_MAJOR]: "#7d7870",
 });
 
 /** Land outside the listed chunks, drawn from landmask.bin (spec-v2 §2): muted paper tone, and its skirt sides. */
 export const UNBUILT_COLORS = Object.freeze({ top: "#e4dccb", side: "#dcd3c1" });
+/** Unbuilt land that is wild hillside rather than city (the Marin Headlands): olive scrub and dry grass. */
+export const SCRUB_COLORS = Object.freeze({ green: "#7c8b52", tan: "#a39265", side: "#6c6747" });
+/** The Marin Headlands across the Golden Gate: north of `south`, west of `east` (lon/lat). */
+export const MARIN_BOX = Object.freeze({ south: 37.8185, east: -122.44 });
+/** true when block (x, z) lies in the Marin Headlands box. */
+export function inMarin(x, z, proj = SF_PROJ) {
+  const { lon, lat } = blockToLonLat(x, z, proj);
+  return lat > MARIN_BOX.south && lon < MARIN_BOX.east;
+}
 
 /** Elevated road decks: asphalt slab top, concrete edges and pillars, a shaded underside. */
 export const DECK_COLORS = Object.freeze({
@@ -210,7 +226,7 @@ const PALETTE = [
   ["precast-1", "#e6e1d6"], ["precast-2", "#d9d4c9"], ["precast-3", "#cfc8bb"], ["precast-4", "#bfb8ab"],
   ["glass", "#8ea3b3"], ["glass-dark", "#6f8799"],
   // landmarks and structures (21–38)
-  ["salesforce", "#dedcd4"], ["salesforce-crown", "#fffdf6"], ["transamerica", "#f2efe8"], ["fremont-181", "#c8d0d6"],
+  ["salesforce", "#e6e7e3"], ["salesforce-crown", "#fffdf6"], ["transamerica", "#f2efe8"], ["fremont-181", "#c8d0d6"],
   ["california-555", "#5a3f38"], ["california-345", "#c9b9ad"], ["millennium", "#8fa4b4"], ["rincon", "#9fb3c2"],
   ["market-575", "#6b5e55"], ["embarcadero", "#ece8de"], ["ferry", "#f4efe2"], ["coit", "#e0e0e0"], ["seats", "#2e5e4e"],
   ["chase", "#dcdcd8"], ["bay-bridge", "#a7adb3"], ["golden-gate", "#a8301f"], ["palace", "#d8c3a5"], ["transit-white", "#f2f2ef"],
@@ -765,6 +781,138 @@ export function landmaskHeight(mask, x, z) {
   return v === 0 ? null : v - 1;
 }
 
+// ---------- street.bin (SFS1) ----------
+// The street-level detail layer, loaded once and drawn only on LOD0 chunks: road centrelines (lane markings and
+// the ambient-traffic graph), crosswalks, tram / cable-car track, and street furniture points. Coordinates are
+// quarter blocks (x4, z4 = round(block × STREET_Q)) inside the reserved grid; y comes from the chunk ground.
+// Layout (little-endian): header 16 B {magic, version u16, reserved u16, nLines u32, nPoints u32}; lines, each
+// {kind u8, flags u8, width4 u8, lanes u8, n u16, reserved u16} then n × {x4 i16, z4 i16}; points, 6 B each
+// {kind u8, rot u8 (heading in 1/256 turns, three.js yaw: 0 faces +z, turning toward +x), x4 i16, z4 i16}.
+
+export const STREET_MAGIC = "SFS1";
+export const STREET_VERSION = 1;
+export const STREET_HEADER_BYTES = 16;
+export const STREET_LINE_BYTES = 8;
+export const STREET_VERT_BYTES = 4;
+export const STREET_POINT_BYTES = 6;
+/** Sub-block resolution of street.bin coordinates and widths. */
+export const STREET_Q = 4;
+export const MAX_STREET_BYTES = 4 * 1024 * 1024;
+export const MAX_STREET_GZ_BYTES = 1536 * 1024;
+
+/**
+ * Line kinds. ROAD: a ground carriageway centreline (width4 = roadway, lanes = OSM lanes or 0), in OSM way
+ * direction (a one-way runs forward). CROSSWALK: the crossing's centreline across the road (width4 = band width).
+ * TRACK: rails embedded in the street or its median (width4 = gauge).
+ */
+export const STREET_LINE = Object.freeze({ ROAD: 1, CROSSWALK: 2, TRACK: 3 });
+export const ROAD_FLAG = Object.freeze({ ONEWAY: 1, MAJOR: 2, CENTRE: 4, DOUBLE_YELLOW: 8 });
+export const CROSSWALK_STYLE = Object.freeze({ ZEBRA: 0, LADDER: 1, LINES: 2 });
+export const TRACK_FLAG = Object.freeze({ CABLE: 1, MEDIAN: 2 });
+const LINE_FLAG_MAX = Object.freeze({ [STREET_LINE.ROAD]: 15, [STREET_LINE.CROSSWALK]: 2, [STREET_LINE.TRACK]: 3 });
+
+/** Point kinds (street furniture and parked cars); rot is the way the object faces (a car: its heading). */
+export const STREET_POINT = Object.freeze({ LAMP: 1, HYDRANT: 2, BENCH: 3, SHELTER: 4, STOP: 5, CAR: 6, SIGNAL: 7, BIN: 8 });
+const POINT_KINDS = new Set(Object.values(STREET_POINT));
+
+/** Heading (radians, three.js yaw) → rot byte, and back. */
+export const rotByte = (rad) => ((Math.round((finite(rad, "rot") / (2 * Math.PI)) * 256) % 256) + 256) % 256;
+export const rotRad = (byte) => (byte / 256) * 2 * Math.PI;
+/** Block coordinate → quarter-block integer. */
+export const streetQ = (v) => Math.round(finite(v, "street coordinate") * STREET_Q);
+
+/** {lines: [{kind, flags, width4, lanes, pts: Int16Array x4,z4 pairs}], points: [{kind, rot, x4, z4}]} checks. */
+export function validateStreet(doc, grid) {
+  exactKeys(doc, ["lines", "points"], "street");
+  if (!Array.isArray(doc.lines) || !Array.isArray(doc.points)) throw new Error("street: lines and points must be arrays");
+  const lim = grid ? [grid[0] * CHUNK * STREET_Q, grid[1] * CHUNK * STREET_Q] : [I16_MAX + 1, I16_MAX + 1];
+  const inGrid = (x, z, what) => {
+    if (x < 0 || z < 0 || x >= lim[0] || z >= lim[1]) throw new Error(`${what}: ${x / STREET_Q},${z / STREET_Q} outside the reserved grid`);
+  };
+  doc.lines.forEach((l, i) => {
+    const what = `street line[${i}]`;
+    exactKeys(l, ["kind", "flags", "width4", "lanes", "pts"], what);
+    if (!(l.kind in LINE_FLAG_MAX)) throw new Error(`${what}: unknown kind ${l.kind}`);
+    inRange(l.flags, 0, LINE_FLAG_MAX[l.kind], `${what}.flags`);
+    inRange(l.width4, 1, 255, `${what}.width4`);
+    inRange(l.lanes, 0, 15, `${what}.lanes`);
+    if (!(l.pts instanceof Int16Array) || l.pts.length < 4 || l.pts.length % 2) throw new Error(`${what}: pts must be an Int16Array of ≥ 2 x4,z4 pairs`);
+    if (l.pts.length / 2 > 0xffff) throw new Error(`${what}: ${l.pts.length / 2} vertices > 65535`);
+    for (let k = 0; k < l.pts.length; k += 2) inGrid(l.pts[k], l.pts[k + 1], `${what} vertex ${k / 2}`);
+  });
+  doc.points.forEach((p, i) => {
+    const what = `street point[${i}]`;
+    exactKeys(p, ["kind", "rot", "x4", "z4"], what);
+    if (!POINT_KINDS.has(p.kind)) throw new Error(`${what}: unknown kind ${p.kind}`);
+    inRange(p.rot, 0, 255, `${what}.rot`);
+    inRange(p.x4, 0, I16_MAX, `${what}.x4`);
+    inRange(p.z4, 0, I16_MAX, `${what}.z4`);
+    inGrid(p.x4, p.z4, what);
+  });
+  return doc;
+}
+
+/** → raw SFS1 bytes (written gzipped as street.bin). */
+export function encodeStreet(doc, grid) {
+  validateStreet(doc, grid);
+  const verts = doc.lines.reduce((n, l) => n + l.pts.length / 2, 0);
+  const len = STREET_HEADER_BYTES + doc.lines.length * STREET_LINE_BYTES + verts * STREET_VERT_BYTES + doc.points.length * STREET_POINT_BYTES;
+  if (len > MAX_STREET_BYTES) throw new Error(`street.bin: ${len} bytes > ${MAX_STREET_BYTES}`);
+  const out = new Uint8Array(len);
+  const dv = new DataView(out.buffer);
+  for (let i = 0; i < 4; i++) out[i] = STREET_MAGIC.charCodeAt(i);
+  dv.setUint16(4, STREET_VERSION, true);
+  dv.setUint16(6, 0, true);
+  dv.setUint32(8, doc.lines.length, true);
+  dv.setUint32(12, doc.points.length, true);
+  let o = STREET_HEADER_BYTES;
+  for (const l of doc.lines) {
+    dv.setUint8(o, l.kind); dv.setUint8(o + 1, l.flags); dv.setUint8(o + 2, l.width4); dv.setUint8(o + 3, l.lanes);
+    dv.setUint16(o + 4, l.pts.length / 2, true); dv.setUint16(o + 6, 0, true);
+    o += STREET_LINE_BYTES;
+    for (const v of l.pts) { dv.setInt16(o, v, true); o += 2; }
+  }
+  for (const p of doc.points) {
+    dv.setUint8(o, p.kind); dv.setUint8(o + 1, p.rot); dv.setInt16(o + 2, p.x4, true); dv.setInt16(o + 4, p.z4, true);
+    o += STREET_POINT_BYTES;
+  }
+  return out;
+}
+
+/** Raw SFS1 bytes → {lines, points}, validated (inside `grid` when given). */
+export function decodeStreet(bytes, grid) {
+  if (!(bytes instanceof Uint8Array)) throw new Error("decodeStreet: expected a Uint8Array");
+  if (isGzip(bytes)) throw new Error("decodeStreet: bytes are still gzipped; inflate first");
+  if (bytes.length < STREET_HEADER_BYTES) throw new Error(`decodeStreet: ${bytes.length} bytes is shorter than the header`);
+  const magic = magicOf(bytes);
+  if (magic !== STREET_MAGIC) throw new Error(`not a street file: magic ${JSON.stringify(magic)}`);
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const version = dv.getUint16(4, true);
+  if (version !== STREET_VERSION) throw new Error(`street version ${version}, this viewer reads ${STREET_VERSION}`);
+  if (dv.getUint16(6, true) !== 0) throw new Error("street: reserved header field is not 0");
+  const nLines = dv.getUint32(8, true), nPoints = dv.getUint32(12, true);
+  const need = (o, n, what) => { if (o + n > bytes.length) throw new Error(`street: truncated in ${what} (${bytes.length} bytes)`); };
+  let o = STREET_HEADER_BYTES;
+  const lines = [];
+  for (let i = 0; i < nLines; i++) {
+    need(o, STREET_LINE_BYTES, `line ${i}`);
+    const n = dv.getUint16(o + 4, true);
+    if (dv.getUint16(o + 6, true) !== 0) throw new Error(`street line[${i}]: reserved field is not 0`);
+    const l = { kind: dv.getUint8(o), flags: dv.getUint8(o + 1), width4: dv.getUint8(o + 2), lanes: dv.getUint8(o + 3), pts: new Int16Array(n * 2) };
+    o += STREET_LINE_BYTES;
+    need(o, n * STREET_VERT_BYTES, `line ${i} vertices`);
+    for (let k = 0; k < n * 2; k++, o += 2) l.pts[k] = dv.getInt16(o, true);
+    lines.push(l);
+  }
+  if (bytes.length !== o + nPoints * STREET_POINT_BYTES) throw new Error(`street: ${bytes.length} bytes, expected ${o + nPoints * STREET_POINT_BYTES}`);
+  const points = [];
+  for (let i = 0; i < nPoints; i++, o += STREET_POINT_BYTES) {
+    points.push({ kind: dv.getUint8(o), rot: dv.getUint8(o + 1), x4: dv.getInt16(o + 2, true), z4: dv.getInt16(o + 4, true) });
+  }
+  return validateStreet({ lines, points }, grid);
+}
+
+
 // ---------- walk.bin (SFW1) ----------
 
 export const WALK_MAGIC = "SFW1";
@@ -1002,7 +1150,7 @@ export const TERRAIN_EXAGGERATION = Object.freeze({ default: 1, min: 1, max: 3 }
 
 const MANIFEST_KEYS = [
   "version", "city", "name", "blockM", "chunk", "proj", "terrainExaggeration", "chunks", "water", "areas",
-  "landmask", "landmarks", "walk", "places", "parents", "yRange", "spawn", "attribution", "sources", "builtAt",
+  "landmask", "landmarks", "street", "walk", "places", "parents", "yRange", "spawn", "attribution", "sources", "builtAt",
 ];
 
 /** Projection object checks: exactly PROJ_KEYS, all finite, x0/z0 chunk-aligned integers. */
@@ -1070,7 +1218,7 @@ export function validateManifest(m) {
     if (a.west >= a.east || a.south >= a.north) throw new Error(`${what}: west/south must be below east/north`);
     if (a.west < -180 || a.east > 180 || a.south < -90 || a.north > 90) throw new Error(`${what}: outside lon/lat range`);
   });
-  for (const k of ["landmask", "landmarks", "walk", "places"]) {
+  for (const k of ["landmask", "landmarks", "street", "walk", "places"]) {
     if (typeof m[k] !== "string" || !FILE_RE.test(m[k])) throw new Error(`manifest.${k} must be a file name next to the manifest, got ${JSON.stringify(m[k])}`);
   }
   if (!isObj(m.parents)) throw new Error("manifest.parents must be an object {id: name}");

@@ -148,12 +148,23 @@ test("keepHighway: the spec section 2 filter", () => {
 test("roadSpec: widths, sidewalks, links, name overrides, width tag", () => {
   assert.deepEqual(roadSpec({ highway: "motorway" }), { roadway: 7, sidewalk: 0, surface: SURFACE.ROAD });
   assert.deepEqual(roadSpec({ highway: "residential" }), { roadway: 4, sidewalk: 1, surface: SURFACE.ROAD });
-  assert.deepEqual(roadSpec({ highway: "secondary" }), { roadway: 5, sidewalk: 1, surface: SURFACE.ROAD });
+  assert.deepEqual(roadSpec({ highway: "secondary" }), { roadway: 5, sidewalk: 1, surface: SURFACE.ROAD_MAJOR });
   assert.deepEqual(roadSpec({ highway: "pedestrian" }), { roadway: 3, sidewalk: 0, surface: SURFACE.PLAZA });
   assert.deepEqual(roadSpec({ highway: "steps" }), { roadway: 1, sidewalk: 0, surface: SURFACE.SIDEWALK });
   assert.equal(roadSpec({ highway: "motorway_link" }).roadway, 5);
   assert.equal(roadSpec({ highway: "service_link" }).roadway, 2);
-  assert.deepEqual(roadSpec({ highway: "primary", name: "Market Street" }), { roadway: 7, sidewalk: 2, surface: SURFACE.ROAD });
+  assert.deepEqual(roadSpec({ highway: "primary", name: "Market Street" }), { roadway: 7, sidewalk: 2, surface: SURFACE.ROAD_MAJOR });
+  assert.equal(roadSpec({ highway: "residential", lanes: "2" }).roadway, 4, "2 lanes + parking = 11.2 m");
+  assert.equal(roadSpec({ highway: "residential", lanes: "1" }).roadway, 3, "a one-lane street is narrower than the class");
+  assert.equal(roadSpec({ highway: "secondary", lanes: "4" }).roadway, 6, "4 lanes + parking = 17.6 m");
+  assert.equal(roadSpec({ highway: "primary", lanes: "6" }).roadway, 8);
+  assert.equal(roadSpec({ highway: "tertiary", lanes: "3;2" }).roadway, 5, "first value of a list");
+  assert.equal(roadSpec({ highway: "tertiary", lanes: "x" }).roadway, 4, "unparseable lanes keep the class width");
+  assert.equal(roadSpec({ highway: "primary_link", lanes: "4" }).roadway, 4, "links ignore lanes");
+  assert.equal(roadSpec({ highway: "residential", lanes: "6", width: "9" }).roadway, 3, "an explicit width wins over lanes");
+  assert.equal(roadSpec({ highway: "primary", lanes: "2", name: "Market Street" }).roadway, 7, "name overrides win over lanes");
+  for (const h of ["trunk", "primary", "secondary"]) assert.equal(roadSpec({ highway: h }).surface, SURFACE.ROAD_MAJOR, `${h} is arterial asphalt`);
+  for (const h of ["tertiary", "residential", "service", "busway"]) assert.equal(roadSpec({ highway: h }).surface, SURFACE.ROAD, `${h} is plain asphalt`);
   assert.equal(roadSpec({ highway: "primary", name: "Van Ness Avenue" }).roadway, 8);
   assert.equal(roadSpec({ highway: "residential", width: "15" }).roadway, 5);
   assert.deepEqual(roadSpec({ highway: "busway" }), { roadway: 3, sidewalk: 0, surface: SURFACE.ROAD });

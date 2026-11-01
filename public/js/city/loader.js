@@ -2,7 +2,7 @@
 // red banner and throws: a missing listed chunk (the SPA fallback answers with index.html), bad gzip magic,
 // bad SFC1 magic or a version mismatch never turns into silent water.
 
-import { assertGzip, chunkKey, decodeChunk, decodeLandmarks, decodeLandmask, validateManifest } from "../../shared/city.js";
+import { assertGzip, chunkKey, decodeChunk, decodeLandmarks, decodeLandmask, decodeStreet, validateManifest } from "../../shared/city.js";
 import { errorBanner } from "./banner.js";
 
 export { errorBanner };
@@ -71,6 +71,17 @@ export async function loadLandmarks(manifest, baseUrl) {
   const raw = await fetchGzipped(url);
   try {
     return decodeLandmarks(raw, manifest.chunks.grid);
+  } catch (e) {
+    throw new Error(`${url}: ${e.message}`);
+  }
+}
+
+/** manifest.street (SFS1, gzipped): the street-detail layer, inside manifest.chunks.grid. → Promise<Street> */
+export async function loadStreet(manifest, baseUrl) {
+  const url = new URL(manifest.street, baseUrl).href;
+  const raw = await fetchGzipped(url);
+  try {
+    return decodeStreet(raw, manifest.chunks.grid);
   } catch (e) {
     throw new Error(`${url}: ${e.message}`);
   }
