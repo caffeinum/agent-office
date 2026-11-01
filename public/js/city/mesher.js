@@ -30,9 +30,11 @@
 // }
 
 import {
-  BUILDING_PALETTE, CAP, CHUNK, COLUMNS, DECK_COLORS, FACADE, LANDMASK_CELL, PALETTE_INDEX, REGION, ROOF_DARKEN, SURFACE,
-  SURFACE_COLORS, TERRAIN_SIDE_COLORS, UNBUILT_COLORS, chunkKey, regionOf,
+  BUILDING_PALETTE, CAP, CHUNK, COLUMNS, DECK_COLORS, FACADE, LANDMASK_CELL, PALETTE_INDEX, REGION, ROOF_DARKEN, SCRUB_COLORS, SURFACE,
+  SURFACE_COLORS, TERRAIN_SIDE_COLORS, UNBUILT_COLORS, chunkKey, inMarin, isRoadSurface, regionOf, validateProj,
 } from "../../shared/city.js";
+import { CURB, PAINT } from "./streetkit.js";
+import { meshStreet } from "./streetmesh.js";
 
 // ---------- colours (linear RGB, indexed by a colour id) ----------
 
@@ -47,12 +49,18 @@ const C_GREEN_ROOF = 70;
 const C_LEAF = 71;
 const C_LEAF_LIGHT = 72;
 const C_LEAF_SIDE = 73;
+const C_SCRUB_GREEN = 74;
+const C_SCRUB_TAN = 75;
+const C_SCRUB_SIDE = 76;
 const C_PAL = 128;
 const PAL_STRIDE = 64;
 /** Palette colour variants: wall, wall pattern (ribs, openings), roof, light (crown), roof pattern (seat rows). */
 const V_WALL = 0, V_DARK = 1, V_ROOF = 2, V_LIGHT = 3, V_ROOF_DARK = 4;
 const VARIANT_FACTOR = [1, 0.78, 1 - ROOF_DARKEN, 1.14, 0.8];
-const N_COLORS = C_PAL + PAL_STRIDE * VARIANT_FACTOR.length;
+const N_FIXED = C_PAL + PAL_STRIDE * VARIANT_FACTOR.length;
+/** Street-kit colours (streetkit.js hex values) take ids from N_FIXED on, defined on first use. */
+const N_KIT = 96;
+const N_COLORS = N_FIXED + N_KIT;
 const GREEN_ROOF_HEX = SURFACE_COLORS[SURFACE.PARK];
 const METAL = PALETTE_INDEX.metal;
 const LEAF_HEX = BUILDING_PALETTE[PALETTE_INDEX.leaf];
@@ -90,10 +98,27 @@ defineColor(C_PILLAR, DECK_COLORS.pillar);
 defineColor(C_DECK_UNDER, DECK_COLORS.under);
 defineColor(C_UNBUILT_TOP, UNBUILT_COLORS.top);
 defineColor(C_UNBUILT_SIDE, UNBUILT_COLORS.side);
+defineColor(C_SCRUB_GREEN, SCRUB_COLORS.green);
+defineColor(C_SCRUB_TAN, SCRUB_COLORS.tan);
+defineColor(C_SCRUB_SIDE, SCRUB_COLORS.side);
+const WILD_TOPS = new Set([C_UNBUILT_TOP, C_SCRUB_GREEN, C_SCRUB_TAN]);
+const WILD_SIDES = new Set([C_UNBUILT_SIDE, C_SCRUB_SIDE]);
 defineColor(C_GREEN_ROOF, GREEN_ROOF_HEX);
 defineColor(C_LEAF, LEAF_HEX);
 defineColor(C_LEAF_LIGHT, LEAF_HEX, 1.16);
 defineColor(C_LEAF_SIDE, LEAF_HEX, 0.82);
+const kitIds = new Map();
+/** Colour id of a street-kit hex colour (allocated once per worker). */
+export function kitColor(hex) {
+  let id = kitIds.get(hex);
+  if (id !== undefined) return id;
+  if (kitIds.size >= N_KIT) throw new Error(`mesher: more than ${N_KIT} street-kit colours`);
+  id = N_FIXED + kitIds.size;
+  defineColor(id, hex);
+  kitIds.set(hex, id);
+  return id;
+}
+const C_CURB = kitColor(PAINT.curb);
 
 /** Top-vertex brightness by occluder count (0–3), Minecraft-style. */
 const AO_LEVELS = [1, 0.8, 0.66, 0.54];
@@ -111,10 +136,10 @@ const NATURAL = new Set([SURFACE.SAND, SURFACE.GRASS, SURFACE.PARK, SURFACE.FORE
 
 /** Pure. Brightness factor of a terrain top face with colour id `colorId` at height y (1 for non-terrain). */
 export function hillShade(colorId, y) {
-  if (colorId >= C_SIDE && colorId !== C_UNBUILT_TOP) return 1;
+  if (colorId >= C_SIDE && !WILD_TOPS.has(colorId)) return 1;
   const t = Math.min(1, Math.max(0, y / HILL_SPAN));
   const f = HILL_LOW + (HILL_HIGH - HILL_LOW) * t;
-  return NATURAL.has(colorId) && colorId !== C_UNBUILT_TOP && y > 0 && y % HILL_CONTOUR === 0 ? f * CONTOUR_SHADE : f;
+  return NATURAL.has(colorId) && !WILD_TOPS.has(colorId) && y > 0 && y % HILL_CONTOUR === 0 ? f * CONTOUR_SHADE : f;
 }
 
 // ---------- slope hillshade ----------
@@ -313,7 +338,7 @@ function setColumn(grid, c, chunk, k) {
     setCell(grid, c, g, top, B, C_SIDE + s, capColorId(B, top), chunk.deck[k]);
   } else {
     setCell(grid, c, g, g, null, C_SIDE + s, s, chunk.deck[k]);
-    const h = canopyAt(chunk, k);
+    const h = grid.treeProps ? 0 : canopyAt(chunk, k);
     if (h > 0) addCanopy(grid, c, g, g + h, canopyTopColor(chunk.cx * CHUNK + (k % CHUNK), chunk.cz * CHUNK + Math.floor(k / CHUNK)));
   }
   grid.gMin[c] = g;
@@ -386,7 +411,7 @@ const DOWN = [0, -1, 0];
 const FLAT = [1, 1, 1, 1];
 
 /** Terrain-like top colours that take the slope hillshade: surfaces, unbuilt land and leaf canopy. */
-const sloped = (colorId) => colorId < C_SIDE || colorId === C_UNBUILT_TOP || colorId === C_LEAF || colorId === C_LEAF_LIGHT;
+const sloped = (colorId) => colorId < C_SIDE || WILD_TOPS.has(colorId) || colorId === C_LEAF || colorId === C_LEAF_LIGHT;
 
 /** Hillshade level of cell (i, j) from the ground (gMin) r cells away on each axis; missing cells are skipped. */
 function cellSlope(grid, i, j, r, scale) {
@@ -407,9 +432,11 @@ function cellSlope(grid, i, j, r, scale) {
   return slopeLevel(axis(1, 0), axis(0, 1));
 }
 
-function meshTops(grid, scale, { ao, uvs }, opaque) {
+/** Coarser hillshade: levels snap to multiples of `step` around flat (fewer bands, longer greedy runs). */
+const snapLevel = (lv, step) => (step <= 1 ? lv : Math.max(0, Math.min(SLOPE_LEVELS - 1, SLOPE_FLAT + Math.round((lv - SLOPE_FLAT) / step) * step)));
+
+function meshTops(grid, scale, { ao, uvs, curb = false, slopeR = scale === 1 ? 3 : 1, slopeStep = 1 }, opaque) {
   const { w } = grid;
-  const slopeR = scale === 1 ? 3 : 1;
   const n = w * w;
   const layers = [
     { has: new Uint8Array(n), ky: new Int32Array(n), kc: new Int32Array(n), down: false },
@@ -423,7 +450,7 @@ function meshTops(grid, scale, { ao, uvs }, opaque) {
       const a = j * w + i;
       const y = grid.u1[c];
       layers[0].has[a] = 1; layers[0].ky[a] = y;
-      const lv = sloped(grid.topC[c]) ? cellSlope(grid, i, j, slopeR, scale) : SLOPE_FLAT;
+      const lv = sloped(grid.topC[c]) ? snapLevel(cellSlope(grid, i, j, slopeR, scale), slopeStep) : SLOPE_FLAT;
       layers[0].kc[a] = (grid.topC[c] << 12) | (lv << 8) | (ao ? topAo(grid, i, j, y) : 0);
       if (grid.u2hi[c]) {
         const ys = grid.u2hi[c];
@@ -446,9 +473,36 @@ function meshTops(grid, scale, { ao, uvs }, opaque) {
       const hill = hillShade(colorId, y) * slopeShade((key >> 8) & 15);
       const shade = occ.map((o) => AO_LEVELS[o] * hill);
       const flip = occ[0] + occ[2] < occ[1] + occ[3];
-      opaque.quad([x0, y, z0, x0, y, z1, x1, y, z1, x1, y, z0], UP, colorId, shade,
+      const yt = curb && L === layers[0] && isRoadSurface(colorId) ? y - CURB : y;
+      opaque.quad([x0, yt, z0, x0, yt, z1, x1, yt, z1, x1, yt, z0], UP, colorId, shade,
         uvs ? [x0, z0, x0, z1, x1, z1, x1, z0] : null, flip, false);
     });
+  }
+}
+
+/**
+ * LOD0 curbs: road tops sit CURB below their ground, so every road cell gets a CURB-high face on each edge whose
+ * neighbour is not road and stands at least as high (a sidewalk, a building, a pillar), or is a higher road terrace.
+ */
+function meshCurbs(grid, opaque) {
+  const { w } = grid;
+  const road = (c) => grid.segN[c] > 0 && isRoadSurface(grid.topC[c]) && grid.u2hi[c] === 0;
+  for (let j = 0; j < w; j++) {
+    for (let i = 0; i < w; i++) {
+      const c = cellAt(grid, i, j);
+      if (!grid.exists[c] || !road(c)) continue;
+      const y = grid.u1[c];
+      for (const dir of SIDES) {
+        const nb = cellAt(grid, i + dir.di, j + dir.dj);
+        if (!grid.segN[nb] || grid.unknown[nb]) continue;
+        const nRoad = road(nb);
+        if (nRoad ? grid.u1[nb] <= y : grid.u1[nb] < y) continue;
+        // the face lies on the shared edge and looks back into this road cell
+        const back = SIDES.find((d) => d.di === -dir.di && d.dj === -dir.dj);
+        const q = sideQuad(back, dir.alongZ ? i + dir.di : j + dir.dj, dir.alongZ ? j : i, (dir.alongZ ? j : i) + 1, y - CURB, y, 1, false);
+        opaque.quad(q.corners, back.normal, C_CURB, FLAT, null, false, false);
+      }
+    }
   }
 }
 
@@ -550,7 +604,7 @@ function wallPieces(lo, hi, base, colorId, kind, accFrom, accC, pos, patterns, e
 /** Unbuilt-land terrace sides face up and take the paper tone at the cell's own hillshade, so far hills read as
  * one shaded surface instead of a stripe per 1-block step. */
 
-function meshSides(grid, scale, { uvs, glow, patterns, paperSides = false }, opaque, walls) {
+function meshSides(grid, scale, { uvs, glow, patterns, paperSides = false, slopeR = 1, slopeStep = 1 }, opaque, walls) {
   const { w } = grid;
   const pieces = [];
   for (const dir of SIDES) {
@@ -559,10 +613,11 @@ function meshSides(grid, scale, { uvs, glow, patterns, paperSides = false }, opa
       const close = (run) => {
         const { lo, hi, colorId, kind, dark } = run;
         const q = sideQuad(dir, line, run.start, run.end + 1, lo, hi, scale, uvs);
-        if (paperSides && colorId === C_UNBUILT_SIDE) {
+        if (paperSides && WILD_SIDES.has(colorId)) {
           const [ci, cj] = dir.alongZ ? [line, run.start] : [run.start, line];
-          const f = hillShade(C_UNBUILT_TOP, hi) * slopeShade(cellSlope(grid, ci, cj, 1, scale));
-          opaque.quad(q.corners, UP, C_UNBUILT_TOP, [f, f, f, f], q.uv, false, false);
+          const top = grid.topC[cellAt(grid, ci, cj)];
+          const f = hillShade(top, hi) * slopeShade(snapLevel(cellSlope(grid, ci, cj, slopeR, scale), slopeStep));
+          opaque.quad(q.corners, UP, top, [f, f, f, f], q.uv, false, false);
           return;
         }
         const shade = dark ? [SIDE_CONTACT, SIDE_CONTACT, 1, 1] : FLAT;
@@ -635,6 +690,69 @@ function emitProp(b, x, z, y0, y1, colorId, glowOn) {
 /** Quads per prop (meshChunk / meshRegion LOD1 emit props as 1×1 boxes). */
 export const PROP_QUADS = 5;
 
+const TRUNK = PALETTE_INDEX.trunk;
+const LEAF = PALETTE_INDEX.leaf;
+/** An axis-aligned box [x0, x1] × [y0, y1] × [z0, z1]: 4 sides and a top. */
+function emitBox(b, x0, x1, y0, y1, z0, z1, colorId) {
+  b.quad([x1, y0, z1, x1, y0, z0, x1, y1, z0, x1, y1, z1], [1, 0, 0], colorId, FLAT, null, false, false);
+  b.quad([x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0], [-1, 0, 0], colorId, FLAT, null, false, false);
+  b.quad([x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1], [0, 0, 1], colorId, FLAT, null, false, false);
+  b.quad([x1, y0, z0, x0, y0, z0, x0, y1, z0, x1, y1, z0], [0, 0, -1], colorId, FLAT, null, false, false);
+  b.quad([x0, y1, z0, x0, y1, z1, x1, y1, z1, x1, y1, z0], UP, colorId, FLAT, null, false, false);
+}
+/**
+ * LOD0 forest: instead of a solid leaf column per FOREST column, one tree per CANOPY_CELL² clump (world-aligned):
+ * a trunk and a two-step crown as wide as the clump's forest columns allow, CANOPY height (2–4) as in LOD1/2.
+ */
+function emitForestTrees(b, chunk) {
+  const ox = chunk.cx * CHUNK, oz = chunk.cz * CHUNK;
+  const c0x = Math.floor(ox / CANOPY_CELL), c1x = Math.floor((ox + CHUNK - 1) / CANOPY_CELL);
+  const c0z = Math.floor(oz / CANOPY_CELL), c1z = Math.floor((oz + CHUNK - 1) / CANOPY_CELL);
+  for (let cz = c0z; cz <= c1z; cz++) {
+    for (let cx = c0x; cx <= c1x; cx++) {
+      let n = 0, sx = 0, sz = 0, g = -1;
+      for (let z = cz * CANOPY_CELL; z < (cz + 1) * CANOPY_CELL; z++) {
+        for (let x = cx * CANOPY_CELL; x < (cx + 1) * CANOPY_CELL; x++) {
+          const lx = x - ox, lz = z - oz;
+          if (lx < 0 || lz < 0 || lx >= CHUNK || lz >= CHUNK) continue;
+          const k = lz * CHUNK + lx;
+          if (!canopyAt(chunk, k)) continue;
+          n++; sx += lx + 0.5; sz += lz + 0.5;
+          if (chunk.ground[k] > g) g = chunk.ground[k];
+        }
+      }
+      if (n < 2) continue;
+      const x = sx / n, z = sz / n;
+      const wx = cx * CANOPY_CELL, wz = cz * CANOPY_CELL;
+      const h = canopyHeight(wx, wz);
+      const half = Math.min(1.45, 0.55 + n * 0.12);
+      const top = canopyTopColor(wx, wz);
+      emitBox(b, x - 0.13, x + 0.13, g, g + h * 0.5, z - 0.13, z + 0.13, pal(V_WALL, TRUNK));
+      emitBox(b, x - half, x + half, g + h * 0.32, g + h * 0.82, z - half, z + half, C_LEAF);
+      emitBox(b, x - half * 0.62, x + half * 0.62, g + h * 0.82, g + h + 0.35, z - half * 0.62, z + half * 0.62, top);
+    }
+  }
+}
+
+/**
+ * LOD0 street trees (spec-v2 polish: a 1-block trunk prop under a 2-block leaf prop): a thin trunk and a stepped
+ * crown, so a tree reads as a tree at street level. Anything else stays a 1×1 box.
+ */
+function emitLod0Prop(b, p) {
+  const x = p.lx, z = p.lz;
+  if (p.color === TRUNK && p.y1 - p.y0 === 1) {
+    emitBox(b, x + 0.42, x + 0.58, p.y0, p.y1 + 0.3, z + 0.42, z + 0.58, pal(V_WALL, TRUNK));
+    return;
+  }
+  if (p.color === LEAF) {
+    const h = p.y1 - p.y0;
+    emitBox(b, x - 0.15, x + 1.15, p.y0 + 0.2, p.y0 + h * 0.62, z - 0.15, z + 1.15, C_LEAF);
+    emitBox(b, x + 0.12, x + 0.88, p.y0 + h * 0.62, p.y1 - 0.1, z + 0.12, z + 0.88, C_LEAF_LIGHT);
+    return;
+  }
+  emitProp(b, x, z, p.y0, p.y1, pal(V_WALL, p.color), p.flags === 1);
+}
+
 // ---------- public API ----------
 
 function assertChunk(chunk, what) {
@@ -657,9 +775,10 @@ function isUnbuiltEdge(nb) {
 
 /**
  * LOD0. neighbours = {n, s, e, w}: Chunk | null (absent = water) | {unbuilt: Int16Array[CHUNK]} (landmask land:
- * coarse heights of the neighbour's edge columns, in order along the shared edge). → {opaque, walls, props} MeshBuffers
+ * coarse heights of the neighbour's edge columns, in order along the shared edge). street: {lines, points} of
+ * street.bin touching this chunk, or null. Road tops sit CURB below the sidewalk. → {opaque, walls, props, decals}
  */
-export function meshChunk(chunk, neighbours) {
+export function meshChunk(chunk, neighbours, street = null) {
   assertChunk(chunk, "chunk");
   if (!neighbours || typeof neighbours !== "object") throw new Error("meshChunk: neighbours {n, s, e, w} required");
   for (const [k, [dx, dz]] of Object.entries(NEIGHBOURS)) {
@@ -676,6 +795,7 @@ export function meshChunk(chunk, neighbours) {
     }
   }
   const grid = createGrid(CHUNK);
+  grid.treeProps = true;
   for (let lz = 0; lz < CHUNK; lz++) {
     for (let lx = 0; lx < CHUNK; lx++) {
       const c = cellAt(grid, lx, lz);
@@ -697,12 +817,19 @@ export function meshChunk(chunk, neighbours) {
   const opaque = createBuilder({ uvs: true });
   const walls = createBuilder({ uvs: true });
   const props = createBuilder({ glow: true });
-  const opts = { ao: true, uvs: true, glow: false, patterns: true };
+  const decals = createBuilder();
+  const opts = { ao: true, uvs: true, glow: false, patterns: true, curb: true };
   meshTops(grid, 1, opts, opaque);
   meshSides(grid, 1, opts, opaque, walls);
-  for (const p of chunk.props) emitProp(props, p.lx, p.lz, p.y0, p.y1, pal(V_WALL, p.color), p.flags === 1);
+  meshCurbs(grid, opaque);
+  for (const p of chunk.props) emitLod0Prop(props, p);
+  emitForestTrees(props, chunk);
+  if (street) {
+    if (!Array.isArray(street.lines) || !Array.isArray(street.points)) throw new Error("meshChunk: street must be {lines, points}");
+    meshStreet(chunk, street, decals, props, kitColor);
+  }
   const origin = [chunk.cx * CHUNK, 0, chunk.cz * CHUNK];
-  return { opaque: opaque.finish(origin), walls: walls.finish(origin), props: props.finish(origin) };
+  return { opaque: opaque.finish(origin), walls: walls.finish(origin), props: props.finish(origin), decals: decals.finish(origin) };
 }
 
 /** Height of column k: its own top on a building column, else its ground plus any leaf canopy. */
@@ -819,6 +946,19 @@ export function meshRegion(chunks, skip, lod) {
 
 // ---------- unbuilt land ----------
 
+/** Unbuilt land hillshade: a wider slope window and coarser levels (less streaking on far hills, fewer quads). */
+export const UNBUILT_SLOPE = { r: 2, step: 3 };
+/** Unbuilt terraces away from listed chunks are this many blocks high (halves the far-hill step faces). */
+export const UNBUILT_TERRACE = 2;
+
+/** Scrub patches: olive chaparral in drifts (~36-block patches with ragged 12-block edges), dry tan grass on the
+ * high ground and between. */
+function scrubTop(i, j, h) {
+  const coarse = canopyHash(Math.floor(i / CANOPY_CELL), Math.floor(j / CANOPY_CELL)) % 100;
+  const fine = canopyHash(i, j) % 100;
+  return coarse * 0.7 + fine * 0.3 < (h > 50 ? 38 : 58) ? C_SCRUB_GREEN : C_SCRUB_TAN;
+}
+
 /**
  * Pure. Coarse height of landmask cell (mx, mz): null for sea or outside, else the cell's coarse ground, at
  * least 1 (land is never at sea level).
@@ -850,30 +990,40 @@ export function unbuiltEdge(mask, cx, cz, side) {
  * own mask height (their skirts meet this layer there); water chunks and sea cells are open. One mesh for the
  * whole grid, origin 0,0,0. mask = decoded landmask; listed / water = [[cx, cz], ...]. → {opaque} MeshBuffers
  */
-export function meshUnbuilt(mask, listed, water) {
+export function meshUnbuilt(mask, listed, water, proj = null) {
+  if (proj !== null) validateProj(proj, "meshUnbuilt proj");
   if (!mask || !(mask.cells instanceof Uint8Array)) throw new Error("meshUnbuilt: mask must be a decoded landmask");
   const keys = (list, what) => {
     if (!Array.isArray(list)) throw new Error(`meshUnbuilt: ${what} must be an array of [cx, cz]`);
     return new Set(list.map(([cx, cz]) => chunkKey(cx, cz)));
   };
   const L = keys(listed, "listed"), Wt = keys(water, "water");
+  const listedCell = (i, j) => L.has(chunkKey(Math.floor(i / (CHUNK / LANDMASK_CELL)), Math.floor(j / (CHUNK / LANDMASK_CELL))));
+  const nearListed = (i, j) => {
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) if (listedCell(i + di, j + dj)) return true;
+    return false;
+  };
   const per = CHUNK / LANDMASK_CELL;
   const w = Math.max(mask.cellsX, mask.cellsZ);
   const grid = createGrid(w);
   for (let j = 0; j < mask.cellsZ; j++) {
     for (let i = 0; i < mask.cellsX; i++) {
-      const h = maskLand(mask, i, j);
-      if (h === null) continue;
+      const h0 = maskLand(mask, i, j);
+      if (h0 === null) continue;
       const key = chunkKey(Math.floor(i / per), Math.floor(j / per));
       if (Wt.has(key)) continue;
+      // away from the listed chunks (whose skirts meet this layer at the exact mask height) terraces are 2 blocks
+      const h = nearListed(i, j) ? h0 : quantizeUp(h0, UNBUILT_TERRACE);
       const c = cellAt(grid, i, j);
-      setCell(grid, c, h, h, null, C_UNBUILT_SIDE, C_UNBUILT_TOP, 0);
+      const bx = (i + 0.5) * LANDMASK_CELL, bz = (j + 0.5) * LANDMASK_CELL;
+      if (proj && inMarin(bx, bz, proj)) setCell(grid, c, h, h, null, C_SCRUB_SIDE, scrubTop(i, j, h), 0);
+      else setCell(grid, c, h, h, null, C_UNBUILT_SIDE, C_UNBUILT_TOP, 0);
       grid.gMin[c] = h;
       if (!L.has(key)) grid.exists[c] = 1;
     }
   }
   const opaque = createBuilder();
-  const opts = { ao: false, uvs: false, glow: false, patterns: false, paperSides: true };
+  const opts = { ao: false, uvs: false, glow: false, patterns: false, paperSides: true, slopeR: UNBUILT_SLOPE.r, slopeStep: UNBUILT_SLOPE.step };
   meshTops(grid, LANDMASK_CELL, opts, opaque);
   meshSides(grid, LANDMASK_CELL, opts, opaque, null);
   return { opaque: opaque.finish([0, 0, 0]) };
@@ -887,9 +1037,9 @@ function buffersOf(mesh, into) {
 }
 
 /**
- * Worker entry. req = {id, kind: "chunk", lod: 0, chunk, n, s, e, w} | {id, kind: "region", lod: 1|2, chunks, skip}
+ * Worker entry. req = {id, kind: "chunk", lod: 0, chunk, n, s, e, w, street?} | {id, kind: "region", lod: 1|2, chunks, skip}
  * | {id, kind: "unbuilt", mask, listed, water}.
- * → {reply: {id, opaque, walls?, props?}, transfer: ArrayBuffer[]}
+ * → {reply: {id, opaque, walls?, props?, decals?}, transfer: ArrayBuffer[]}
  */
 export function handleMeshRequest(req) {
   if (!req || typeof req !== "object") throw new Error("mesh request: not an object");
@@ -897,15 +1047,15 @@ export function handleMeshRequest(req) {
   if (id === undefined) throw new Error("mesh request: missing id");
   if (req.kind === "chunk") {
     if (req.lod !== 0) throw new Error(`mesh request ${id}: chunk requests are lod 0, got ${req.lod}`);
-    const { opaque, walls, props } = meshChunk(req.chunk, { n: req.n, s: req.s, e: req.e, w: req.w });
-    return { reply: { id, opaque, walls, props }, transfer: buffersOf(props, buffersOf(walls, buffersOf(opaque, []))) };
+    const { opaque, walls, props, decals } = meshChunk(req.chunk, { n: req.n, s: req.s, e: req.e, w: req.w }, req.street ?? null);
+    return { reply: { id, opaque, walls, props, decals }, transfer: buffersOf(decals, buffersOf(props, buffersOf(walls, buffersOf(opaque, [])))) };
   }
   if (req.kind === "region") {
     const { opaque } = meshRegion(req.chunks, req.skip, req.lod);
     return { reply: { id, opaque }, transfer: buffersOf(opaque, []) };
   }
   if (req.kind === "unbuilt") {
-    const { opaque } = meshUnbuilt(req.mask, req.listed, req.water);
+    const { opaque } = meshUnbuilt(req.mask, req.listed, req.water, req.proj ?? null);
     return { reply: { id, opaque }, transfer: buffersOf(opaque, []) };
   }
   throw new Error(`mesh request ${id}: unknown kind ${JSON.stringify(req.kind)}`);

@@ -74,6 +74,8 @@ const OP_KEYS = {
   site: ["key", "name", "lat", "lon", "toward", "heightRef", "realHeightM", "source", "covers"],
   mesh: ["kind", "y0", "y1", "every", "inset", "palette", "emissive"],
 };
+/** crown_lattice: fins on the ring at `inset`; clock_faces: one face per side, the cells just outside the shape. */
+export const MESH_KINDS = Object.freeze(["crown_lattice", "clock_faces"]);
 const LANDMARK_KEYS = ["key", "name", "address", "lat", "lon", "toward", "heightRef", "realHeightM", "source", "palette", "accent", "covers", "note", "recipe", "bridge"];
 
 function validateSiteRef(o, skyline, what) {
@@ -106,7 +108,7 @@ function validateOp(op, what) {
   }
   if (op.op === "prop") palette(op.color, what);
   if (op.op === "field" && !(op.surface in SURFACE_BY_NAME)) throw new Error(`${what}: unknown surface ${op.surface}`);
-  if (op.op === "mesh" && !["crown_lattice"].includes(op.kind)) throw new Error(`${what}: unknown mesh kind ${op.kind}`);
+  if (op.op === "mesh" && !MESH_KINDS.includes(op.kind)) throw new Error(`${what}: unknown mesh kind ${op.kind}`);
 }
 
 const BRIDGE_KEYS = ["palette", "points", "decks", "deckWidth", "towerLegs", "crossBeams", "cableSag", "suspenderEvery", "anchorSize"];
@@ -446,6 +448,17 @@ export function compileLandmark(lm, ctx, skyline) {
     }
     return out;
   };
+  /** The cells just outside a shape at the middle of each of its four sides (frame u/v), up to 3 per side. */
+  const faceCells = (sh) => {
+    const all = columnsOf(sh);
+    const inside = all.filter((c) => sh.contains(c, 0));
+    if (!inside.length) return [];
+    const mu = inside.reduce((s, c) => s + c.u, 0) / inside.length, mv = inside.reduce((s, c) => s + c.v, 0) / inside.length;
+    const key = (c) => `${c.x},${c.z}`;
+    const inSet = new Set(inside.map(key));
+    const touches = (c) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => inSet.has(`${c.x + dx},${c.z + dz}`));
+    return all.filter((c) => !inSet.has(key(c)) && touches(c)).filter((c) => Math.min(Math.abs(c.u - mu), Math.abs(c.v - mv)) <= 1.2).map((c) => [c.x, c.z]);
+  };
   const write = (c, top) => {
     ensurePart();
     const k = columnKey(c.x, c.z);
@@ -588,7 +601,7 @@ export function compileLandmark(lm, ctx, skyline) {
       case "mesh": {
         const sh = need();
         const inset = op.inset ?? 0;
-        const cells = columnsOf(sh).filter((c) => sh.contains(c, inset) && !sh.contains(c, inset + 1)).map((c) => [c.x, c.z]);
+        const cells = op.kind === "clock_faces" ? faceCells(sh) : columnsOf(sh).filter((c) => sh.contains(c, inset) && !sh.contains(c, inset + 1)).map((c) => [c.x, c.z]);
         if (cells.length === 0) throw new Error(`${lm.name}: mesh ring is empty`);
         S.mesh.push({ ...op, cells, palette: palette(op.palette ?? lm.accent, lm.name) });
         break;

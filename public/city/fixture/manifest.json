@@ -125,6 +125,7 @@
  ],
  "landmask": "landmask.bin",
  "landmarks": "landmarks.bin",
+ "street": "street.bin",
  "walk": "walk.bin",
  "places": "places.json",
  "parents": {

@@ -430,7 +430,7 @@ function walkerCity(camPos, target) {
   const added = [];
   return {
     THREE, added, stage: { camera: cam },
-    add: (o) => added.push(o), remove: (o) => added.splice(added.indexOf(o), 1),
+    add: (o) => added.push(o), remove: (o) => added.splice(added.indexOf(o), 1), standY: (x, y) => y,
     worldToScreen: (x, y, z) => { v.set(x, y, z).project(cam); return { x: (v.x + 1) * 640, y: (1 - v.y) * 400, visible: v.z > -1 && v.z < 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1 }; },
   };
 }

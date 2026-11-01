@@ -20,7 +20,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const PLACE_RADIUS = 15;
 /** Anchor searched within this many blocks of the EAS column (rule 5). */
 export const ANCHOR_RADIUS = 12;
-export const ANCHOR_PREFERENCE = Object.freeze([SURFACE.SIDEWALK, SURFACE.PLAZA, SURFACE.ROAD]);
+export const ANCHOR_PREFERENCE = Object.freeze([SURFACE.SIDEWALK, SURFACE.PLAZA, SURFACE.ROAD, SURFACE.ROAD_MAJOR]);
 
 const fail = (msg) => {
   throw new Error(`companies: ${msg}`);

@@ -11,10 +11,11 @@ const EXTRA = Object.freeze([
 ]);
 
 /**
- * → {roads, land, buildings, extra, points, trees, coastline} query strings, each prefixed
+ * → {roads, land, buildings, extra, points, trees, street, coastline} query strings, each prefixed
  * [out:json][timeout:300][maxsize:1073741824]. roads/land/buildings are the v1 strings unchanged, so cached
  * requests stay valid (roads already carries highway=busway). spec-v2 §3.1 adds `extra` (building:part, sports,
- * dog-park, pool and fountain areas, ponds), `points` (lighting towers, masts, towers, flagpoles) and `trees`.
+ * dog-park, pool and fountain areas, ponds), `points` (lighting towers, masts, towers, flagpoles) and `trees`;
+ * the street-detail pass adds `street` (signals, crossings, lamps, stops, benches, hydrants, tram/light-rail track).
  * Queries that return relations end in `out geom;` rather than the spec's `out geom tags;`: the `tags`
  * verbosity drops relation members, so multipolygons would arrive without geometry. Default (body)
  * verbosity still carries every tag.
@@ -37,9 +38,19 @@ export function overpassQueries(bbox) {
     extra: `${OVERPASS_PREFIX}(${EXTRA.map((f) => `wr${f}${b};`).join("")});out geom;`,
     points: `${OVERPASS_PREFIX}(node["tower:type"="lighting"]${b};node["man_made"~"^(mast|tower|flagpole)$"]${b};);out;`,
     trees: `${OVERPASS_PREFIX}node["natural"="tree"]${b};out;`,
+    street: `${OVERPASS_PREFIX}(${STREET.map((f) => `${f}${b};`).join("")});out geom;`,
     coastline: `${OVERPASS_PREFIX}way["natural"="coastline"]${b};out geom tags;`,
   };
 }
+
+/** Street furniture nodes and tram / cable-car / light-rail track ways (the street-level detail layer, street.bin). */
+const STREET = Object.freeze([
+  'node["highway"~"^(traffic_signals|crossing|street_lamp|bus_stop)$"]',
+  'node["public_transport"="platform"]',
+  'node["amenity"~"^(bench|waste_basket)$"]',
+  'node["emergency"="fire_hydrant"]',
+  'way["railway"~"^(tram|light_rail)$"]',
+]);
 
 const DROP_HIGHWAY = new Set(["proposed", "construction", "abandoned", "corridor", "platform", "elevator", "bus_stop"]);
 
@@ -82,9 +93,9 @@ export function dropBuildingReason(tags) {
 
 const ROAD_CLASSES = Object.freeze({
   motorway: { roadway: 7, sidewalk: 0, surface: SURFACE.ROAD },
-  trunk: { roadway: 6, sidewalk: 1, surface: SURFACE.ROAD },
-  primary: { roadway: 6, sidewalk: 1, surface: SURFACE.ROAD },
-  secondary: { roadway: 5, sidewalk: 1, surface: SURFACE.ROAD },
+  trunk: { roadway: 6, sidewalk: 1, surface: SURFACE.ROAD_MAJOR },
+  primary: { roadway: 6, sidewalk: 1, surface: SURFACE.ROAD_MAJOR },
+  secondary: { roadway: 5, sidewalk: 1, surface: SURFACE.ROAD_MAJOR },
   tertiary: { roadway: 4, sidewalk: 1, surface: SURFACE.ROAD },
   residential: { roadway: 4, sidewalk: 1, surface: SURFACE.ROAD },
   unclassified: { roadway: 4, sidewalk: 1, surface: SURFACE.ROAD },
@@ -109,7 +120,16 @@ export const SHORT_BRIDGE_M = 300;
 /** Base class of a highway value: "primary_link" → "primary". */
 export const highwayClass = (h) => (h.endsWith("_link") ? h.slice(0, -5) : h);
 
-/** → {roadway, sidewalk, surface} in blocks, or null for classes outside the width table */
+/** Lane and kerb-parking widths (metres) for a roadway from OSM `lanes` (an SF street: lanes plus two parking lanes). */
+export const LANE_M = 3.2;
+export const PARKING_M = 4.8;
+const LANES_CLASSES = new Set(["trunk", "primary", "secondary", "tertiary", "residential", "unclassified"]);
+
+/**
+ * → {roadway, sidewalk, surface} in blocks, or null for classes outside the width table. Width order: the class
+ * table, then OSM `lanes` (lanes × LANE_M + PARKING_M, never below the class width − 1), the name overrides, and
+ * an explicit `width` tag last. Arterials (trunk, primary, secondary) are ROAD_MAJOR asphalt.
+ */
 export function roadSpec(tags) {
   const h = tags.highway;
   const link = h.endsWith("_link");
@@ -117,6 +137,10 @@ export function roadSpec(tags) {
   if (!cls) return null;
   const spec = { ...cls };
   if (link) spec.roadway = Math.max(2, cls.roadway - 2);
+  const lanes = Number(String(tags.lanes ?? "").split(";")[0]);
+  if (!link && LANES_CLASSES.has(highwayClass(h)) && Number.isInteger(lanes) && lanes > 0 && lanes <= 10) {
+    spec.roadway = Math.max(cls.roadway - 1, Math.round((lanes * LANE_M + PARKING_M) / 3));
+  }
   Object.assign(spec, NAME_OVERRIDES[tags.name] ?? {});
   if (tags.width !== undefined) {
     const w = parseHeightM(tags.width);

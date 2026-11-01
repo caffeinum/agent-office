@@ -4,10 +4,13 @@
 // the unbuilt-land layer from landmask.bin (one mesh), the instanced landmarks.bin layer and a north arrow.
 // Exposes the §3 scene API consumed by W6/W7, plus follow/unfollow and setCamera (spec-v2 §8 W4).
 
-import { CHUNK, REGION, SURFACE, SURFACE_COLORS, chunkKey, chunkOf, pickId } from "../../shared/city.js";
+import { CHUNK, REGION, SURFACE, SURFACE_COLORS, chunkKey, chunkOf, isRoadSurface, pickId } from "../../shared/city.js";
 import { grainTexture } from "../textures.js";
-import { CAMERA as CAMERA_LIMITS, createStage } from "./stage.js";
-import { createChunkStore, fail, loadLandmarks, loadLandmask, loadManifest } from "./loader.js";
+import { CAMERA as CAMERA_LIMITS, createStage, maxPolarFor, minPolarFor } from "./stage.js";
+import { createChunkStore, fail, loadLandmarks, loadLandmask, loadManifest, loadStreet } from "./loader.js";
+import { binStreet } from "./streetmesh.js";
+import { CURB, DECAL_DIST } from "./streetkit.js";
+import { createTraffic } from "./traffic.js";
 import { pickRay } from "./pick.js";
 import { createWindowAtlas } from "./textures.js";
 import { createUnmapped } from "./unmapped.js";
@@ -19,8 +22,15 @@ export const LOD1_R = 5;
 export const HYSTERESIS = 0.5;
 export const UPLOADS_PER_FRAME = 2;
 export const WORKERS = 2;
-/** The camera keeps this many blocks of air above the heightfield under it (near plane is 1 block). */
+/** The camera keeps this many blocks of air above the heightfield under it, down to STREET_CLEARANCE close in. */
 export const CAMERA_CLEARANCE = 3;
+export const STREET_CLEARANCE = 0.45;
+/** Pure. Air (blocks) the camera keeps above the columns under it at orbit distance dist. */
+export const clearanceFor = (dist) => Math.min(CAMERA_CLEARANCE, Math.max(STREET_CLEARANCE, dist * 0.08));
+/** Pure. Near plane (blocks) at orbit distance dist: 1 block far out, down to 0.05 at eye level. */
+export const nearFor = (dist) => Math.min(1, Math.max(0.05, dist * 0.02));
+/** Street view (follow, view=street): the camera rides STREET_BACK behind and STREET_UP above the walker. */
+export const STREET_VIEW = Object.freeze({ back: 2.6, up: 1.05, ahead: 6, lookUp: 0.55, ease: 0.12, turn: 0.08 });
 /** Zoomed in, the orbit target rides up onto the roof under it: it stays within dist × this of the roof top. */
 export const TARGET_ROOF_REACH = 0.5;
 const WATER_MARGIN = 6000;
@@ -97,7 +107,9 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
   if (!manifestUrl) throw new Error("createCityScene: manifestUrl is required");
   const manifest = await loadManifest(manifestUrl);
   const baseUrl = new URL(".", new URL(manifestUrl, location.href)).href;
-  const [mask, landmarkBoxes] = await Promise.all([loadLandmask(manifest, baseUrl), loadLandmarks(manifest, baseUrl)]);
+  const [mask, landmarkBoxes, street] = await Promise.all([loadLandmask(manifest, baseUrl), loadLandmarks(manifest, baseUrl), loadStreet(manifest, baseUrl)]);
+  const streetBins = binStreet(street);
+  const NO_STREET = { lines: [], points: [] };
   const unmapped = createUnmapped(manifest, mask);
   const store = createChunkStore(manifest, baseUrl);
   const stage = createStage(container, { theme });
@@ -122,7 +134,8 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     })),
     water: new THREE.MeshStandardMaterial({ color: SURFACE_COLORS[SURFACE.WATER], roughness: 0.35, metalness: 0, polygonOffset: true, polygonOffsetFactor: 4, polygonOffsetUnits: 8 }),
     props: propGlow(new THREE.MeshStandardMaterial({ vertexColors: true, emissive: new THREE.Color("#ffffff"), emissiveIntensity: 0, roughness: 0.6, metalness: 0.2, flatShading: true })),
-    unbuilt: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, flatShading: true, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }),
+    unbuilt: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, flatShading: false, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }),
+    decals: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }),
   };
   const landmarks = createLandmarkLayer(THREE, landmarkBoxes);
   scene.add(landmarks.group);
@@ -188,7 +201,9 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     m.updateMatrix();
     return m;
   }
-  const disposeMesh = (m) => { if (m) { scene.remove(m); m.geometry.dispose(); } };
+  const disposeMesh = (m) => { if (m) { scene.remove(m); m.geometry.dispose(); decalMeshes.delete(m); } };
+  const decalMeshes = new Set();
+  let decalsOn = true;
 
   /* ── LOD bookkeeping ────────────────────────────────────────────────────────────────────────── */
   // lod0: key → {cx, cz, want, inflight, meshes: [opaque, walls] | null}
@@ -209,13 +224,16 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
   function requestLod0(e) {
     e.inflight = true;
     const chunk = store.get(e.cx, e.cz);
-    mesh({ kind: "chunk", lod: 0, chunk, n: neighbour(e.cx, e.cz - 1, "n"), s: neighbour(e.cx, e.cz + 1, "s"), e: neighbour(e.cx + 1, e.cz, "e"), w: neighbour(e.cx - 1, e.cz, "w") }, `chunk ${e.cx},${e.cz}`)
+    const street = streetBins.get(chunkKey(e.cx, e.cz)) ?? NO_STREET;
+    mesh({ kind: "chunk", lod: 0, chunk, n: neighbour(e.cx, e.cz - 1, "n"), s: neighbour(e.cx, e.cz + 1, "s"), e: neighbour(e.cx + 1, e.cz, "e"), w: neighbour(e.cx - 1, e.cz, "w"), street }, `chunk ${e.cx},${e.cz}`)
       .then((reply) => uploads.push(() => {
         e.inflight = false;
         if (!e.want) return;
         const what = `chunk ${e.cx},${e.cz}`;
         const meshes = [buildMesh(reply.opaque, mats.opaque, what), buildMesh(reply.walls, mats.walls, what), buildMesh(reply.props, mats.props, what)].filter(Boolean);
         for (const m of meshes) { m.castShadow = true; m.receiveShadow = true; scene.add(m); }
+        const decal = buildMesh(reply.decals, mats.decals, what);
+        if (decal) { decal.receiveShadow = true; decal.name = "city-decals"; decal.visible = decalsOn; scene.add(decal); meshes.push(decal); decalMeshes.add(decal); }
         e.meshes = meshes;
         dirty = true;
       }))
@@ -243,7 +261,7 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
 
   // the unbuilt-land layer: one mesh for the whole grid, meshed once
   let unbuiltMesh = null;
-  mesh({ kind: "unbuilt", mask, listed: manifest.chunks.list.map(([cx, cz]) => [cx, cz]), water: manifest.water }, "unbuilt land")
+  mesh({ kind: "unbuilt", mask, listed: manifest.chunks.list.map(([cx, cz]) => [cx, cz]), water: manifest.water, proj: manifest.proj }, "unbuilt land")
     .then((reply) => uploads.push(() => {
       unbuiltMesh = buildMesh(reply.opaque, mats.unbuilt, "unbuilt land");
       // no shadows: its up-facing terrace sides would self-shadow into stripes, and it lies outside the shadow box
@@ -311,6 +329,24 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     if (c) return c.chunk.ground[c.i];
     return unmapped.heightAt(x, z) ?? 0;
   }
+  /** y a walker or car stands on: ground, CURB lower on a carriageway column (the viewer's sunk road tops). */
+  function streetY(x, z) {
+    const c = column(x, z);
+    if (!c) return unmapped.heightAt(x, z) ?? 0;
+    const g = c.chunk.ground[c.i];
+    return !c.chunk.bldg[c.i] && isRoadSurface(c.chunk.surface[c.i]) ? g - CURB : g;
+  }
+  /** y for a figure at (x, y, z) from the walk graph: CURB lower when it stands on carriageway ground (a crossing). */
+  function standY(x, y, z) {
+    const c = column(x, z);
+    if (!c || c.chunk.bldg[c.i] || !isRoadSurface(c.chunk.surface[c.i])) return y;
+    return Math.abs(y - c.chunk.ground[c.i]) < 0.6 ? y - CURB : y;
+  }
+  /** true when the column under a block position is carriageway (road surface, no building). */
+  function isRoadAt(x, z) {
+    const c = column(x, z);
+    return !!c && !c.chunk.bldg[c.i] && isRoadSurface(c.chunk.surface[c.i]);
+  }
   /** Highest solid y of the column under a block position: column top, deck slab, prop or ground; 0 on water / unloaded. */
   function surfaceTop(x, z) {
     const c = column(x, z);
@@ -342,24 +378,63 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
 
   /* ── follow ─────────────────────────────────────────────────────────────────────────────────── */
   let following = null;
+  let followView = "orbit";
+  let streetYaw = null;
   const unfollowCbs = [];
-  /** Track getPos() → {x, y, z} every frame (the target eases onto it, the camera keeps its offset). */
-  function follow(getPos) {
+  /**
+   * Track getPos() → {x, y, z, heading?} every frame. view "orbit": the target eases onto it and the camera keeps
+   * its offset. view "street": an eye-level chase camera STREET_VIEW.back behind the walker, looking ahead along
+   * its heading (getPos must give heading).
+   */
+  function follow(getPos, { view = "orbit" } = {}) {
     if (typeof getPos !== "function") throw new Error("city.follow: getPos must be a function → {x, y, z}");
+    if (view !== "orbit" && view !== "street") throw new Error(`city.follow: view must be orbit | street, got ${JSON.stringify(view)}`);
     camAnim.active = false;
     following = getPos;
+    followView = view;
+    streetYaw = null;
+  }
+  /** Switch the follow camera between "orbit" and "street" while following. */
+  function setFollowView(view) {
+    if (view !== "orbit" && view !== "street") throw new Error(`city.setFollowView: view must be orbit | street, got ${JSON.stringify(view)}`);
+    if (followView === "street" && view === "orbit") {
+      // back out to a readable orbit over the walker
+      offsetDir.setFromSphericalCoords(1, DEFAULT_POLAR, getCamera().az);
+      camera.position.copy(controls.target).addScaledVector(offsetDir, 60);
+    }
+    followView = view;
+    streetYaw = null;
   }
   function unfollow(reason) {
     if (!following) return;
     following = null;
+    followView = "orbit";
     for (const fn of unfollowCbs) fn(reason);
   }
+  const lookAhead = new THREE.Vector3();
   function stepFollow(dt) {
     if (!following) return;
     const p = following();
     if (!p || ![p.x, p.y, p.z].every(Number.isFinite)) throw new Error(`city.follow: getPos returned ${JSON.stringify(p)}, expected {x, y, z}`);
-    const k = 1 - Math.pow(1 - FOLLOW_EASE, dt * 60);
     const t = controls.target;
+    if (followView === "street") {
+      if (!Number.isFinite(p.heading)) throw new Error(`city.follow (street view): getPos gave no finite heading: ${JSON.stringify(p)}`);
+      if (streetYaw === null) streetYaw = p.heading;
+      const turn = Math.atan2(Math.sin(p.heading - streetYaw), Math.cos(p.heading - streetYaw));
+      streetYaw += turn * (1 - Math.pow(1 - STREET_VIEW.turn, dt * 60));
+      const fx = Math.sin(streetYaw), fz = Math.cos(streetYaw);
+      const k = 1 - Math.pow(1 - STREET_VIEW.ease, dt * 60);
+      lookAhead.set(p.x + fx * STREET_VIEW.ahead, p.y + STREET_VIEW.lookUp, p.z + fz * STREET_VIEW.ahead);
+      t.lerp(lookAhead, k);
+      const cx = p.x - fx * STREET_VIEW.back, cz = p.z - fz * STREET_VIEW.back;
+      const cy = Math.max(p.y, streetY(cx, cz)) + STREET_VIEW.up;
+      camera.position.x += (cx - camera.position.x) * k;
+      camera.position.y += (cy - camera.position.y) * k;
+      camera.position.z += (cz - camera.position.z) * k;
+      camera.lookAt(t);
+      return;
+    }
+    const k = 1 - Math.pow(1 - FOLLOW_EASE, dt * 60);
     const dx = (p.x - t.x) * k, dy = (p.y - t.y) * k, dz = (p.z - t.z) * k;
     t.x += dx; t.y += dy; t.z += dz;
     camera.position.x += dx; camera.position.y += dy; camera.position.z += dz;
@@ -375,7 +450,7 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     camAnim.active = false;
     unfollow("api");
     const d = THREE.MathUtils.clamp(dist, CAMERA_LIMITS.minDist, CAMERA_LIMITS.maxDist);
-    const phi = THREE.MathUtils.clamp(polar, CAMERA_LIMITS.minPolar, CAMERA_LIMITS.maxPolar);
+    const phi = THREE.MathUtils.clamp(polar, minPolarFor(d), maxPolarFor(d));
     offsetDir.setFromSphericalCoords(1, phi, az);
     controls.target.set(x, groundAt(x, z), z);
     camera.position.copy(controls.target).addScaledVector(offsetDir, d);
@@ -416,24 +491,38 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     // clamp the target to the city and glide its height over the terrain; close in, lift it toward the roof
     // under it so orbiting a tower pivots on the tower, not on a point buried in it
     const t = controls.target;
+    const street = following && followView === "street";
     const cx = THREE.MathUtils.clamp(t.x, bbox.x0, bbox.x1), cz = THREE.MathUtils.clamp(t.z, bbox.z0, bbox.z1);
     const gy = Math.max(groundAt(cx, cz), surfaceTop(cx, cz) - camera.position.distanceTo(t) * TARGET_ROOF_REACH);
-    const cy = camAnim.active || following ? t.y : t.y + (gy - t.y) * Math.min(1, dt * 4);
+    // a target left under the terrain (set before its chunk loaded) jumps up at once, camera and all
+    const buried = t.y < groundAt(cx, cz) - 1;
+    const cy = buried ? gy : camAnim.active || following ? t.y : t.y + (gy - t.y) * Math.min(1, dt * 4);
     if (cx !== t.x || cz !== t.z || cy !== t.y) {
       const dx = cx - t.x, dy = cy - t.y, dz = cz - t.z;
       t.set(cx, cy, cz);
       camera.position.x += dx; camera.position.y += dy; camera.position.z += dz;
     }
-    // never inside a building: the camera stays CAMERA_CLEARANCE above the heightfield around it
-    const floor = surfaceTopNear(camera.position.x, camera.position.z, 1) + CAMERA_CLEARANCE;
+    // never inside a building: the camera keeps clearanceFor(dist) above the heightfield around it (only its own
+    // column close in, so a street-level camera can stand on a sidewalk beside a wall)
+    const orbitDist = camera.position.distanceTo(t);
+    const r = orbitDist < 20 ? 0 : 1;
+    const floor = (r ? surfaceTopNear(camera.position.x, camera.position.z, 1) : surfaceTop(camera.position.x, camera.position.z)) + (street ? STREET_CLEARANCE : clearanceFor(orbitDist));
     if (camera.position.y < floor) {
       camera.position.y = floor;
       camera.lookAt(t);
     }
     const dist = camera.position.distanceTo(t);
-    scene.fog.near = Math.min(dist * 1.5, camera.far);
-    scene.fog.far = Math.min(dist * 4.5, camera.far);
+    const near = nearFor(street ? 1 : dist);
+    if (Math.abs(near - camera.near) > camera.near * 0.15) { camera.near = near; camera.updateProjectionMatrix(); }
+    const fogDist = Math.max(dist, 90);
+    scene.fog.near = Math.min(fogDist * 1.5, camera.far);
+    scene.fog.far = Math.min(fogDist * 4.5, camera.far);
+    const wantDecals = dist < DECAL_DIST;
+    if (wantDecals !== decalsOn) { decalsOn = wantDecals; for (const m of decalMeshes) m.visible = wantDecals; }
   }
+
+  /* ── ambient traffic ───────────────────────────────────────────────────────────────────────── */
+  const traffic = createTraffic({ THREE, scene, street, streetY });
 
   /* ── compass ────────────────────────────────────────────────────────────────────────────────── */
   let compass = null;
@@ -450,6 +539,7 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
   const frameCbs = [];
   stage.onFrame((now, dt, keyed) => {
     stepCamera(now, dt, keyed);
+    traffic.update(dt, controls.target, camera.position.distanceTo(controls.target));
     if (compass) compass.update(controls.getAzimuthalAngle());
     const t = controls.target;
     if (Math.abs(t.x - lastTarget.x) > 2 || Math.abs(t.z - lastTarget.z) > 2) { dirty = true; lastTarget = { x: t.x, z: t.z }; }
@@ -493,7 +583,7 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     let l0 = 0, r1 = 0, r2 = 0;
     for (const e of lod0.values()) if (e.meshes) l0++;
     for (const r of regions.values()) if (r.mesh) { if (r.shown.lod === 1) r1++; else r2++; }
-    return { lod0: l0, regions1: r1, regions2: r2, pending: store.pending() + waiting.size + uploads.length, unbuilt: unbuiltMesh !== null, landmarks: landmarks.count };
+    return { lod0: l0, regions1: r1, regions2: r2, pending: store.pending() + waiting.size + uploads.length, unbuilt: unbuiltMesh !== null, landmarks: landmarks.count, traffic: traffic.stats() };
   };
 
   const city = {
@@ -508,6 +598,8 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     setCamera,
     getCamera,
     follow,
+    setFollowView,
+    get followView() { return followView; },
     unfollow: () => unfollow("api"),
     /** fn(reason: "user" | "api") when follow ends (a pan, orbit, key or setCamera cancels it). */
     onUnfollow(fn) { unfollowCbs.push(fn); },
@@ -522,6 +614,10 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
     pick,
     worldToScreen,
     groundAt,
+    streetY,
+    standY,
+    isRoadAt,
+    street,
     buildingAt,
     cameraDistance: () => camera.position.distanceTo(controls.target),
     target: () => ({ x: controls.target.x, y: controls.target.y, z: controls.target.z }),

@@ -251,7 +251,7 @@ await test("sf: walk.bin gates on the real build [post-int]", () => {
   const manifest = validateManifest(JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")));
   const bytes = new Uint8Array(readFileSync(join(dir, manifest.walk)));
   assert.ok(bytes.length <= MAX_WALK_BYTES, `walk.bin ${bytes.length} B raw`);
-  assert.ok(gzipSync(bytes, { level: 9 }).length <= MAX_WALK_GZ_BYTES, "walk.bin ≤ 150 KB gzipped");
+  assert.ok(gzipSync(bytes, { level: 9 }).length <= MAX_WALK_GZ_BYTES, "walk.bin ≤ 160 KB gzipped");
   const g = decodeWalk(bytes, manifest);
   const places = validatePlaces(JSON.parse(readFileSync(join(dir, manifest.places), "utf8")), manifest, g);
 

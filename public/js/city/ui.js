@@ -77,18 +77,28 @@ export function applyBadges(labels, counts) {
   }
 }
 
+export const FOLLOW_VIEWS = Object.freeze(["orbit", "street"]);
+
+/** Pure. ?view → "orbit" | "street"; orbit when absent; throws on anything else. */
+export function parseView(value) {
+  if (value == null) return "orbit";
+  if (!FOLLOW_VIEWS.includes(value)) throw new Error(`?view=${value}: expected ${FOLLOW_VIEWS.join(" or ")}`);
+  return value;
+}
+
 /**
- * Follow controller over the scene's follow(getPos)/unfollow() (W4). getPos reads the live interpolation; a
- * walker that left keeps its last position until the UI unfollows. → {follow(id), unfollow(), following}
+ * Follow controller over the scene's follow(getPos, {view})/unfollow() (W4). getPos reads the live interpolation
+ * (with heading, for the street view); a walker that left keeps its last position until the UI unfollows.
+ * → {follow(id), unfollow(), setView(view), following, view}
  */
-export function createFollow(city, live, { onChange = () => {}, now = () => Date.now() } = {}) {
+export function createFollow(city, live, { onChange = () => {}, now = () => Date.now(), view = "orbit" } = {}) {
   if (typeof city.follow !== "function" || typeof city.unfollow !== "function") {
     throw new Error("city scene has no follow(getPos)/unfollow(): W4's scene API (spec-v2 §8 W4) is required to follow a walker");
   }
-  let id = null, last = null;
+  let id = null, last = null, mode = parseView(view);
   const getPos = () => {
     const p = live.position(id, now());
-    if (p) last = { x: p.x, y: p.y, z: p.z };
+    if (p) last = { x: p.x, y: typeof city.standY === "function" ? city.standY(p.x, p.y, p.z) : p.y, z: p.z, heading: p.heading };
     return last;
   };
   return {
@@ -96,9 +106,19 @@ export function createFollow(city, live, { onChange = () => {}, now = () => Date
       if (!live.walker(next)) throw new Error(`follow: no walker ${JSON.stringify(next)} in the city`);
       id = next;
       last = null;
-      city.follow(getPos);
+      city.follow(getPos, { view: mode });
       onChange(id);
     },
+    /** "orbit" | "street": applied now when following, and to the next follow. */
+    setView(next) {
+      mode = parseView(next);
+      if (id !== null) {
+        if (typeof city.setFollowView !== "function") throw new Error("city scene has no setFollowView(view): the street view needs it");
+        city.setFollowView(mode);
+      }
+      onChange(id);
+    },
+    get view() { return mode; },
     unfollow() {
       if (id === null) return;
       id = null;
@@ -146,15 +166,29 @@ export function mountCityUi(city, companies, root, { places, walk, liveUrl }) {
 
   const live = createLiveState({ graph: walk });
   let follower = null;
+  const initialView = parseView(params.get("view"));
   let dirty = true;
   const guard = (fn) => (...a) => { try { return fn(...a); } catch (e) { throw fail(e); } };
 
+  const viewBtn = el("button", "cu-view cu-glass", "street view");
+  viewBtn.type = "button";
+  viewBtn.hidden = true;
   const follow = guard((id) => {
     follower ??= createFollow(city, live, {
-      onChange: (fid) => { walkers.select(fid); setUrlParam("follow", fid); dirty = true; },
+      view: initialView,
+      onChange: (fid) => {
+        walkers.select(fid);
+        setUrlParam("follow", fid);
+        setUrlParam("view", fid && follower?.view === "street" ? "street" : null);
+        viewBtn.hidden = !fid;
+        viewBtn.textContent = follower?.view === "street" ? "orbit view" : "street view";
+        viewBtn.setAttribute("aria-pressed", String(follower?.view === "street"));
+        dirty = true;
+      },
     });
     follower.follow(id);
   });
+  viewBtn.addEventListener("click", guard(() => follower?.setView(follower.view === "street" ? "orbit" : "street")));
   const unfollow = () => follower?.unfollow();
 
   const panel = createPanel(ui, { onClose: () => setUrlParam("c", null), onFollow: follow });
@@ -175,6 +209,7 @@ export function mountCityUi(city, companies, root, { places, walk, liveUrl }) {
   }));
   const people = createPeople(ui, { onFollow: follow });
   const walkers = createWalkers(city, live, ui, { onChipPick: follow });
+  ui.appendChild(viewBtn);
   ui.appendChild(footer);
 
   const pins = createPins(city, sites, { onCounts: (counts) => applyBadges(labels, counts) });

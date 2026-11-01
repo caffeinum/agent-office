@@ -46,12 +46,16 @@ export declare function regionOf(cx: number, cz: number): [rx: number, rz: numbe
 
 export declare const SURFACE: Readonly<{
   WATER: 1; SHALLOW: 2; SAND: 3; GRASS: 4; PARK: 5; FOREST: 6; ROAD: 7; SIDEWALK: 8; RAIL: 9; PLAZA: 10;
-  PIER: 11; HILL: 12; PARKING: 13; DIRT: 14; COURT: 15; TRACK: 16; POOL: 17;
+  PIER: 11; HILL: 12; PARKING: 13; DIRT: 14; COURT: 15; TRACK: 16; POOL: 17; ROAD_MAJOR: 18;
 }>;
 export type Surface = (typeof SURFACE)[keyof typeof SURFACE];
+export declare function isRoadSurface(s: number): boolean;
 export declare const SURFACE_COLORS: Readonly<Record<Surface, string>>;
 export declare const TERRAIN_SIDE_COLORS: Readonly<Record<Surface, string>>;
 export declare const UNBUILT_COLORS: Readonly<{ top: string; side: string }>;
+export declare const SCRUB_COLORS: Readonly<{ green: string; tan: string; side: string }>;
+export declare const MARIN_BOX: Readonly<{ south: number; east: number }>;
+export declare function inMarin(x: number, z: number, proj?: Projection): boolean;
 export declare const DECK_COLORS: Readonly<{ top: string; edge: string; pillar: string; under: string }>;
 
 export declare const BUILDING_PALETTE: readonly string[];
@@ -175,6 +179,33 @@ export declare function encodeLandmask(mask: Landmask, grid?: readonly [number, 
 export declare function decodeLandmask(bytes: Uint8Array, grid?: readonly [number, number]): Landmask;
 export declare function landmaskHeight(mask: Landmask, x: number, z: number): number | null;
 
+// ---------- street.bin (SFS1) ----------
+
+export declare const STREET_MAGIC: "SFS1";
+export declare const STREET_VERSION: 1;
+export declare const STREET_HEADER_BYTES: 16;
+export declare const STREET_LINE_BYTES: 8;
+export declare const STREET_VERT_BYTES: 4;
+export declare const STREET_POINT_BYTES: 6;
+export declare const STREET_Q: 4;
+export declare const MAX_STREET_BYTES: number;
+export declare const MAX_STREET_GZ_BYTES: number;
+export declare const STREET_LINE: Readonly<{ ROAD: 1; CROSSWALK: 2; TRACK: 3 }>;
+export declare const ROAD_FLAG: Readonly<{ ONEWAY: 1; MAJOR: 2; CENTRE: 4; DOUBLE_YELLOW: 8 }>;
+export declare const CROSSWALK_STYLE: Readonly<{ ZEBRA: 0; LADDER: 1; LINES: 2 }>;
+export declare const TRACK_FLAG: Readonly<{ CABLE: 1; MEDIAN: 2 }>;
+export declare const STREET_POINT: Readonly<{ LAMP: 1; HYDRANT: 2; BENCH: 3; SHELTER: 4; STOP: 5; CAR: 6; SIGNAL: 7; BIN: 8 }>;
+/** pts: x4, z4 pairs (quarter blocks). */
+export interface StreetLine { kind: number; flags: number; width4: number; lanes: number; pts: Int16Array }
+export interface StreetPoint { kind: number; rot: number; x4: number; z4: number }
+export interface Street { lines: StreetLine[]; points: StreetPoint[] }
+export declare function rotByte(rad: number): number;
+export declare function rotRad(byte: number): number;
+export declare function streetQ(v: number): number;
+export declare function validateStreet(doc: Street, grid?: readonly [number, number]): Street;
+export declare function encodeStreet(doc: Street, grid?: readonly [number, number]): Uint8Array;
+export declare function decodeStreet(bytes: Uint8Array, grid?: readonly [number, number]): Street;
+
 // ---------- walk.bin (SFW1) ----------
 
 export declare const WALK_MAGIC: "SFW1";
@@ -249,6 +280,8 @@ export interface Manifest {
   /** file names next to the manifest: landmask/landmarks gzipped, walk raw, places JSON */
   landmask: string;
   landmarks: string;
+  /** street.bin (SFS1, gzipped): street-level detail */
+  street: string;
   walk: string;
   places: string;
   parents: Parents;

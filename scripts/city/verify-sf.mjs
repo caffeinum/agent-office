@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 import {
-  BLOCK_M, CHUNK, SURFACE, assertGzip, chunkKey, chunkOf, decodeChunk, decodeLandmarks, decodeLandmask, lonLatToBlock, validateManifest,
+  BLOCK_M, CHUNK, SURFACE, assertGzip, chunkKey, chunkOf, decodeChunk, decodeLandmarks, decodeLandmask, decodeStreet, isRoadSurface, lonLatToBlock, validateManifest,
+  STREET_LINE, STREET_POINT, STREET_Q, TRACK_FLAG,
 } from "../../public/shared/city.js";
 import { percentile, skirtHeights } from "./lib/mask.mjs";
 import { areaSources } from "./fetch-sf.mjs";
@@ -40,6 +41,7 @@ export function loadCity(dir) {
   };
   const landmask = decodeLandmask(readGz("landmask"), manifest.chunks.grid);
   const landmarks = decodeLandmarks(readGz("landmarks"), manifest.chunks.grid);
+  const street = decodeStreet(readGz("street"), manifest.chunks.grid);
   /** Column at global block (x, z): listed chunk data, or open water for a water chunk. Unbuilt land throws. */
   const column = (x, z) => {
     const [cx, cz] = chunkOf(x, z);
@@ -56,7 +58,36 @@ export function loadCity(dir) {
     const p = lonLatToBlock(lon, lat, manifest.proj);
     return { x: Math.floor(p.x), z: Math.floor(p.z), ...column(Math.floor(p.x), Math.floor(p.z)) };
   };
-  return { manifest, chunks, water, landmask, landmarks, column, at };
+  return { manifest, chunks, water, landmask, landmarks, street, column, at };
+}
+
+/** street.bin features of `kind` (line or point) within r blocks of lat/lon. */
+function streetNear(city, lat, lon, r, { line = null, point = null, flag = 0 } = {}) {
+  const p = lonLatToBlock(lon, lat, city.manifest.proj);
+  const near = (x4, z4) => Math.hypot(x4 / STREET_Q - p.x, z4 / STREET_Q - p.z) <= r;
+  if (line !== null) return city.street.lines.filter((l) => l.kind === line && (l.flags & flag) === flag && Array.from({ length: l.pts.length / 2 }, (_, k) => near(l.pts[k * 2], l.pts[k * 2 + 1])).some(Boolean));
+  return city.street.points.filter((q) => q.kind === point && near(q.x4, q.z4));
+}
+
+/** Street-detail gates: the cable-car turnaround, Market St rails, 2nd & Howard crosswalks, kerbside furniture and cars. */
+function streetGates(city) {
+  const P = { powellMarket: [37.7849, -122.40776], secondHoward: [37.786774, -122.398258], ferry: [37.7955, -122.3945] };
+  const need = (what, list, min) => {
+    if (list.length < min) throw new Error(`${what}: ${list.length} < ${min}`);
+    return `${what} ${list.length}`;
+  };
+  return [
+    ["Powell & Market has cable-car track", () => need("cable lines within 30", streetNear(city, ...P.powellMarket, 30, { line: STREET_LINE.TRACK, flag: TRACK_FLAG.CABLE }), 1)],
+    ["Market St carries streetcar rails at Powell", () => need("tram lines within 30", streetNear(city, ...P.powellMarket, 30, { line: STREET_LINE.TRACK }).filter((l) => !(l.flags & TRACK_FLAG.CABLE)), 1)],
+    ["2nd & Howard has marked crosswalks and a signal", () => `${need("crosswalks within 12", streetNear(city, ...P.secondHoward, 12, { line: STREET_LINE.CROSSWALK }), 3)}, ${need("signals within 12", streetNear(city, ...P.secondHoward, 12, { point: STREET_POINT.SIGNAL }), 1)}`],
+    ["The Embarcadero at the Ferry Building has light-rail track and lamps", () => `${need("tracks within 40", streetNear(city, ...P.ferry, 40, { line: STREET_LINE.TRACK }), 1)}, ${need("lamps within 40", streetNear(city, ...P.ferry, 40, { point: STREET_POINT.LAMP }), 2)}`],
+    ["parked cars sit on carriageway columns", () => {
+      const cars = city.street.points.filter((q) => q.kind === STREET_POINT.CAR);
+      const off = cars.filter((q) => !isRoadSurface(city.column(Math.floor(q.x4 / STREET_Q), Math.floor(q.z4 / STREET_Q)).surface));
+      if (cars.length < 1000 || off.length) throw new Error(`${cars.length} cars, ${off.length} off the road`);
+      return `${cars.length} cars, all on the road`;
+    }],
+  ];
 }
 
 /** Building at a point, or the tallest building column within `r` blocks of it. */
@@ -141,9 +172,9 @@ function knownPoints(city) {
   water("McCovey Cove", P.mccoveyCove);
   water("the Bay east of the Embarcadero", P.bayEast);
   water("Palace of Fine Arts lagoon", P.palaceLagoon);
-  gate("Embarcadero in front of the Ferry Building is ROAD, ground ≥1", () => {
+  gate("Embarcadero in front of the Ferry Building is road, ground ≥1", () => {
     const c = city.at(P.embarcadero.lat, P.embarcadero.lon);
-    if (c.surface !== SURFACE.ROAD || c.ground < 1 || c.building) throw new Error(`surface ${c.surface} ground ${c.ground}`);
+    if (!isRoadSurface(c.surface) || c.ground < 1 || c.building) throw new Error(`surface ${c.surface} ground ${c.ground}`);
     return `ground ${c.ground}`;
   });
   gate("Fort Point is a land/water edge (both within 16 blocks)", () => {
@@ -164,7 +195,7 @@ function knownPoints(city) {
   });
   gate("Civic Center station slab is gone: ROAD/PLAZA/SIDEWALK, no building", () => {
     const c = city.at(P.civicCenterStation.lat, P.civicCenterStation.lon);
-    if (c.building || ![SURFACE.ROAD, SURFACE.PLAZA, SURFACE.SIDEWALK].includes(c.surface)) throw new Error(`surface ${c.surface} building ${c.building?.id ?? "-"}`);
+    if (c.building || ![SURFACE.ROAD, SURFACE.ROAD_MAJOR, SURFACE.PLAZA, SURFACE.SIDEWALK].includes(c.surface)) throw new Error(`surface ${c.surface} building ${c.building?.id ?? "-"}`);
     return `surface ${c.surface}`;
   });
   gate("4th St bridge over Mission Creek is a deck", () => {
@@ -248,6 +279,7 @@ export async function verifySf(dir = "public/city/sf") {
   run(`all ${city.manifest.chunks.list.length} manifest chunks exist and decode`, () => `${city.chunks.size} chunks, ${city.water.size} water`);
   for (const [name, fn] of knownPoints(city)) run(name, fn);
   run("Golden Gate Bridge south tower is in landmarks.bin", () => ggbTower(city));
+  for (const [name, fn] of streetGates(city)) run(name, fn);
   run("water/land gate (≤0.5% footprint centroids on water)", () => footprintGate(city));
   run("unbuilt-land skirts under 2 blocks at p90", () => skirtGate(city));
   if (failed.length) throw new Error(`verify-sf: ${failed.length} gate(s) failed: ${failed.join("; ")}`);

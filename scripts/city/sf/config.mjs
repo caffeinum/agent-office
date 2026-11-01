@@ -1,6 +1,6 @@
 // SF build constants (docs/city/spec.md §1-2, §5, extended by docs/city/spec-v2.md §1-3): the areas, their
 // fetch boxes, the land/water mask dataset, the terrain knob and the verify-sf known points.
-import { CITY_BUDGET, ROT_DEG, SF_GRID, SF_PROJ, TERRAIN_EXAGGERATION as TX_RANGE } from "../../../public/shared/city.js";
+import { CITY_BUDGET, MARIN_BOX, ROT_DEG, SF_GRID, SF_PROJ, TERRAIN_EXAGGERATION as TX_RANGE } from "../../../public/shared/city.js";
 
 export const CITY = "sf";
 export const NAME = "San Francisco";
@@ -57,7 +57,7 @@ export const HILL_SLOPE_RADIUS = 3;
 export const SPAWN = Object.freeze({ lon: -122.4, lat: 37.79213, dist: 900, azNorthUp: Math.PI * 0.18 });
 export const spawnAz = () => SPAWN.azNorthUp - (ROT_DEG * Math.PI) / 180;
 /** Marin Headlands (unbuilt landmask land only): north of the strait's midline, west of Alcatraz, terrain above minM. */
-export const MARIN = Object.freeze({ south: 37.8185, east: -122.44, minM: 3 });
+export const MARIN = Object.freeze({ ...MARIN_BOX, minM: 3 });
 /** SoMa / Showplace Square, lon/lat ring: large low untagged footprints here may get the warehouse brick share. */
 export const SOMA_WAREHOUSES = Object.freeze([
   [-122.4195, 37.7735], [-122.3945, 37.7935], [-122.3880, 37.7890], [-122.3870, 37.7650], [-122.4060, 37.7630], [-122.4140, 37.7670],
