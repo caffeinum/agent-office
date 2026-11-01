@@ -216,7 +216,7 @@ test("chunk: decode fails loudly on corrupt bytes", () => {
   const table = 16 + 8192 + 4096 + 8192 + 8192 + 8192;
   assert.throws(() => dec(mut((b) => { b[table + 18] = 1; })), /building\[0\] reserved/);
   assert.throws(() => dec(mut((b) => { b[table + 15] = 6; })), /cap/);
-  assert.throws(() => dec(mut((b) => { b[table + 16] = 6; })), /facade/);
+  assert.throws(() => dec(mut((b) => { b[table + 16] = 7; })), /facade/);
   assert.throws(() => dec(mut((b) => { b[table + 17] = 250; })), /accent/);
   assert.throws(() => dec(mut((b, dv) => dv.setUint16(table + 40, 3, true))), /expected/);
 });
@@ -232,7 +232,7 @@ test("chunk: validator rejects each semantic rule", () => {
   bad((c) => { c.buildings[0].palette = 200; }, /palette/);
   bad((c) => { c.buildings[0].accent = BUILDING_PALETTE.length; }, /accent/);
   bad((c) => { c.buildings[0].cap = 6; }, /cap/);
-  bad((c) => { c.buildings[0].facade = 6; }, /facade/);
+  bad((c) => { c.buildings[0].facade = 7; }, /facade/);
   bad((c) => { c.buildings[0].parent = 901; }, /parent 901 is neither/);
   bad((c) => { c.buildings[1].parent = 7; }, /parent is its own id/);
   bad((c) => { c.buildings[0].parent = 900; }, /no chains/);

@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
 import {
   BLOCK_M, CHUNK, CITY_VERSION, LANDMASK_CELL, SURFACE, blockToLonLat, chunkKey, encodeChunk, encodeLandmask,
-  lonLatToBlock, osmColourToHex, osmMaterial, paletteFor, validateManifest,
+  PALETTE_INDEX, lonLatToBlock, osmColourToHex, osmMaterial, paletteFor, validateManifest,
 } from "../../public/shared/city.js";
 import { readSources } from "./lib/http.mjs";
 import { assembleRings, pointInPolygon, polygonArea, ringCentroid, ringsToPolygons, scanPolygon, stampLine } from "./lib/geo.mjs";
@@ -29,7 +29,7 @@ import { renderTopdown } from "./lib/topdown.mjs";
 import { areaSources, coarseTerrainTiles, terrainTiles } from "./fetch-sf.mjs";
 import {
   AREAS, ATTRIBUTION, BUDGET, BUILD_DIR, CACHE_BUILDINGS, CITY, COARSE_TERRAIN_ZOOM, DROP_BUILDINGS, GRID, HILL_GROUND, HILL_SLOPE,
-  HILL_SLOPE_RADIUS, LANDMARK_BRIDGE_RE, MASK, NAME, OUT_DIR, PROJ, RAW_DIR, SPAWN, TERRAIN_EXAGGERATION, TERRAIN_ZOOM, spawnAz,
+  HILL_SLOPE_RADIUS, LANDMARK_BRIDGE_RE, MARIN, MASK, NAME, OUT_DIR, PROJ, RAW_DIR, SOMA_WAREHOUSES, SPAWN, TERRAIN_EXAGGERATION, TERRAIN_ZOOM, spawnAz,
 } from "./sf/config.mjs";
 
 const OVERRIDES_PATH = new URL("./sf/overrides.json", import.meta.url);
@@ -155,6 +155,32 @@ function landPolygons() {
   });
 }
 
+/**
+ * Morphological opening of the land mask (cross, radius 1): land strips at most 2 blocks wide (marina finger
+ * docks in the DataSF land polygons, slivers between slips) become water, so the shore reads as one clean edge
+ * instead of land/water stripes. Real piers come back as OSM pier polygons. Mutates water. → columns turned to water
+ */
+function openLand(water, w, h) {
+  const land = (x, z) => x >= 0 && z >= 0 && x < w && z < h && water[z * w + x] === 0;
+  const eroded = new Uint8Array(w * h);
+  for (let z = 0; z < h; z++) {
+    for (let x = 0; x < w; x++) {
+      if (land(x, z) && land(x + 1, z) && land(x - 1, z) && land(x, z + 1) && land(x, z - 1)) eroded[z * w + x] = 1;
+    }
+  }
+  const kept = (x, z) => x >= 0 && z >= 0 && x < w && z < h && eroded[z * w + x] === 1;
+  let removed = 0;
+  for (let z = 0; z < h; z++) {
+    for (let x = 0; x < w; x++) {
+      const i = z * w + x;
+      if (water[i] || kept(x, z) || kept(x + 1, z) || kept(x - 1, z) || kept(x, z + 1) || kept(x, z - 1)) continue;
+      water[i] = 1;
+      removed++;
+    }
+  }
+  return removed;
+}
+
 /** Ground in blocks from metres with the terrain knob. */
 const groundFromM = (m) => Math.max(1, Math.round((m * TERRAIN_EXAGGERATION) / BLOCK_M));
 
@@ -166,6 +192,7 @@ const groundFromM = (m) => Math.max(1, Math.round((m * TERRAIN_EXAGGERATION) / B
  */
 function stampTerrainAndMask(raster, land, inArea, report) {
   const water = buildWaterMask(raster, land);
+  report.thinLandRemoved = openLand(water, raster.w, raster.h);
   const elevation = createElevation(RAW_DIR, terrainTiles(), TERRAIN_ZOOM);
   const { x0, z0, w, h, ground, surface } = raster;
   let landCols = 0;
@@ -242,6 +269,11 @@ function stampLandcover(raster, report) {
     }
     if (e.type === "relation") relations++;
     const shape = osmShape(e);
+    const marinaDock = shape.line ? !t.name || t.floating === "yes" || /\bdock\b/i.test(t.name) : t.floating === "yes" && !t.name;
+    if (s === SURFACE.PIER && marinaDock) {
+      inc(skipped, "floating or unnamed pier line (marina dock)");
+      continue;
+    }
     if (shape.unclosable || shape.partialUnclosable) {
       unclosableRelations += e.type === "relation" ? 1 : 0;
       unclosable.push({ id: `${e.type[0]}${e.id}`, members: shape.partialUnclosable ?? "all" });
@@ -278,6 +310,28 @@ function stampLandcover(raster, report) {
   return rails;
 }
 
+const GANGWAY_DECK_Y = 1;
+const FOOT_CLASSES = new Set(["footway", "path", "pedestrian", "steps", "corridor", "cycleway"]);
+/** Some centreline column of the way is open water (ground 0) or pier deck: a gangway or a footbridge over water. */
+function touchesWater(raster, line) {
+  let wet = 0;
+  stampLine(line, 1, (x, z) => {
+    const i = rasterIndex(raster, x, z);
+    if (i >= 0 && (raster.ground[i] === 0 || raster.surface[i] === SURFACE.PIER)) wet++;
+  });
+  return wet > 0;
+}
+
+/** Walk height of a gangway: the highest ground under its centreline, at least the pier top (1). */
+function gangwayY(raster, line) {
+  let y = GANGWAY_DECK_Y;
+  stampLine(line, 1, (x, z) => {
+    const i = rasterIndex(raster, x, z);
+    if (i >= 0 && raster.ground[i] > y) y = raster.ground[i];
+  });
+  return y;
+}
+
 /** Deck candidates (spec-v2 §3.8): elevated DECK_CLASSES ways, and any `bridge` way under 300 m (rail too). */
 function deckKind(tags, lengthM, cls) {
   const bridge = isBridge(tags);
@@ -292,6 +346,7 @@ function stampRoads(raster, report) {
   const decks = [];
   const unmapped = {};
   const droppedLandmarkDecks = [];
+  const gangways = [];
   let dropped = 0;
   for (const e of readOsm("roads")) {
     const t = e.tags ?? {};
@@ -311,18 +366,24 @@ function stampRoads(raster, report) {
       droppedLandmarkDecks.push(e.id);
       continue;
     }
+    if (kind === "short" && FOOT_CLASSES.has(t.highway) && touchesWater(raster, line)) {
+      gangways.push({ id: e.id, y: gangwayY(raster, line) });
+      continue;
+    }
     if (kind) decks.push({ id: e.id, line, width: spec.roadway, layer: layerOf(t), kind, tags: t });
     else roads.push({ line, spec });
   }
+  // ferry gangways and dock walkways (foot bridges touching water or pier deck) draw no elevated deck: the pier
+  // polygons under them are the deck
   const onLand = (s) => (x, z) => {
     const i = rasterIndex(raster, x, z);
-    if (i >= 0 && ground[i] > 0) surface[i] = s;
+    if (i >= 0 && ground[i] > 0 && surface[i] !== SURFACE.PIER) surface[i] = s;
   };
   for (const r of roads) if (r.spec.sidewalk > 0) stampLine(r.line, r.spec.roadway + 2 * r.spec.sidewalk, onLand(SURFACE.SIDEWALK));
   roads.sort((a, b) => a.spec.roadway - b.spec.roadway);
   for (const r of roads) stampLine(r.line, r.spec.roadway, onLand(r.spec.surface));
-  report.roads = { kept: roads.length, dropped, unmappedClasses: unmapped, droppedLandmarkDecks };
-  return decks;
+  report.roads = { kept: roads.length, dropped, unmappedClasses: unmapped, droppedLandmarkDecks, gangways: gangways.length };
+  return { decks, gangwayDecks: Object.fromEntries(gangways.map((g) => [g.id, g.y])) };
 }
 
 function stampRails(raster, rails, decks, report) {
@@ -537,6 +598,20 @@ function loadBuildings(raster, report) {
   return { datasf, osm };
 }
 
+const WAREHOUSE_TAGS = new Set(["warehouse", "industrial", "storage", "manufacture", "factory"]);
+const WAREHOUSE_MIN_AREA = 150;
+/** An old industrial building: tagged as one, or a large low SoMa footprint (the only untagged brick). */
+function isOldWarehouse(b) {
+  if (WAREHOUSE_TAGS.has(b.tags?.building)) return true;
+  const h = b.top - b.base;
+  if (h < 3 || h > 12) return false;
+  const area = b.polygons.reduce((s, p) => s + polygonArea(p), 0);
+  if (area < WAREHOUSE_MIN_AREA) return false;
+  const [cx, cz] = centroidOf(b);
+  const { lon, lat } = blockToLonLat(cx, cz, PROJ);
+  return pointInPolygon(lon, lat, [SOMA_WAREHOUSES]);
+}
+
 /** Owner-resolve the merged buildings (taller wins), then write entries and columns through the raster API. */
 function stampBuildings(raster, merged, datasf, report) {
   const { ground, surface } = raster;
@@ -581,6 +656,7 @@ function stampBuildings(raster, merged, datasf, report) {
     const material = osmMaterial(b.tags?.["building:material"]);
     if (material) opts.material = material;
     if (b.structure) opts.structure = b.structure;
+    if (!colour && !material && isOldWarehouse(b)) opts.warehouse = true;
     b.palette = b.palette ?? paletteFor(b.top - b.base, b.id, opts);
     raster.addEntry({ id: b.id, base: b.base, top: b.top, palette: b.palette });
     refByEntry.set(raster.entryIndex(b.id), { roofRef: b.roofRef, base: b.base });
@@ -633,6 +709,53 @@ function stampBuildings(raster, merged, datasf, report) {
   } };
 }
 
+const TREE_NATURAL = new Set([SURFACE.GRASS, SURFACE.PARK, SURFACE.HILL, SURFACE.FOREST]);
+const TREE_STREET = new Set([SURFACE.SIDEWALK, SURFACE.PLAZA]);
+const STREET_TREE_SPACING = 3;
+
+/**
+ * OSM natural=tree nodes. On natural ground (park, grass, hill) a tree turns a plus-shaped 5 columns into FOREST,
+ * which the mesher draws as leaf canopy. → street-tree candidates [[x, z]] on sidewalks and plazas.
+ */
+function stampTreeCanopy(raster, report) {
+  const street = [];
+  let canopy = 0;
+  for (const e of readOsm("trees")) {
+    if (e.type !== "node") continue;
+    const [fx, fz] = toBlock(e.lon, e.lat);
+    const x = Math.floor(fx), z = Math.floor(fz);
+    const i = rasterIndex(raster, x, z);
+    if (i < 0 || raster.ground[i] === 0) continue;
+    const s = raster.surface[i];
+    if (TREE_STREET.has(s)) { street.push([x, z]); continue; }
+    if (!TREE_NATURAL.has(s)) continue;
+    for (const [dx, dz] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const j = rasterIndex(raster, x + dx, z + dz);
+      if (j >= 0 && raster.ground[j] > 0 && TREE_NATURAL.has(raster.surface[j])) { raster.surface[j] = SURFACE.FOREST; canopy++; }
+    }
+  }
+  report.trees = { canopyColumns: canopy, streetCandidates: street.length };
+  return street;
+}
+
+/** Street trees as props (trunk + 2-block leaf canopy), at most one per STREET_TREE_SPACING² cell, on free columns. */
+function addStreetTrees(raster, candidates, report) {
+  const used = new Set();
+  let n = 0;
+  for (const [x, z] of candidates) {
+    const cell = `${Math.floor(x / STREET_TREE_SPACING)},${Math.floor(z / STREET_TREE_SPACING)}`;
+    if (used.has(cell)) continue;
+    const i = rasterIndex(raster, x, z);
+    if (i < 0 || raster.owner[i] >= 0 || raster.deck[i] !== 0 || raster.ground[i] === 0 || !TREE_STREET.has(raster.surface[i])) continue;
+    used.add(cell);
+    const g = raster.ground[i];
+    raster.addProp(x, z, { y0: g, y1: g + 1, color: PALETTE_INDEX.trunk, flags: 0 });
+    raster.addProp(x, z, { y0: g + 1, y1: g + 3, color: PALETTE_INDEX.leaf, flags: 0 });
+    n++;
+  }
+  report.trees.street = n;
+}
+
 function stampShallow(raster) {
   const { w, h, ground, surface } = raster;
   let n = 0;
@@ -646,7 +769,7 @@ function stampShallow(raster) {
         if (zz < 0 || zz >= h) continue;
         for (let dx = -SHALLOW_RADIUS; dx <= SHALLOW_RADIUS; dx++) {
           const xx = x + dx;
-          if (xx >= 0 && xx < w && ground[zz * w + xx] > 0) {
+          if (xx >= 0 && xx < w && ground[zz * w + xx] > 0 && surface[zz * w + xx] !== SURFACE.PIER) {
             near = true;
             break;
           }
@@ -737,15 +860,24 @@ function manifestSources(sources) {
       : { id: s.id, url: s.url, license: s.license, fetchedAt: s.fetchedAt, sha256: s.sha256 }));
 }
 
-/** Coarse + fine elevation for landmask cells: z15 where loaded, else z12. → (x, z) → ground blocks */
-function coarseHeightAt() {
+/** Coarse + fine elevation for landmask cells: z15 where loaded, else z12. → {heightAt(x, z) → ground blocks, marinLand(x, z)} */
+function coarseTerrain() {
   const fine = createElevation(RAW_DIR, terrainTiles(), TERRAIN_ZOOM);
   const coarse = createElevation(RAW_DIR, coarseTerrainTiles(), COARSE_TERRAIN_ZOOM);
-  return (x, z) => {
+  const metres = (x, z) => {
     const { lon, lat } = blockToLonLat(x, z, PROJ);
     const e = fine.covers(lon, lat) ? fine.sample(lon, lat) : coarse.sample(lon, lat);
     if (!Number.isFinite(e)) throw new Error(`landmask: non-finite elevation at ${lon},${lat}`);
-    return groundFromM(e);
+    return e;
+  };
+  return {
+    heightAt: (x, z) => groundFromM(metres(x, z)),
+    /** The Marin Headlands across the Golden Gate: no DataSF land polygon, so land is terrain above MARIN.minM. */
+    marinLand: (x, z) => {
+      const { lon, lat } = blockToLonLat(x, z, PROJ);
+      if (!(lat > MARIN.south && lon < MARIN.east) || !(fine.covers(lon, lat) || coarse.covers(lon, lat))) return false;
+      return metres(x, z) > MARIN.minM;
+    },
   };
 }
 
@@ -772,9 +904,12 @@ export async function buildSf() {
   const rails = stampLandcover(raster, report);
   lap("landcover");
   const terrainGround = raster.ground.slice();
-  const decks = stampRoads(raster, report);
+  const { decks, gangwayDecks } = stampRoads(raster, report);
   stampRails(raster, rails, decks, report);
   const deckPlan = planDecks(raster, water, decks, overrides, report);
+  // walk (W5) needs a deck top for every bridge way: a gangway is walked on the pier / ground under it
+  Object.assign(report.decks, gangwayDecks);
+  const streetTrees = stampTreeCanopy(raster, report);
   lap("roads, rail, decks");
   const { datasf, osm } = loadBuildings(raster, report);
   const outlines = osm.filter((o) => !o.isPart).map((o) => ({ key: o.key, polygons: o.polygons, heightM: o.heightM, explicitHeightM: o.tags.height !== undefined ? parseHeightM(o.tags.height) : null, tags: o.tags, structure: o.structure }));
@@ -800,6 +935,7 @@ export async function buildSf() {
   report.shallowColumns = stampShallow(raster);
   applyLandmarks(raster, ctx);
   calibrateSkyline(raster, ctx);
+  addStreetTrees(raster, streetTrees, report);
   lap("hooks");
   unresolvedTowers(raster, placed, report);
 
@@ -811,7 +947,8 @@ export async function buildSf() {
   const waterList = waterChunks.filter(([cx, cz]) => inArea.has(`${cx},${cz}`));
   lap(`chunks (${chunks.length} listed, ${waterList.length} water)`);
 
-  const mask = buildLandmask({ grid: GRID, chunk: CHUNK, cell: LANDMASK_CELL, landPolygons: land, heightAt: coarseHeightAt() });
+  const terrain = coarseTerrain();
+  const mask = buildLandmask({ grid: GRID, chunk: CHUNK, cell: LANDMASK_CELL, landPolygons: land, heightAt: terrain.heightAt, extraLand: terrain.marinLand });
   const landmaskGz = gz(encodeLandmask(mask, GRID));
   if (landmaskGz.length > BUDGET.landmaskBytes) throw new Error(`landmask.bin ${landmaskGz.length} bytes gz > ${BUDGET.landmaskBytes}`);
   lap(`landmask ${mask.cellsX}×${mask.cellsZ} (${landmaskGz.length} B gz)`);

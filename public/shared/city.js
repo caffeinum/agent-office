@@ -143,9 +143,9 @@ export const SURFACE_COLORS = Object.freeze({
   [SURFACE.WATER]: "#3d7fb3",
   [SURFACE.SHALLOW]: "#5aa0cf",
   [SURFACE.SAND]: "#e9d8a6",
-  [SURFACE.GRASS]: "#7cbf5a",
-  [SURFACE.PARK]: "#6aad4d",
-  [SURFACE.FOREST]: "#4f8a3c",
+  [SURFACE.GRASS]: "#5b8a3c",
+  [SURFACE.PARK]: "#56843d",
+  [SURFACE.FOREST]: "#4a7236",
   [SURFACE.ROAD]: "#4a4d52",
   [SURFACE.SIDEWALK]: "#c9c4ba",
   [SURFACE.RAIL]: "#6b6158",
@@ -168,9 +168,9 @@ export const TERRAIN_SIDE_COLORS = Object.freeze({
   [SURFACE.WATER]: "#2f6a99",
   [SURFACE.SHALLOW]: "#2f6a99",
   [SURFACE.SAND]: "#d4c08c",
-  [SURFACE.GRASS]: DIRT_SIDE,
-  [SURFACE.PARK]: DIRT_SIDE,
-  [SURFACE.FOREST]: DIRT_SIDE,
+  [SURFACE.GRASS]: "#55783a",
+  [SURFACE.PARK]: "#4f7136",
+  [SURFACE.FOREST]: "#3f5f2e",
   [SURFACE.ROAD]: "#7d7870",
   [SURFACE.SIDEWALK]: "#a9a398",
   [SURFACE.RAIL]: "#5a5149",
@@ -185,7 +185,7 @@ export const TERRAIN_SIDE_COLORS = Object.freeze({
 });
 
 /** Land outside the listed chunks, drawn from landmask.bin (spec-v2 §2): muted paper tone, and its skirt sides. */
-export const UNBUILT_COLORS = Object.freeze({ top: "#e4dccb", side: "#cfc6b2" });
+export const UNBUILT_COLORS = Object.freeze({ top: "#e4dccb", side: "#dcd3c1" });
 
 /** Elevated road decks: asphalt slab top, concrete edges and pillars, a shaded underside. */
 export const DECK_COLORS = Object.freeze({
@@ -210,13 +210,14 @@ const PALETTE = [
   ["precast-1", "#e6e1d6"], ["precast-2", "#d9d4c9"], ["precast-3", "#cfc8bb"], ["precast-4", "#bfb8ab"],
   ["glass", "#8ea3b3"], ["glass-dark", "#6f8799"],
   // landmarks and structures (21–38)
-  ["salesforce", "#dedcd4"], ["salesforce-crown", "#f4f2ea"], ["transamerica", "#f2efe8"], ["fremont-181", "#c8d0d6"],
-  ["california-555", "#4e3530"], ["california-345", "#c9b9ad"], ["millennium", "#8fa4b4"], ["rincon", "#9fb3c2"],
+  ["salesforce", "#dedcd4"], ["salesforce-crown", "#fffdf6"], ["transamerica", "#f2efe8"], ["fremont-181", "#c8d0d6"],
+  ["california-555", "#5a3f38"], ["california-345", "#c9b9ad"], ["millennium", "#8fa4b4"], ["rincon", "#9fb3c2"],
   ["market-575", "#6b5e55"], ["embarcadero", "#ece8de"], ["ferry", "#f4efe2"], ["coit", "#e0e0e0"], ["seats", "#2e5e4e"],
-  ["chase", "#dcdcd8"], ["bay-bridge", "#a7adb3"], ["golden-gate", "#c0362c"], ["palace", "#d8c3a5"], ["transit-white", "#f2f2ef"],
+  ["chase", "#dcdcd8"], ["bay-bridge", "#a7adb3"], ["golden-gate", "#a8301f"], ["palace", "#d8c3a5"], ["transit-white", "#f2f2ef"],
   // props (39–41); pier sheds use concrete-warm
-
   ["light", "#fff4d6"], ["metal", "#8a8f96"], ["flag", "#b8312f"],
+  // trees and ballpark props (42–46)
+  ["leaf", "#3f6a30"], ["trunk", "#5e4632"], ["steel-dark", "#3b3f45"], ["coke", "#c4232c"], ["glove", "#8b5a2b"],
 ];
 export const BUILDING_PALETTE = Object.freeze(PALETTE.map(([, hex]) => hex));
 /** name → palette index. */
@@ -224,16 +225,27 @@ export const PALETTE_INDEX = Object.freeze(Object.fromEntries(PALETTE.map(([name
 
 const range = (a, b) => Object.freeze(Array.from({ length: b - a + 1 }, (_, i) => a + i));
 
-/** Height groups by building height in blocks (top − base). Above 30: stone/precast with ~25% blue-grey glass. */
+const named = (...names) => Object.freeze(names.map((n) => {
+  const i = PALETTE.findIndex(([name]) => name === n);
+  if (i < 0) throw new Error(`palette group: unknown colour ${n}`);
+  return i;
+}));
+
+/**
+ * Height groups by building height in blocks (top − base). SF reads white, cream and pastel: low buildings are
+ * pastel or white stucco, midrise is stucco / stone (brick only from tags or the old-warehouse share). Above 30:
+ * stone/precast with ~25% blue-grey glass.
+ */
 export const PALETTE_GROUPS = Object.freeze({
-  pastel: Object.freeze({ minH: 0, maxH: 4, indices: range(0, 5) }),
-  midrise: Object.freeze({ minH: 5, maxH: 12, indices: range(6, 10) }),
+  pastel: Object.freeze({ minH: 0, maxH: 4, indices: named("pastel-pink", "pastel-blue", "pastel-yellow", "pastel-green", "pastel-lilac", "pastel-cream", "stucco", "stone-white") }),
+  midrise: Object.freeze({ minH: 5, maxH: 12, indices: named("stucco", "stucco-tan", "concrete-warm", "stone-white", "pastel-cream", "stone-light") }),
+  warehouse: Object.freeze({ minH: 3, maxH: 12, indices: named("brick", "brick-dark", "stucco-tan", "concrete-warm", "concrete", "stucco") }),
   stone: Object.freeze({ minH: 13, maxH: 30, indices: range(11, 14) }),
   tall: Object.freeze({ minH: 31, maxH: Infinity, indices: range(15, 18) }),
   glass: Object.freeze({ minH: 31, maxH: Infinity, indices: range(19, 20) }),
 });
 /** Palette indices a building colour/material may map to (props-only colours excluded). */
-const PROP_COLOURS = new Set(["light", "metal", "flag"]);
+const PROP_COLOURS = new Set(["light", "metal", "flag", "leaf", "trunk", "steel-dark", "coke", "glove"]);
 const BUILDING_COLOUR_INDICES = Object.freeze(PALETTE.flatMap(([name], i) => (PROP_COLOURS.has(name) ? [] : [i])));
 
 export const ROOF_DARKEN = 0.12;
@@ -241,7 +253,7 @@ export const ROOF_DARKEN = 0.12;
 /** Entry `cap` (top face of the column only). */
 export const CAP = Object.freeze({ FLAT: 0, CROWN: 1, SPIRE: 2, DOME: 3, GREEN: 4, SEATS: 5 });
 /** Entry `facade`. */
-export const FACADE = Object.freeze({ WINDOWS: 0, BLANK: 1, RIBBED: 2, PARKING: 3, ARCADE: 4, CURTAIN: 5 });
+export const FACADE = Object.freeze({ WINDOWS: 0, BLANK: 1, RIBBED: 2, PARKING: 3, ARCADE: 4, CURTAIN: 5, BRACED: 6 });
 /** `accentFrom` value meaning "no accent band". */
 export const ACCENT_NONE = 0x7fff;
 
@@ -316,12 +328,14 @@ export function hashId(id) {
   return h;
 }
 
-const PALETTE_OPTIONS = new Set(["colour", "material", "structure"]);
+const PALETTE_OPTIONS = new Set(["colour", "material", "structure", "warehouse"]);
 
 /**
  * Palette index for a non-landmark building of `heightBlocks` (top − base) with id `id` (spec-v2 §3.9).
  * opts.colour ("#rrggbb", from osmColourToHex) wins, then opts.material (an osmMaterial key), then the height
  * group. opts.structure (a STRUCTURE_KINDS value) keeps a ≤ 4-block structure out of the pastel group.
+ * opts.warehouse (true for an old industrial / warehouse building ≤ 12 blocks) uses the warehouse group, the only
+ * untagged source of brick (one in three).
  */
 export function paletteFor(heightBlocks, id, opts = {}) {
   if (!Number.isInteger(heightBlocks) || heightBlocks < 1) throw new Error(`paletteFor: height must be an integer ≥ 1, got ${heightBlocks}`);
@@ -334,8 +348,10 @@ export function paletteFor(heightBlocks, id, opts = {}) {
     if (!(opts.material in MATERIAL_COLORS)) throw new Error(`paletteFor: unknown material "${opts.material}" (use osmMaterial)`);
     return nearestPaletteIndex(MATERIAL_COLORS[opts.material]);
   }
+  if (opts.warehouse !== undefined && typeof opts.warehouse !== "boolean") throw new Error("paletteFor: warehouse must be a boolean");
   let group;
-  if (heightBlocks > PALETTE_GROUPS.stone.maxH) group = h % 4 === 0 ? PALETTE_GROUPS.glass : PALETTE_GROUPS.tall;
+  if (opts.warehouse && heightBlocks <= PALETTE_GROUPS.warehouse.maxH) group = PALETTE_GROUPS.warehouse;
+  else if (heightBlocks > PALETTE_GROUPS.stone.maxH) group = h % 4 === 0 ? PALETTE_GROUPS.glass : PALETTE_GROUPS.tall;
   else if (heightBlocks > PALETTE_GROUPS.midrise.maxH) group = PALETTE_GROUPS.stone;
   else if (heightBlocks > PALETTE_GROUPS.pastel.maxH || opts.structure !== undefined) group = PALETTE_GROUPS.midrise;
   else group = PALETTE_GROUPS.pastel;
@@ -350,7 +366,7 @@ export const HEADER_BYTES = 16;
 export const BUILDING_ENTRY_BYTES = 20;
 export const PROP_BYTES = 8;
 export const MAX_CAP = 5;
-export const MAX_FACADE = 5;
+export const MAX_FACADE = 6;
 const LAYERS = [
   ["ground", Int16Array],
   ["surface", Uint8Array],

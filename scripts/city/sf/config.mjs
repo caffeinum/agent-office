@@ -56,6 +56,12 @@ export const HILL_SLOPE_RADIUS = 3;
  */
 export const SPAWN = Object.freeze({ lon: -122.4, lat: 37.79213, dist: 900, azNorthUp: Math.PI * 0.18 });
 export const spawnAz = () => SPAWN.azNorthUp - (ROT_DEG * Math.PI) / 180;
+/** Marin Headlands (unbuilt landmask land only): north of the strait's midline, west of Alcatraz, terrain above minM. */
+export const MARIN = Object.freeze({ south: 37.8185, east: -122.44, minM: 3 });
+/** SoMa / Showplace Square, lon/lat ring: large low untagged footprints here may get the warehouse brick share. */
+export const SOMA_WAREHOUSES = Object.freeze([
+  [-122.4195, 37.7735], [-122.3945, 37.7935], [-122.3880, 37.7890], [-122.3870, 37.7650], [-122.4060, 37.7630], [-122.4140, 37.7670],
+]);
 /** Exists but stays off (spec §1: vertical is linear 1:1). */
 export const TOWER_KNEE = null;
 
@@ -106,8 +112,9 @@ export const BUDGET = Object.freeze({
   manifestBytes: 100 * 1024, companiesBytes: 64 * 1024, landmaskBytes: 256 * 1024,
 });
 
-/** OSM ways that are never buildings or chunk decks: the Bay Bridge towers and decks come from landmarks.bin (W3). */
-export const DROP_BUILDINGS = Object.freeze(["o:w432712476", "o:w432712477"]);
+/** OSM ways that are never buildings or chunk decks: the Bay Bridge towers and decks come from landmarks.bin (W3);
+ * the Oracle Park stadium relation (r7330762) is drawn by the lm:oracle-park ballpark recipe. */
+export const DROP_BUILDINGS = Object.freeze(["o:w432712476", "o:w432712477", "o:r7330762"]);
 /** Deck ways whose name/bridge:name matches are drawn by the landmark mesh, never as chunk decks. */
 export const LANDMARK_BRIDGE_RE = /Bay Bridge|Golden Gate Bridge/i;
 

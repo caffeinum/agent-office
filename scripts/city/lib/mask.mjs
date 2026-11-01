@@ -20,9 +20,10 @@ export function buildWaterMask(raster, landPolygons) {
 /**
  * landmask.bin cells (spec-v2 §2) over the whole reserved grid: 0 = sea, else coarse ground (blocks) + 1, clamped
  * to 255. A cell is land when its centre lies in the land polygons (global block coords); heightAt(x, z) gives the
- * ground in blocks at a block-space point (the cell centre). → {cellsX, cellsZ, cells}
+ * ground in blocks at a block-space point (the cell centre). extraLand(x, z) (optional) marks more land cells by
+ * their centre (land outside the polygon set, e.g. the Marin Headlands from the terrain model). → {cellsX, cellsZ, cells}
  */
-export function buildLandmask({ grid, chunk, cell, landPolygons, heightAt }) {
+export function buildLandmask({ grid, chunk, cell, landPolygons, heightAt, extraLand = null }) {
   if (!Array.isArray(landPolygons) || landPolygons.length === 0) throw new Error("buildLandmask: no land polygons");
   const cellsX = (grid[0] * chunk) / cell, cellsZ = (grid[1] * chunk) / cell;
   if (!Number.isInteger(cellsX) || !Number.isInteger(cellsZ)) throw new Error(`buildLandmask: grid ${grid} × ${chunk} is not a multiple of cell ${cell}`);
@@ -32,6 +33,11 @@ export function buildLandmask({ grid, chunk, cell, landPolygons, heightAt }) {
     scanPolygon(scaled, (cx, cz) => {
       if (cx >= 0 && cz >= 0 && cx < cellsX && cz < cellsZ) land[cz * cellsX + cx] = 1;
     });
+  }
+  if (extraLand) {
+    for (let cz = 0; cz < cellsZ; cz++) {
+      for (let cx = 0; cx < cellsX; cx++) if (!land[cz * cellsX + cx] && extraLand((cx + 0.5) * cell, (cz + 0.5) * cell)) land[cz * cellsX + cx] = 1;
+    }
   }
   const cells = new Uint8Array(cellsX * cellsZ);
   for (let cz = 0; cz < cellsZ; cz++) {

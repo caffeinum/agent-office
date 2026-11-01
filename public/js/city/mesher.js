@@ -44,6 +44,9 @@ const C_DECK_UNDER = 67;
 const C_UNBUILT_TOP = 68;
 const C_UNBUILT_SIDE = 69;
 const C_GREEN_ROOF = 70;
+const C_LEAF = 71;
+const C_LEAF_LIGHT = 72;
+const C_LEAF_SIDE = 73;
 const C_PAL = 128;
 const PAL_STRIDE = 64;
 /** Palette colour variants: wall, wall pattern (ribs, openings), roof, light (crown), roof pattern (seat rows). */
@@ -52,10 +55,12 @@ const VARIANT_FACTOR = [1, 0.78, 1 - ROOF_DARKEN, 1.14, 0.8];
 const N_COLORS = C_PAL + PAL_STRIDE * VARIANT_FACTOR.length;
 const GREEN_ROOF_HEX = SURFACE_COLORS[SURFACE.PARK];
 const METAL = PALETTE_INDEX.metal;
+const LEAF_HEX = BUILDING_PALETTE[PALETTE_INDEX.leaf];
 
 if (BUILDING_PALETTE.length > PAL_STRIDE) throw new Error(`mesher: palette has ${BUILDING_PALETTE.length} colours, the colour table holds ${PAL_STRIDE}`);
 if (Math.max(...Object.values(SURFACE)) >= C_SIDE) throw new Error("mesher: surface ids overflow the colour table");
 if (METAL === undefined) throw new Error("mesher: palette has no 'metal' colour for spire caps");
+if (LEAF_HEX === undefined) throw new Error("mesher: palette has no 'leaf' colour for tree canopy");
 
 /** Colour id of palette index p in variant v. */
 const pal = (v, p) => C_PAL + v * PAL_STRIDE + p;
@@ -86,6 +91,9 @@ defineColor(C_DECK_UNDER, DECK_COLORS.under);
 defineColor(C_UNBUILT_TOP, UNBUILT_COLORS.top);
 defineColor(C_UNBUILT_SIDE, UNBUILT_COLORS.side);
 defineColor(C_GREEN_ROOF, GREEN_ROOF_HEX);
+defineColor(C_LEAF, LEAF_HEX);
+defineColor(C_LEAF_LIGHT, LEAF_HEX, 1.16);
+defineColor(C_LEAF_SIDE, LEAF_HEX, 0.82);
 
 /** Top-vertex brightness by occluder count (0–3), Minecraft-style. */
 const AO_LEVELS = [1, 0.8, 0.66, 0.54];
@@ -96,9 +104,9 @@ const SIDE_CONTACT = 0.72;
 
 /** Natural ground darkens on every HILL_CONTOUR-th terrace, so slopes read as contour bands. */
 export const HILL_CONTOUR = 10;
-const CONTOUR_SHADE = 0.88;
+const CONTOUR_SHADE = 0.94;
 /** Hypsometric tint: ground at y = 0 is HILL_LOW bright, ground at HILL_SPAN and above is HILL_HIGH. */
-const HILL_LOW = 0.94, HILL_HIGH = 1.12, HILL_SPAN = 90;
+const HILL_LOW = 0.94, HILL_HIGH = 1.08, HILL_SPAN = 90;
 const NATURAL = new Set([SURFACE.SAND, SURFACE.GRASS, SURFACE.PARK, SURFACE.FOREST, SURFACE.HILL, SURFACE.DIRT, C_UNBUILT_TOP]);
 
 /** Pure. Brightness factor of a terrain top face with colour id `colorId` at height y (1 for non-terrain). */
@@ -106,7 +114,45 @@ export function hillShade(colorId, y) {
   if (colorId >= C_SIDE && colorId !== C_UNBUILT_TOP) return 1;
   const t = Math.min(1, Math.max(0, y / HILL_SPAN));
   const f = HILL_LOW + (HILL_HIGH - HILL_LOW) * t;
-  return NATURAL.has(colorId) && y > 0 && y % HILL_CONTOUR === 0 ? f * CONTOUR_SHADE : f;
+  return NATURAL.has(colorId) && colorId !== C_UNBUILT_TOP && y > 0 && y % HILL_CONTOUR === 0 ? f * CONTOUR_SHADE : f;
+}
+
+// ---------- slope hillshade ----------
+
+/** Horizontal direction toward the sun (stage.js SUN_DIR −0.55, 1, 0.75), normalised. */
+const SUN_H = (() => { const l = Math.hypot(-0.55, 0.75); return [-0.55 / l, 0.75 / l]; })();
+const SLOPE_GAIN = 0.9;
+const SLOPE_MIN = 0.7, SLOPE_STEP = 0.03, SLOPE_LEVELS = 16;
+/** Level whose shade is exactly 1 (flat ground). */
+export const SLOPE_FLAT = Math.round((1 - SLOPE_MIN) / SLOPE_STEP);
+
+/** Pure. Quantised hillshade level (0..15) for a terrain gradient (rise per block along +x, +z). */
+export function slopeLevel(gx, gz) {
+  const lit = 1 - SLOPE_GAIN * (gx * SUN_H[0] + gz * SUN_H[1]);
+  const lv = Math.round((lit - SLOPE_MIN) / SLOPE_STEP);
+  return Math.max(0, Math.min(SLOPE_LEVELS - 1, lv));
+}
+/** Brightness of slope level lv. */
+export const slopeShade = (lv) => (lv === SLOPE_FLAT ? 1 : SLOPE_MIN + lv * SLOPE_STEP);
+
+// ---------- tree canopy ----------
+
+/** Canopy clumps: CANOPY_CELL² columns share one crown height (2–4 blocks) and leaf shade. */
+export const CANOPY_CELL = 3;
+function canopyHash(x, z) {
+  let h = Math.imul(Math.floor(x / CANOPY_CELL), 0x27d4eb2d) ^ Math.imul(Math.floor(z / CANOPY_CELL), 0x165667b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  return (h ^ (h >>> 13)) >>> 0;
+}
+/** Pure. Leaf canopy height (blocks above ground) of a FOREST column at world (x, z): 2..4. */
+export function canopyHeight(x, z) {
+  return 2 + (canopyHash(x, z) % 3);
+}
+const canopyTopColor = (x, z) => ((canopyHash(x, z) >>> 4) % 3 === 0 ? C_LEAF_LIGHT : C_LEAF);
+/** Canopy height of chunk column k, 0 when it carries none (not forest, a building or a deck). */
+function canopyAt(chunk, k) {
+  if (chunk.bldg[k] || chunk.deck[k] !== 0 || chunk.surface[k] !== SURFACE.FOREST || chunk.ground[k] <= 0) return 0;
+  return canopyHeight(chunk.cx * CHUNK + (k % CHUNK), chunk.cz * CHUNK + Math.floor(k / CHUNK));
 }
 
 // ---------- geometry builder ----------
@@ -175,7 +221,7 @@ const MAX_SEGS = 4;
 const K_TERRAIN = 0;
 const K_ATLAS = 1 + FACADE.WINDOWS;
 const kindOf = (facade) => 1 + facade;
-const glows = (kind) => kind === K_ATLAS || kind === kindOf(FACADE.CURTAIN);
+const glows = (kind) => kind === K_ATLAS || kind === kindOf(FACADE.CURTAIN) || kind === kindOf(FACADE.BRACED);
 
 function createGrid(w) {
   const p = w + 2;
@@ -267,8 +313,22 @@ function setColumn(grid, c, chunk, k) {
     setCell(grid, c, g, top, B, C_SIDE + s, capColorId(B, top), chunk.deck[k]);
   } else {
     setCell(grid, c, g, g, null, C_SIDE + s, s, chunk.deck[k]);
+    const h = canopyAt(chunk, k);
+    if (h > 0) addCanopy(grid, c, g, g + h, canopyTopColor(chunk.cx * CHUNK + (k % CHUNK), chunk.cz * CHUNK + Math.floor(k / CHUNK)));
   }
   grid.gMin[c] = g;
+}
+
+/** Leaf canopy [lo, hi) on top of terrain cell c (no building, no deck): a leaf segment and a leaf top face. */
+function addCanopy(grid, c, lo, hi, topC) {
+  const n = grid.segN[c];
+  if (n >= MAX_SEGS) throw new Error("mesher: canopy cell has no free segment");
+  const o = c * MAX_SEGS + n;
+  grid.segLo[o] = lo; grid.segHi[o] = hi; grid.segC[o] = C_LEAF_SIDE; grid.segKind[o] = K_TERRAIN;
+  grid.segAccFrom[o] = NO_ACCENT; grid.segAccC[o] = 0;
+  grid.segN[c] = n + 1;
+  grid.u1[c] = hi;
+  grid.topC[c] = topC;
 }
 
 /** Border cell c holds unbuilt land of coarse height h (0 = sea: left absent). */
@@ -325,8 +385,31 @@ const UP = [0, 1, 0];
 const DOWN = [0, -1, 0];
 const FLAT = [1, 1, 1, 1];
 
+/** Terrain-like top colours that take the slope hillshade: surfaces, unbuilt land and leaf canopy. */
+const sloped = (colorId) => colorId < C_SIDE || colorId === C_UNBUILT_TOP || colorId === C_LEAF || colorId === C_LEAF_LIGHT;
+
+/** Hillshade level of cell (i, j) from the ground (gMin) r cells away on each axis; missing cells are skipped. */
+function cellSlope(grid, i, j, r, scale) {
+  const { w } = grid;
+  const g = (a, b) => {
+    const ci = Math.max(-1, Math.min(w, a)), cj = Math.max(-1, Math.min(w, b));
+    const c = cellAt(grid, ci, cj);
+    return grid.segN[c] ? grid.gMin[c] : null;
+  };
+  const here = g(i, j);
+  const axis = (dx, dz) => {
+    const a = g(i - dx * r, j - dz * r), b = g(i + dx * r, j + dz * r);
+    if (a !== null && b !== null) return (b - a) / (2 * r * scale);
+    if (b !== null) return (b - here) / (r * scale);
+    if (a !== null) return (here - a) / (r * scale);
+    return 0;
+  };
+  return slopeLevel(axis(1, 0), axis(0, 1));
+}
+
 function meshTops(grid, scale, { ao, uvs }, opaque) {
   const { w } = grid;
+  const slopeR = scale === 1 ? 3 : 1;
   const n = w * w;
   const layers = [
     { has: new Uint8Array(n), ky: new Int32Array(n), kc: new Int32Array(n), down: false },
@@ -340,26 +423,27 @@ function meshTops(grid, scale, { ao, uvs }, opaque) {
       const a = j * w + i;
       const y = grid.u1[c];
       layers[0].has[a] = 1; layers[0].ky[a] = y;
-      layers[0].kc[a] = (grid.topC[c] << 8) | (ao ? topAo(grid, i, j, y) : 0);
+      const lv = sloped(grid.topC[c]) ? cellSlope(grid, i, j, slopeR, scale) : SLOPE_FLAT;
+      layers[0].kc[a] = (grid.topC[c] << 12) | (lv << 8) | (ao ? topAo(grid, i, j, y) : 0);
       if (grid.u2hi[c]) {
         const ys = grid.u2hi[c];
         layers[1].has[a] = 1; layers[1].ky[a] = ys;
-        layers[1].kc[a] = (C_DECK_TOP << 8) | (ao ? topAo(grid, i, j, ys) : 0);
-        layers[2].has[a] = 1; layers[2].ky[a] = grid.u2lo[c]; layers[2].kc[a] = C_DECK_UNDER << 8;
+        layers[1].kc[a] = (C_DECK_TOP << 12) | (SLOPE_FLAT << 8) | (ao ? topAo(grid, i, j, ys) : 0);
+        layers[2].has[a] = 1; layers[2].ky[a] = grid.u2lo[c]; layers[2].kc[a] = (C_DECK_UNDER << 12) | (SLOPE_FLAT << 8);
       }
     }
   }
   for (const L of layers) {
     greedy(w, L.has, L.ky, L.kc, (i0, j0, i1, j1, y, key) => {
       const x0 = i0 * scale, x1 = i1 * scale, z0 = j0 * scale, z1 = j1 * scale;
-      const colorId = key >> 8;
+      const colorId = key >> 12;
       if (L.down) {
         opaque.quad([x0, y, z0, x1, y, z0, x1, y, z1, x0, y, z1], DOWN, colorId, FLAT,
           uvs ? [x0, z0, x1, z0, x1, z1, x0, z1] : null, false, false);
         return;
       }
       const occ = [key & 3, (key >> 2) & 3, (key >> 4) & 3, (key >> 6) & 3];
-      const hill = hillShade(colorId, y);
+      const hill = hillShade(colorId, y) * slopeShade((key >> 8) & 15);
       const shade = occ.map((o) => AO_LEVELS[o] * hill);
       const flip = occ[0] + occ[2] < occ[1] + occ[3];
       opaque.quad([x0, y, z0, x0, y, z1, x1, y, z1, x1, y, z0], UP, colorId, shade,
@@ -412,6 +496,9 @@ const runKey = (lo, hi, colorId, kind, dark) => ((((lo + 1024) * 4096 + (hi + 10
 export const PARKING_FLOOR = 3;
 export const ARCADE_HEIGHT = 2;
 export const CURTAIN_MULLION = 4;
+/** Braced: diagonal exterior braces cross every BRACE_PERIOD blocks (181 Fremont). */
+export const BRACE_PERIOD = 8;
+const braced = (pos, y) => (pos + y) % BRACE_PERIOD === 0 || (((pos - y) % BRACE_PERIOD) + BRACE_PERIOD) % BRACE_PERIOD === 0;
 
 /**
  * Split one wall piece [lo, hi) of a segment into styled pieces: accent band at accFrom, then the facade pattern
@@ -424,6 +511,17 @@ function wallPieces(lo, hi, base, colorId, kind, accFrom, accC, pos, patterns, e
     const facade = kind - 1;
     if (facade === FACADE.RIBBED) { emit(a, b, pos % 2 ? darkOf(c) : c); return; }
     if (facade === FACADE.CURTAIN) { emit(a, b, pos % CURTAIN_MULLION === 0 ? darkOf(c) : c); return; }
+    if (facade === FACADE.BRACED) {
+      let y = a;
+      while (y < b) {
+        const brace = braced(pos, y);
+        let e = y + 1;
+        while (e < b && braced(pos, e) === brace) e++;
+        emit(y, e, brace ? darkOf(c) : c);
+        y = e;
+      }
+      return;
+    }
     if (facade === FACADE.ARCADE) {
       const split = Math.min(b, Math.max(a, base + ARCADE_HEIGHT));
       if (split > a) emit(a, split, pos % 2 ? darkOf(c) : c);
@@ -449,7 +547,10 @@ function wallPieces(lo, hi, base, colorId, kind, accFrom, accC, pos, patterns, e
   } else styled(lo, hi, colorId);
 }
 
-function meshSides(grid, scale, { uvs, glow, patterns }, opaque, walls) {
+/** Unbuilt-land terrace sides face up and take the paper tone at the cell's own hillshade, so far hills read as
+ * one shaded surface instead of a stripe per 1-block step. */
+
+function meshSides(grid, scale, { uvs, glow, patterns, paperSides = false }, opaque, walls) {
   const { w } = grid;
   const pieces = [];
   for (const dir of SIDES) {
@@ -458,6 +559,12 @@ function meshSides(grid, scale, { uvs, glow, patterns }, opaque, walls) {
       const close = (run) => {
         const { lo, hi, colorId, kind, dark } = run;
         const q = sideQuad(dir, line, run.start, run.end + 1, lo, hi, scale, uvs);
+        if (paperSides && colorId === C_UNBUILT_SIDE) {
+          const [ci, cj] = dir.alongZ ? [line, run.start] : [run.start, line];
+          const f = hillShade(C_UNBUILT_TOP, hi) * slopeShade(cellSlope(grid, ci, cj, 1, scale));
+          opaque.quad(q.corners, UP, C_UNBUILT_TOP, [f, f, f, f], q.uv, false, false);
+          return;
+        }
         const shade = dark ? [SIDE_CONTACT, SIDE_CONTACT, 1, 1] : FLAT;
         (kind === K_ATLAS && walls ? walls : opaque).quad(q.corners, dir.normal, colorId, shade, q.uv, false, glow && glows(kind));
       };
@@ -598,8 +705,8 @@ export function meshChunk(chunk, neighbours) {
   return { opaque: opaque.finish(origin), walls: walls.finish(origin), props: props.finish(origin) };
 }
 
-/** Height of column k: its own top on a building column, else its ground. */
-const columnTop = (chunk, k) => (chunk.bldg[k] ? chunk.top[k] : chunk.ground[k]);
+/** Height of column k: its own top on a building column, else its ground plus any leaf canopy. */
+const columnTop = (chunk, k) => (chunk.bldg[k] ? chunk.top[k] : chunk.ground[k] + canopyAt(chunk, k));
 
 /** Downsample the f×f columns at (lx0, lz0) of `chunk` into cell c: max top, majority colour at that top. */
 function setDownsampled(grid, c, chunk, lx0, lz0, f) {
@@ -620,7 +727,7 @@ function setDownsampled(grid, c, chunk, lx0, lz0, f) {
     for (let x = lx0; x < lx0 + f; x++) {
       const k = z * CHUNK + x;
       if (columnTop(chunk, k) !== maxH) continue;
-      const key = chunk.bldg[k] ? capColorId(entryOf(chunk, k), maxH) : chunk.surface[k];
+      const key = chunk.bldg[k] ? capColorId(entryOf(chunk, k), maxH) : canopyAt(chunk, k) ? C_LEAF : chunk.surface[k];
       const n = (counts.get(key) ?? 0) + 1;
       counts.set(key, n);
       if (n > bestCount) { bestCount = n; best = k; }
@@ -630,6 +737,11 @@ function setDownsampled(grid, c, chunk, lx0, lz0, f) {
   if (chunk.bldg[best]) {
     const B = entryOf(chunk, best);
     setCell(grid, c, B.base, maxH, B, C_SIDE + s, capColorId(B, maxH), maxDeck);
+  } else if (canopyAt(chunk, best)) {
+    const g = quantizeUp(chunk.ground[best], f);
+    setCell(grid, c, g, g, null, C_SIDE + s, s, maxDeck);
+    const h = Math.max(g + 1, quantizeUp(maxH, f));
+    if (maxDeck === 0) addCanopy(grid, c, g, h, C_LEAF);
   } else {
     const h = quantizeUp(maxH, f);
     setCell(grid, c, h, h, null, C_SIDE + s, s, maxDeck);
@@ -761,7 +873,7 @@ export function meshUnbuilt(mask, listed, water) {
     }
   }
   const opaque = createBuilder();
-  const opts = { ao: false, uvs: false, glow: false, patterns: false };
+  const opts = { ao: false, uvs: false, glow: false, patterns: false, paperSides: true };
   meshTops(grid, LANDMASK_CELL, opts, opaque);
   meshSides(grid, LANDMASK_CELL, opts, opaque, null);
   return { opaque: opaque.finish([0, 0, 0]) };

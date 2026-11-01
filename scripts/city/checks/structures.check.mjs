@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  CAP, CHUNK, CITY_VERSION, FACADE, SF_PROJ, STRUCTURE_KINDS, SURFACE, chunkOf, encodeChunk, decodeChunk, decodeLandmarks, lonLatToBlock, pickId,
+  CAP, CHUNK, CITY_VERSION, FACADE, PALETTE_INDEX, SF_PROJ, STRUCTURE_KINDS, SURFACE, chunkOf, encodeChunk, decodeChunk, decodeLandmarks, lonLatToBlock, pickId,
 } from "../../../public/shared/city.js";
 import { gunzipSync } from "node:zlib";
 import { createBuildCtx } from "../lib/ctx.mjs";
@@ -263,11 +263,10 @@ await test("Oracle Park: stands rise with distance from the field, Hmax ≤ 11, 
 
 await test("Oracle Park: exactly 6 emissive light props on the stands, scoreboard facade 1, one parent; no boxes in landmarks.bin", () => {
   const { r, chunks, ctx } = oracle;
-  assert.equal(r.props.length, 6);
-  for (const p of r.props) {
-    assert.equal(p.flags, 1);
-    assert.equal(r.entries[r.owner[rasterIndex(r, p.x, p.z)]].facade, FACADE.ARCADE);
-  }
+  assert.equal(r.props.filter((p) => p.flags === 1).length, 6, "6 emissive light heads");
+  assert.equal(r.props.filter((p) => p.color === PALETTE_INDEX["steel-dark"]).length, 6, "6 dark steel masts");
+  assert.ok(r.props.some((p) => p.color === PALETTE_INDEX.coke) && r.props.some((p) => p.color === PALETTE_INDEX.glove), "Coke bottle and glove");
+  for (const p of r.props) assert.equal(r.entries[r.owner[rasterIndex(r, p.x, p.z)]].facade, FACADE.ARCADE, "every prop stands on the stands");
   const sb = colsOfEntry(r, (e) => e.facade === FACADE.BLANK);
   assert.ok(sb.length >= 12 && sb.length <= 20, `8×2 scoreboard, ${sb.length} columns`);
   const pids = new Set(chunks.flatMap((c) => c.buildings.map(pickId)));

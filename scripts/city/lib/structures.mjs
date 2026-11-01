@@ -161,7 +161,7 @@ export function ballparkLayout({ outline, field, infield }, { hmax, outfieldMin,
     return t;
   };
   // scoreboard: centre field, just behind the outfield fence
-  const back = march(-hx, -hz, (x, z) => pointInPolygon(x, z, [field])) + 1 + scoreboard.d / 2;
+  const back = march(-hx, -hz, (x, z) => pointInPolygon(x, z, [field])) + 3 + scoreboard.d / 2;
   const sbx = fx - hx * back, sbz = fz - hz * back;
   const sb = new Map();
   for (const [x, z] of outlineCols) {
@@ -345,6 +345,13 @@ export function applyStructures(raster, ctx, opts = {}) {
         restyle({ palette: PALETTE_INDEX["transit-white"], accent: PALETTE_INDEX["pastel-green"], facade: FACADE.RIBBED, cap: CAP.GREEN }, () => 7);
         break;
       case "canopy": {
+        // ferry gate shelters stand on the pier deck: drawn as an asphalt slab on posts they read as a road
+        // sticking into the bay, so they keep only the pier under them
+        if (rec.tags.ferry === "yes" || cols.every(([, , i]) => raster.surface[i] === SURFACE.PIER)) {
+          for (const [x, z] of cols) raster.clearBuilding(x, z);
+          (log.droppedFerryCanopies ??= []).push(rec.key);
+          break;
+        }
         const ax = principalAxis(cols);
         const corners = new Set();
         for (const su of [-1, 1]) for (const sv of [-1, 1]) {

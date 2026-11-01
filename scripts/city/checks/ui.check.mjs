@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as THREE from "../../../public/vendor/three-0.186.1/three.module.js";
 import { CHUNK, SURFACE, decodeChunk, decodeWalk, chunkKey, validateCompanies, validateManifest, validatePlaces } from "../../../public/shared/city.js";
-import { cullLabels, labelGroups, LABEL_LIFT, MAX_LABELS } from "../../../public/js/city/labels.js";
+import { cullLabels, labelBudget, labelGroups, LABEL_LIFT, MAX_LABELS } from "../../../public/js/city/labels.js";
 import {
   PIN_BOXES, PIN_SIZE, PINS_MAX_DIST, PINS_PER_COLUMN, PINS_PER_COMPANY, createPins, layoutPins, pinBounds, stepAway,
 } from "../../../public/js/city/pins.js";
@@ -61,6 +61,16 @@ test("cullLabels: at most 24 by default, max honoured, bad input throws", () => 
   assert.equal(cullLabels(many, 5).length, 5);
   assert.throws(() => cullLabels([{ id: "x", x: 0, y: 0, w: 1, h: 1, order: 0 }]), /no numeric dist/);
   assert.throws(() => cullLabels([], -1), /max/);
+});
+
+test("labelBudget scales with the viewport (phone few, desktop ≤ 24); the gap keeps chips apart", () => {
+  assert.ok(labelBudget(390, 844) <= 6 && labelBudget(390, 844) >= 4);
+  assert.ok(labelBudget(1280, 800) > labelBudget(390, 844) && labelBudget(1280, 800) <= MAX_LABELS);
+  assert.equal(labelBudget(4000, 3000), MAX_LABELS);
+  assert.throws(() => labelBudget(NaN, 1), /viewport/);
+  const near = [rect("a", 0, 0, 1, 0), rect("b", 54, 0, 2, 1)];
+  assert.equal(cullLabels(near, 24, 0).length, 2);
+  assert.equal(cullLabels(near, 24, 6).length, 1, "within the gap counts as overlap");
 });
 
 test("labelGroups: fixture gives 2 chips holding all 3 companies, shared tower in one chip at roofY+2", () => {

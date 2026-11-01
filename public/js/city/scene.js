@@ -246,7 +246,8 @@ export async function createCityScene(container, { manifestUrl, theme = "day", a
   mesh({ kind: "unbuilt", mask, listed: manifest.chunks.list.map(([cx, cz]) => [cx, cz]), water: manifest.water }, "unbuilt land")
     .then((reply) => uploads.push(() => {
       unbuiltMesh = buildMesh(reply.opaque, mats.unbuilt, "unbuilt land");
-      if (unbuiltMesh) { unbuiltMesh.receiveShadow = true; unbuiltMesh.name = "city-unbuilt"; scene.add(unbuiltMesh); }
+      // no shadows: its up-facing terrace sides would self-shadow into stripes, and it lies outside the shadow box
+      if (unbuiltMesh) { unbuiltMesh.receiveShadow = false; unbuiltMesh.name = "city-unbuilt"; scene.add(unbuiltMesh); }
       dirty = true;
     }))
     .catch((err) => { throw fail(err); });

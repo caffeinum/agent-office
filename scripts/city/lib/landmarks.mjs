@@ -70,9 +70,9 @@ const OP_KEYS = {
   taper: ["to", "y0", "y1"], spire: ["w", "y1", "at"], rim: ["width", "y1", "inset"], slope: ["axis", "y0", "y1"],
   part: ["name", "cap", "facade", "palette", "accent", "accentFrom"], prop: ["at", "y0", "y1", "color", "emissive"],
   field: ["surface"], arena: ["wall", "rise"], arc: ["centre", "r", "width", "from", "to", "y1"],
-  ballpark: ["outline", "field", "infield", "hmax", "outfieldMin", "lights", "scoreboard", "stands", "scoreboardPalette", "sources"],
+  ballpark: ["outline", "field", "infield", "hmax", "outfieldMin", "lights", "scoreboard", "stands", "scoreboardPalette", "sources", "leftField"],
   site: ["key", "name", "lat", "lon", "toward", "heightRef", "realHeightM", "source", "covers"],
-  mesh: ["kind", "y0", "y1", "every", "inset", "palette"],
+  mesh: ["kind", "y0", "y1", "every", "inset", "palette", "emissive"],
 };
 const LANDMARK_KEYS = ["key", "name", "address", "lat", "lon", "toward", "heightRef", "realHeightM", "source", "palette", "accent", "covers", "note", "recipe", "bridge"];
 
@@ -110,7 +110,8 @@ function validateOp(op, what) {
 }
 
 const BRIDGE_KEYS = ["palette", "points", "decks", "deckWidth", "towerLegs", "crossBeams", "cableSag", "suspenderEvery", "anchorSize"];
-const POINT_KINDS = ["anchor", "tower", "end"];
+/** approach: where the deck lands on the shore; the deck descends from the anchor to the ground there. */
+const POINT_KINDS = ["approach", "anchor", "tower", "end"];
 function validateBridge(b, what) {
   if (!isObj(b)) throw new Error(`${what}: must be an object`);
   for (const k of Object.keys(b)) if (!BRIDGE_KEYS.includes(k)) throw new Error(`${what}: unknown field "${k}"`);
@@ -374,6 +375,42 @@ function chamferOk(shape, c, inset, size) {
 // ---------- compile ----------
 
 /**
+ * The Coke bottle and the glove on the left-centre stands: a 2×2 red bottle (neck 1×1) and a 3×2 brown glove,
+ * `angle` degrees left of straight-away centre field, on the stands just past the field. → props (y relative)
+ */
+function leftFieldProps(lay, { angle }) {
+  num(angle, "ballpark.leftField.angle");
+  const [hx, hz] = lay.home, [fx, fz] = lay.centre;
+  const dx = -hx, dz = -hz, lx = dz, lz = -dx;
+  const a = (angle * Math.PI) / 180;
+  const ux = dx * Math.cos(a) + lx * Math.sin(a), uz = dz * Math.cos(a) + lz * Math.sin(a);
+  const standAt = (t) => lay.stands.get(columnKey(Math.floor(fx + ux * t), Math.floor(fz + uz * t)));
+  let t = 1;
+  while (standAt(t) === undefined) { if (++t > 400) throw new Error("ballpark.leftField: no stands along the left-centre ray"); }
+  t += 3;
+  const top = (x, z) => {
+    const h = lay.stands.get(columnKey(x, z));
+    if (h === undefined) throw new Error(`ballpark.leftField: prop column ${x},${z} is not on the stands`);
+    return h;
+  };
+  const out = [];
+  const bx = Math.floor(fx + ux * t), bz = Math.floor(fz + uz * t);
+  const base = Math.max(...[[0, 0], [1, 0], [0, 1], [1, 1]].map(([i, j]) => top(bx + i, bz + j)));
+  for (const [i, j] of [[0, 0], [1, 0], [0, 1], [1, 1]]) out.push({ x: bx + i, z: bz + j, y0: null, y1: base + 5, color: PALETTE_INDEX.coke, flags: 0 });
+  out.push({ x: bx, z: bz, y0: base + 5, y1: base + 8, color: PALETTE_INDEX.coke, flags: 0 });
+  // the glove: 5 blocks further along the stands to the left
+  const gx = bx + 0.5 + lx * 5, gz = bz + 0.5 + lz * 5;
+  const gcells = [];
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) {
+    const k = [Math.floor(gx + lx * i + ux * j), Math.floor(gz + lz * i + uz * j)];
+    if (!gcells.some(([x, z]) => x === k[0] && z === k[1])) gcells.push(k);
+  }
+  const gbase = Math.max(...gcells.map(([x, z]) => top(x, z)));
+  for (const [x, z] of gcells) out.push({ x, z, y0: null, y1: gbase + 3, color: PALETTE_INDEX.glove, flags: 0 });
+  return out;
+}
+
+/**
  * Compile one landmark against ctx (proj, osm). Pure: no raster writes.
  * → {key, name, sites: [{site, frame, refTop, parts: [{name, cap, facade, palette, accent, accentFrom}],
  *    cols: Map key→{x, z, part, top}, field: Map key→surface, outline: Set key, props: [{x, z, y0|null, y1, color, flags}],
@@ -538,7 +575,12 @@ export function compileLandmark(lm, ctx, skyline) {
         for (const [k, t] of lay.stands) { const [x, z] = k.split(",").map(Number); S.cols.set(k, { x, z, part: stands, top: t }); }
         const sb = addPart("scoreboard", op.scoreboardPalette);
         for (const [k, t] of lay.scoreboard) { const [x, z] = k.split(",").map(Number); S.cols.set(k, { x, z, part: sb, top: t }); }
-        for (const [x, z] of lay.lights) S.props.push({ x, z, y0: null, y1: op.lights.y1, color: PALETTE_INDEX.light, flags: 1 });
+        // light towers: a dark steel mast with an emissive head
+        for (const [x, z] of lay.lights) {
+          S.props.push({ x, z, y0: null, y1: op.lights.y1 - 2, color: PALETTE_INDEX["steel-dark"], flags: 0 });
+          S.props.push({ x, z, y0: op.lights.y1 - 2, y1: op.lights.y1, color: PALETTE_INDEX.light, flags: 1 });
+        }
+        if (op.leftField) for (const p of leftFieldProps(lay, op.leftField)) S.props.push(p);
         part = stands;
         S.ballpark = { home: lay.home, centre: lay.centre, standsPart: stands, hmax: op.hmax, outfieldMin: op.outfieldMin };
         break;

@@ -204,7 +204,7 @@ The integrator sends the operator this message verbatim, with one screenshot per
   | 18–19 | reserved u16, must be 0 | new |
 
   - `cap`: 0 flat, 1 crown (lighter), 2 spire (metal), 3 dome, 4 green roof, 5 seats. It applies to the column's top face only.
-  - `facade`: 0 window atlas, 1 blank, 2 ribbed, 3 open-deck parking, 4 brick arcade, 5 glass curtain.
+  - `facade`: 0 window atlas, 1 blank, 2 ribbed, 3 open-deck parking, 4 arcade, 5 glass curtain, 6 braced (diagonal exterior braces, 181 Fremont).
   - `accent`: a palette index used for cap faces and for side faces at y ≥ `accentFrom`.
 - **Per-column and per-height styling:**
   - Styling that differs by column becomes separate entries sharing a `parent`. Examples: the Ferry shed (arcade) vs the clock tower (dome), Moscone's green part vs its plain roof, a ballpark's stands vs its scoreboard.
@@ -218,7 +218,7 @@ The integrator sends the operator this message verbatim, with one screenshot per
 - **`decodeChunk`/`validateChunk`** check:
   - the exact byte length
   - frame == 0 (until c1), and reserved bytes == 0
-  - cap ≤ 5, facade ≤ 5, accent and palette in range
+  - cap ≤ 5, facade ≤ 6, accent and palette in range
   - every `parent` is 0 or an id in the same chunk table, or listed in `manifest.parents`
   - props inside the chunk, and `y1 > y0`
   - the `top` rules above.
@@ -732,6 +732,16 @@ One tool is added to the office ToolSet in `src/tools.ts`. The office MCP lists 
    - The viewer adapts to the City DO wire format (`createWireAdapter` in `live.js`): snapshot `sites`, per-site `presence` deltas, `chat.msg`, `left.inside`, standing walkers with speed 0.
    - The GGB south tower verify point is the OSM tower centroid (37.814014, −122.477891).
    - `validateWalk` checks reverse edges with sorted numeric keys (decode ~4× faster).
+
+7. **Visual polish pass (2026-11-01, after the v2 visual judgment).** One rebuild from the cached raw data; `npm run check` and verify-sf 23/23 green; 1028 chunks + 183 water, 3.76 MB total.
+   - **Colour.** Untagged brick is gone from the height groups: low buildings are pastel or white stucco, midrise is stucco / stone. Brick comes only from OSM colour/material tags and the `warehouse` group (`paletteFor(…, {warehouse})`, one in three), which build-sf gives to buildings tagged warehouse/industrial and to large low footprints inside `SOMA_WAREHOUSES`. 555 California is #5a3f38; the Golden Gate a darker International Orange; grass and park greens darker.
+   - **Labels.** Former companies are not labelled (search still lists them). Chips sit beside the roof anchor (tail on the left), a viewport budget (`labelBudget`, one per 60 000 px², 4–24) and a 6 px gap cull them, and anchors farther than 2.2× the orbit distance are dropped.
+   - **Skyline.** The Salesforce crown lattice is an emissive landmarks.bin layer (lit at night) over a brighter crown band; 181 Fremont gets facade 6 (`BRACED`, diagonal braces every 8 blocks) and a 2×2 mast. `CAMERA.maxPolar` is 1.42 so the skyline can be shot in profile.
+   - **Trees.** The mesher draws every FOREST column (no building, no deck) as a 2–4 block leaf canopy in 3×3 clumps (`canopyHeight`, no format change). OSM `natural=tree` nodes turn 5 natural-ground columns into FOREST; trees on sidewalks and plazas become trunk + 2-block leaf props, one per 3×3 cell.
+   - **Golden Gate.** Bridge point kind `approach`: the deck runs from the south anchorage down to the ground at Presidio Parkway on concrete pillars, with a concrete anchorage block; decks are 2 blocks thick. The landmask adds Marin Headlands land (terrain above 3 m, north of 37.8185°, west of −122.44°).
+   - **Hills.** Terrain, unbuilt land and canopy tops take a quantised slope hillshade (sun from the stage's SUN_DIR); contours are fainter and off unbuilt land; unbuilt terrace sides face up in the paper tone so far hills stop striping, and the unbuilt mesh receives no shadows.
+   - **Ferry Building.** Cream arcade; a dark clock-face band on the 5×5 stage, a cupola part, a 1-block roof ridge and a white flagpole (no red cube). Foot bridges touching water or pier deck (ferry gangways, marina walkways) draw no elevated deck; ferry-gate `building=roof` canopies are dropped (they read as roads in the bay).
+   - **Oracle Park.** Light towers are dark steel masts with emissive heads; the scoreboard sits 3 blocks behind the fence; a Coke bottle and a glove stand on the left-centre stands (`ballpark.leftField`). The OSM stadium relation r7330762 is in `DROP_BUILDINGS`. Marina docks (unnamed, floating or "Dock …" pier lines) are skipped, piers no longer grow a shallow-water halo, and a radius-1 opening of the land mask removes land strips ≤ 2 blocks wide (4269 columns).
 
 ## 10. risks and cut-lines
 

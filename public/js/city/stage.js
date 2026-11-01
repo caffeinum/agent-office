@@ -16,7 +16,7 @@ export const DPR_LOW = 1.0;
 export const FPS_FLOOR = 45;
 export const SHADOW_HALF = 128;
 export const SHADOW_MAP = 2048;
-export const CAMERA = { fov: 30, near: 1, far: 6000, minPolar: 0.32, maxPolar: 1.2, minDist: 30, maxDist: 2500 };
+export const CAMERA = { fov: 30, near: 1, far: 6000, minPolar: 0.32, maxPolar: 1.42, minDist: 30, maxDist: 2500 };
 
 export const THEMES = {
   day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0, threshold: 0.95, exposure: 1.0, windows: 0 },

@@ -57,7 +57,7 @@
   font-size: 12px; line-height: 1.35; white-space: nowrap; text-align: left;
   pointer-events: auto; cursor: pointer; will-change: transform;
 }
-.cu-chip::after { content: ""; position: absolute; left: 50%; bottom: -4px; width: 8px; height: 8px; background: inherit; transform: translateX(-50%) rotate(45deg); border-radius: 1px; }
+.cu-chip::after { content: ""; position: absolute; left: -4px; top: 50%; width: 8px; height: 8px; background: inherit; transform: translateY(-50%) rotate(45deg); border-radius: 1px; }
 .cu-chip:hover, .cu-chip:focus-visible { outline: 2px solid var(--cu-accent); outline-offset: 1px; }
 .cu-chip-row { display: flex; align-items: center; gap: 5px; }
 .cu-chip-row b { font-weight: 700; }

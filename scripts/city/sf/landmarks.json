@@ -11,7 +11,7 @@
         { "op": "tier", "inset": 1, "y1": 70 },
         { "op": "tier", "inset": 2, "y1": 99 },
         { "op": "rim", "inset": 2, "width": 1, "y1": 104 },
-        { "op": "mesh", "kind": "crown_lattice", "inset": 2, "y0": 104, "y1": 109, "every": 2 },
+        { "op": "mesh", "kind": "crown_lattice", "inset": 2, "y0": 104, "y1": 109, "every": 2, "emissive": true },
         { "op": "rect", "w": 6, "d": 6, "y1": 109 }
       ]
     },
@@ -32,13 +32,19 @@
       "key": "o:w445566153", "name": "181 Fremont", "address": "181 Fremont St", "lat": 37.7897, "lon": -122.39535, "toward": 225,
       "heightRef": "181-fremont", "palette": "fremont-181", "accent": "metal",
       "recipe": [
+        { "op": "part", "name": "tower", "facade": "braced" },
         { "op": "rect", "w": 14, "d": 12 },
         { "op": "tier", "y1": 60 },
         { "op": "tier", "chamfer": 2, "y1": 64 },
         { "op": "tier", "chamfer": 4, "y1": 68 },
         { "op": "chamfer", "size": 4 },
         { "op": "slope", "axis": "u", "y0": 68, "y1": 72 },
-        { "op": "prop", "at": [2, 0], "y1": 82, "color": "metal" }
+        { "op": "prop", "at": [2, 0], "y1": 78, "color": "metal" },
+        { "op": "prop", "at": [3, 0], "y1": 78, "color": "metal" },
+        { "op": "prop", "at": [2, 1], "y1": 78, "color": "metal" },
+        { "op": "prop", "at": [3, 1], "y1": 78, "color": "metal" },
+        { "op": "prop", "at": [2, 0], "y0": 78, "y1": 82, "color": "metal" },
+        { "op": "prop", "at": [2, 0], "y0": 82, "y1": 83, "color": "flag", "emissive": true }
       ]
     },
     {
@@ -164,12 +170,15 @@
       "recipe": [
         { "op": "part", "name": "shed", "facade": "arcade" },
         { "op": "rect", "w": 67, "d": 18, "y1": 5 },
+        { "op": "rect", "w": 61, "d": 4, "y1": 6 },
         { "op": "part", "name": "clock tower", "cap": "dome", "facade": "blank" },
         { "op": "rect", "w": 6, "d": 6, "at": [0, 6], "y1": 15 },
-        { "op": "rect", "w": 5, "d": 5, "at": [0, 6], "y1": 18 },
+        { "op": "part", "name": "clock faces", "facade": "blank", "accent": "steel-dark", "accentFrom": 17 },
+        { "op": "rect", "w": 5, "d": 5, "at": [0, 6], "y1": 19 },
+        { "op": "part", "name": "cupola", "cap": "dome", "facade": "blank" },
         { "op": "rect", "w": 4, "d": 4, "at": [0, 6], "y1": 21 },
         { "op": "rect", "w": 3, "d": 3, "at": [0, 6], "y1": 24 },
-        { "op": "prop", "at": [0, 6], "y1": 25, "color": "flag" }
+        { "op": "prop", "at": [0, 6], "y1": 26, "color": "transit-white" }
       ]
     },
     {
@@ -216,6 +225,7 @@
           "hmax": 10,
           "outfieldMin": 3,
           "lights": { "angles": [-130, -85, -40, 40, 85, 130], "y1": 18 },
+          "leftField": { "angle": 28 },
           "scoreboard": { "w": 8, "d": 2, "y1": 9 },
           "stands": { "cap": "seats", "facade": "arcade", "palette": "brick-dark", "accent": "seats" },
           "scoreboardPalette": { "facade": "blank", "palette": "concrete-dark" }
@@ -268,6 +278,7 @@
       "bridge": {
         "palette": "golden-gate",
         "points": [
+          { "ref": "South approach (Presidio Parkway)", "source": "https://www.openstreetmap.org/way/26968360", "lat": 37.8074, "lon": -122.4765, "kind": "approach" },
           { "ref": "South Anchorage", "source": "https://www.openstreetmap.org/way/1560010167", "lat": 37.809653, "lon": -122.477416, "kind": "anchor" },
           { "ref": "South Tower", "source": "https://www.openstreetmap.org/way/1330049620", "lat": 37.814014, "lon": -122.477891, "kind": "tower" },
           { "ref": "Midspan", "source": "https://www.openstreetmap.org/way/1329761880", "lat": 37.819759, "lon": -122.478562, "kind": "end" }

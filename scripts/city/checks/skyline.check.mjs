@@ -9,7 +9,7 @@ import { gunzipSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  BLOCK_M, CHUNK, CITY_VERSION, MAX_LANDMARKS_BYTES, SF_GRID, SF_PROJ, SURFACE, chunkOf, decodeChunk, decodeLandmarks, encodeChunk,
+  BLOCK_M, CHUNK, CITY_VERSION, MAX_LANDMARKS_BYTES, PALETTE_INDEX, SF_GRID, SF_PROJ, SURFACE, chunkOf, decodeChunk, decodeLandmarks, encodeChunk,
   lonLatToBlock, pickId,
 } from "../../../public/shared/city.js";
 import { createBuildCtx } from "../lib/ctx.mjs";
@@ -257,14 +257,16 @@ await test("Transamerica: top-width profile is non-increasing, width at y60 ≤ 
   assert.equal(Math.max(...cols.map((c) => c.top)), 87);
 });
 
-await test("Ferry Building: clock tower ≥ 24, shed at 5 ±1, both pick as one parent; flagpole prop", () => {
+await test("Ferry Building: clock tower ≥ 24, shed at 5 ±1, both pick as one parent; white flagpole and a clock-face band", () => {
   const { raster } = stamped.get("Ferry Building");
   const cols = columnsOf(raster);
   const tower = cols.filter((c) => c.entry.cap === 3), shed = cols.filter((c) => c.entry.facade === 4);
   assert.ok(Math.max(...tower.map((c) => c.top - c.base)) >= 24);
   for (const c of shed) assert.ok(Math.abs(c.top - c.base - 5) <= 1, `shed column at ${c.top - c.base}`);
   assert.equal(pickId(tower[0].entry), pickId(shed[0].entry));
-  assert.equal(raster.props.length, 1);
+  assert.equal(raster.props.length, 1, "one white flagpole");
+  const faces = cols.filter((c) => c.entry.accent === PALETTE_INDEX["steel-dark"]);
+  assert.ok(faces.length > 0 && faces.every((c) => c.entry.accentFrom - c.base === 17 && c.top - c.base === 19), "clock faces: a dark band from 17 on the 5×5 stage");
 });
 
 await test("Coit Tower: footprint ≤ 25 columns, top 21", () => {

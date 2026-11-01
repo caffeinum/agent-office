@@ -12,7 +12,8 @@ import {
   UNBUILT_COLORS, chunkKey, decodeChunk, decodeLandmarks, decodeLandmask, lonLatToBlock, regionOf, validateChunk, validateManifest,
 } from "../../../public/shared/city.js";
 import {
-  ARCADE_HEIGHT, HILL_CONTOUR, PROP_QUADS, capColorId, handleMeshRequest, hillShade, linearBytes, meshChunk, meshRegion, meshUnbuilt, srgbToLinear,
+  ARCADE_HEIGHT, CANOPY_CELL, HILL_CONTOUR, PROP_QUADS, SLOPE_FLAT, canopyHeight, capColorId, handleMeshRequest, hillShade, linearBytes, meshChunk,
+  meshRegion, meshUnbuilt, slopeLevel, slopeShade, srgbToLinear,
 } from "../../../public/js/city/mesher.js";
 import { landmarkInstances, landmarkTriangles } from "../../../public/js/city/meshlayer.js";
 import { createUnmapped } from "../../../public/js/city/unmapped.js";
@@ -188,8 +189,9 @@ test("colours are linear bytes, buffers are typed and local to the chunk origin"
   assert.ok(opaque.normals instanceof Int8Array && opaque.uvs instanceof Float32Array);
   assert.deepEqual(opaque.origin, [3 * CHUNK, 0, 4 * CHUNK]);
   assert.ok(Math.max(...opaque.positions) <= CHUNK && Math.min(...opaque.positions) >= 0);
-  // grass #7cbf5a: sRGB 0x7c = 124 → linear ≈ 0.202 → 51 at full brightness, times the hill shade at y = 3
-  assert.equal(opaque.colors[0], Math.round(srgbToLinear(124 / 255) * hillShade(SURFACE.GRASS, 3) * 255));
+  // grass red channel: sRGB → linear at full brightness, times the hill shade at y = 3 (flat: slope shade 1)
+  const red = parseInt(SURFACE_COLORS[SURFACE.GRASS].slice(1, 3), 16);
+  assert.equal(opaque.colors[0], Math.round(srgbToLinear(red / 255) * hillShade(SURFACE.GRASS, 3) * 255));
 });
 
 test("bad input fails loudly", () => {
@@ -496,13 +498,16 @@ test("fixture unbuilt land: paper tone at coarse height in cx 55 only, none in l
   const qs = quadsWithColor(opaque);
   assert.ok(qs.length > 0);
   const paper = linearBytes(UNBUILT_COLORS.top);
-  const tops = qs.filter((q) => q.normal[1] === 1);
+  const tops = qs.filter((q) => q.normal[1] === 1 && q.min[1] === q.max[1]);
+  assert.ok(qs.filter((q) => q.min[1] !== q.max[1]).every((q) => q.normal[1] === 1), "paper terrace sides face up (no stripe per step)");
   for (const q of tops) {
     const [cx0, cz0] = [Math.floor(q.min[0] / CHUNK), Math.floor(q.min[2] / CHUNK)];
     const [cx1, cz1] = [Math.floor((q.max[0] - 1) / CHUNK), Math.floor((q.max[2] - 1) / CHUNK)];
     assert.ok(cx0 === 55 && cx1 === 55 && cz0 >= 24 && cz1 <= 27, `unbuilt top ${q.min}–${q.max} outside the unbuilt column`);
     assert.equal(q.min[1], 2);
-    assert.ok(q.rgb.every((v, i) => Math.abs(v - Math.round(srgbToLinear(parseInt(UNBUILT_COLORS.top.slice(1 + 2 * i, 3 + 2 * i), 16) / 255) * hillShade(68, 2) * 255)) <= 1), `paper tone ${q.rgb} vs ${paper}`);
+    // paper tone at the hill shade of y = 2, times a slope hillshade in [slopeShade(0), slopeShade(15)]
+    const flat = [0, 1, 2].map((i) => srgbToLinear(parseInt(UNBUILT_COLORS.top.slice(1 + 2 * i, 3 + 2 * i), 16) / 255) * hillShade(68, 2) * 255);
+    assert.ok(q.rgb.every((v, i) => v >= Math.floor(flat[i] * slopeShade(0)) - 1 && v <= Math.ceil(flat[i] * slopeShade(15)) + 1), `paper tone ${q.rgb} vs ${paper}`);
   }
   assert.ok(tops.reduce((n, q) => n + (q.max[0] - q.min[0]) * (q.max[2] - q.min[2]), 0) === CHUNK * CHUNK * 4, "4 unbuilt chunks covered");
   const u = createUnmapped(city.manifest, mask);
@@ -541,7 +546,7 @@ test("fixture seam: listed ground 1 next to unbuilt 2 needs no skirt; the unbuil
   const west = quads(meshChunk(c, { ...neighboursIn(city, c), w: nb }).opaque).filter((q) => q.normal[0] === -1 && q.min[0] === 0);
   assert.equal(west.length, 0, "the higher unbuilt neighbour covers the listed edge");
   const { opaque } = meshUnbuilt(mask, city.manifest.chunks.list.map(([cx, cz]) => [cx, cz]), city.manifest.water);
-  const east = quads(opaque).filter((q) => q.normal[0] === 1 && q.min[0] === 56 * CHUNK);
+  const east = quads(opaque).filter((q) => q.min[0] === 56 * CHUNK && q.max[0] === 56 * CHUNK && q.min[1] !== q.max[1]);
   assert.ok(east.length > 0 && east.every((q) => q.max[1] === 2 && q.min[1] === 1), `unbuilt east side 2 → 1 (${east.map((q) => `${q.min[1]}-${q.max[1]}`)})`);
 });
 
@@ -622,3 +627,30 @@ test("[post-int] real downtown chunks (Salesforce 74,63 and the largest, 76,56) 
 });
 
 console.log(`mesher.check: ${passed} passed`);
+
+test("slope hillshade: flat is exactly 1, sun-facing slopes are lighter, slopes away darker, levels clamp", () => {
+  assert.equal(slopeLevel(0, 0), SLOPE_FLAT);
+  assert.equal(slopeShade(SLOPE_FLAT), 1);
+  // the sun sits toward −x, +z: ground rising toward +x tilts toward it (lighter), rising toward −x away (darker)
+  assert.ok(slopeShade(slopeLevel(0.3, 0)) > 1);
+  assert.ok(slopeShade(slopeLevel(-0.3, 0)) < 1);
+  assert.equal(slopeLevel(-50, 50), 0);
+  assert.equal(slopeLevel(50, -50), 15);
+});
+
+test("tree canopy: FOREST columns get a 2–4 block leaf crown shared per clump; buildings, decks and grass do not", () => {
+  const c = flatChunk(2, 2, 3);
+  for (let k = 0; k < 64 * 8; k++) c.surface[k] = SURFACE.FOREST;
+  c.deck[5] = 9;
+  const { opaque } = meshChunk(c, around(c));
+  const tops = quads(opaque).filter((q) => q.normal[1] === 1);
+  const crown = tops.filter((q) => q.min[2] < 8 && q.min[1] > 3 && q.min[1] !== 9);
+  assert.ok(crown.length > 0, "canopy tops above the ground");
+  for (const q of crown) assert.ok(q.min[1] >= 5 && q.min[1] <= 7, `crown top ${q.min[1]} is ground 3 + 2..4`);
+  assert.ok(!tops.some((q) => q.min[2] >= 8 && q.min[1] > 3 && q.min[1] < 9), "grass rows stay flat");
+  for (let x = 0; x < 30; x++) {
+    const h = canopyHeight(x, 7);
+    assert.ok(h >= 2 && h <= 4);
+    assert.equal(h, canopyHeight(Math.floor(x / CANOPY_CELL) * CANOPY_CELL, 7 - (7 % CANOPY_CELL)), "one height per clump");
+  }
+});

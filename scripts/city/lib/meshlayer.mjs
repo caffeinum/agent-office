@@ -60,12 +60,16 @@ function stripCells(a, b, half, visit) {
   }
 }
 
+const APPROACH_PILLAR_EVERY = 8;
+
 /**
- * A suspension bridge from landmarks.json `bridge` (spec-v2 §5 rows 20, 21): deck(s) along the pier chain, twin
- * tower legs with cross-beams at every `tower` point, two parabolic cables per span from anchor/tower tops, and
- * suspenders every `suspenderEvery` blocks. `end` points are cut ends (midspan): the cable reaches its sag there.
+ * A suspension bridge from landmarks.json `bridge` (spec-v2 §5 rows 20, 21): 2-block-thick deck(s) along the pier
+ * chain, twin tower legs with cross-beams at every `tower` point, two parabolic cables per span from anchor/tower
+ * tops, and suspenders every `suspenderEvery` blocks. `end` points are cut ends (midspan): the cable reaches its
+ * sag there. An `approach` point lands the deck on the shore: from the neighbouring anchor (a concrete anchorage
+ * block up to the deck) the deck descends to groundAt + 1 there, never below the ground, on pillars.
  */
-export function bridgeVoxels(bridge, towerTop, proj, vox) {
+export function bridgeVoxels(bridge, towerTop, proj, vox, groundAt = null) {
   const color = PALETTE_INDEX[bridge.palette];
   if (color === undefined) throw new Error(`bridge: unknown palette ${bridge.palette}`);
   const pts = bridge.points.map((p) => {
@@ -79,7 +83,11 @@ export function bridgeVoxels(bridge, towerTop, proj, vox) {
   const cableTop = (p) => (p.kind === "tower" ? towerTop - 1 : p.kind === "anchor" ? deckTop + 1 : deckTop + bridge.cableSag);
   for (let s = 0; s + 1 < pts.length; s++) {
     const a = pts[s], b = pts[s + 1];
-    for (const y of decks) stripCells(a.at, b.at, half, (x, z) => vox.add(x, z, y, y + 1, color));
+    if (a.kind === "approach" || b.kind === "approach") {
+      approachVoxels(a.kind === "approach" ? b : a, a.kind === "approach" ? a : b, Math.max(...decks), half, color, vox, groundAt);
+      continue;
+    }
+    for (const y of decks) stripCells(a.at, b.at, half, (x, z) => vox.add(x, z, y - 1, y + 1, color));
     const dx = b.at[0] - a.at[0], dz = b.at[1] - a.at[1], L = Math.hypot(dx, dz);
     const ux = dx / L, uz = dz / L, vx = -uz, vz = ux;
     // parabola: between two towers its low point (deck + sag) is midway; otherwise it is at the non-tower end
@@ -139,13 +147,37 @@ export function bridgeVoxels(bridge, towerTop, proj, vox) {
   }
 }
 
+/** Deck from `from` (at deck height y) down to the shore at `to`, on pillars; a concrete anchorage at an anchor. */
+function approachVoxels(from, to, y, half, color, vox, groundAt) {
+  if (!groundAt) throw new Error("bridge: an approach point needs ctx.groundAt");
+  const g = (x, z) => groundAt(x, z);
+  const land = g(Math.floor(to.at[0]), Math.floor(to.at[1])) + 1;
+  if (land > y) throw new Error(`bridge approach ${to.ref}: ground ${land - 1} is above the deck ${y}`);
+  const L = Math.hypot(to.at[0] - from.at[0], to.at[1] - from.at[1]);
+  stripCells(from.at, to.at, half, (x, z, t) => {
+    const ground = g(x, z);
+    const top = Math.max(ground + 1, Math.round(y + (land - y) * t));
+    vox.add(x, z, top - 1, top + 1, color);
+    const along = Math.round(t * L);
+    if (along % APPROACH_PILLAR_EVERY === 0 && top - 1 > ground) vox.add(x, z, ground, top - 1, PALETTE_INDEX.concrete);
+  });
+  if (from.kind === "anchor") {
+    const size = 4;
+    stripCells([from.at[0] - 0.01, from.at[1]], [from.at[0] + 0.01, from.at[1]], size, (x, z) => {
+      const ground = g(x, z);
+      if (y - 1 > ground) vox.add(x, z, ground, y - 1, PALETTE_INDEX.concrete);
+    });
+  }
+}
+
 /** Salesforce crown lattice (spec-v2 §5 row 1): fins every `every` ring cells from y0 to y1 plus a top band. */
 function latticeVoxels(op, S, base, vox) {
   const [cx, cz] = [S.frame.cx, S.frame.cz];
   const ring = [...op.cells].sort((a, b) => Math.atan2(a[1] + 0.5 - cz, a[0] + 0.5 - cx) - Math.atan2(b[1] + 0.5 - cz, b[0] + 0.5 - cx));
+  const flags = op.emissive ? 1 : 0;
   ring.forEach(([x, z], i) => {
-    if (i % op.every === 0) vox.add(x, z, base + op.y0, base + op.y1, op.palette);
-    else vox.add(x, z, base + op.y1 - 1, base + op.y1, op.palette);
+    if (i % op.every === 0) vox.add(x, z, base + op.y0, base + op.y1, op.palette, flags);
+    else vox.add(x, z, base + op.y1 - 1, base + op.y1, op.palette, flags);
   });
 }
 
@@ -154,7 +186,7 @@ export function landmarkMeshBoxes(ctx, landmarks = loadLandmarks(), skyline = lo
   const vox = new VoxelSet();
   for (const lm of landmarks) {
     if (lm.bridge !== undefined) {
-      bridgeVoxels(lm.bridge, Math.round(siteHeightM(lm, skyline) / BLOCK_M), ctx.proj, vox);
+      bridgeVoxels(lm.bridge, Math.round(siteHeightM(lm, skyline) / BLOCK_M), ctx.proj, vox, ctx.groundAt);
       continue;
     }
     if (!lm.recipe.some((o) => o.op === "mesh")) continue;
