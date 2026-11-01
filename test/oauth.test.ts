@@ -362,3 +362,32 @@ describe("OAuth sign-in flow", () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe("MCP Events over an OAuth grant", () => {
+  it("a new session on the same grant subscribes as the agent that grant joined as", async () => {
+    const o = await createOffice();
+    const { tokens } = await signIn(o);
+    const real = globalThis.fetch;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (!url.startsWith("https://hooks.")) return real(input, init);
+      return Response.json({ challenge: JSON.parse(String(init?.body)).challenge });
+    });
+    const rpc = async (sessionId: string, method: string, params: unknown) => {
+      const res = await SELF.fetch(`${ORIGIN}/mcp`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${tokens.access_token}`, "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-session-id": sessionId },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 2, method, params }),
+      });
+      return (await res.json()) as any;
+    };
+    const first = (await mcpInit(tokens.access_token)).headers.get("mcp-session-id")!;
+    const joined = JSON.parse((await rpc(first, "tools/call", { name: "office_join", arguments: { name: "ChatGPT" } })).result.content[0].text);
+    const second = (await mcpInit(tokens.access_token)).headers.get("mcp-session-id")!;
+    const secret = `whsec_${btoa("k".repeat(32))}`;
+    const sub = await rpc(second, "events/subscribe", { name: "office.message", arguments: {}, delivery: { mode: "webhook", url: "https://hooks.example.com/cb", secret }, cursor: null });
+    expect(sub.error).toBeUndefined();
+    const stored = await runInDurableObject(env.OFFICE.get(env.OFFICE.idFromName(o.id)), async (_i, state) => [...(await state.storage.list<{ agentId: string }>({ prefix: "evsub:" })).values()]);
+    expect(stored.map((s) => s.agentId)).toEqual([joined.agent.id]);
+  });
+});

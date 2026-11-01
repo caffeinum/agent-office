@@ -16,6 +16,7 @@ import { grantFromRequest, type OAuthGrant } from "./oauth";
 import { handleRest } from "./api";
 import { registryStub } from "./registry";
 import { validateWebhookUrl, WebhookError, Webhooks } from "./webhook";
+import { agentTokenOf, EventError, Events, INVALID_REQUEST } from "./events";
 import { CITY_ID, NO_LINK, type BridgeAgent, type CityArgs, type CityResult, type LinkRow, type LinkState } from "./city/do";
 
 export const MAX_CHAT = 200;
@@ -100,6 +101,8 @@ interface AgentRecord extends Agent {
   mcp?: true;
   /** Id of the invite it came in through; revoking that invite shows it out. */
   inviteId?: string;
+  /** The OAuth grant it last joined through: a new MCP session on that grant finds it again (events/subscribe). */
+  grantId?: string;
 }
 
 export interface ChatMsg {
@@ -180,7 +183,11 @@ export interface ToolHost {
   endSession(sessionId: string): Promise<void>;
   /** GET /mcp: an SSE stream for a known session; chat for its agent is pushed as channel notifications. */
   openStream(sessionId: string): Promise<Response>;
+  /** MCP Events: events/list, events/subscribe, events/unsubscribe. Throws EventError for JSON-RPC errors. */
+  eventsCall(method: EventMethod, params: unknown, ctx: CallCtx): Promise<unknown>;
 }
+
+export type EventMethod = "events/list" | "events/subscribe" | "events/unsubscribe";
 
 /** One open GET /mcp event stream. */
 interface McpStream {
@@ -216,7 +223,7 @@ interface WsAttachment {
   label?: string;
 }
 
-const publicAgent = ({ tokenHash: _t, lastRead: _r, sessions: _s, askedName: _n, mcp: _m, inviteId: _i, ...a }: AgentRecord): Agent => a;
+const publicAgent = ({ tokenHash: _t, lastRead: _r, sessions: _s, askedName: _n, mcp: _m, inviteId: _i, grantId: _g, ...a }: AgentRecord): Agent => a;
 
 function hueOf(name: string): number {
   let h = 0;
@@ -266,6 +273,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
   /** Created with the ADMIN_KEY; null for offices created before this was recorded. */
   private admin: boolean | null = null;
   private hooks: Webhooks;
+  private events: Events;
   /** This office's link to a company site on the city map (the City DO holds the authoritative state). */
   private cityLink: { siteId: string; state: LinkState } | null = null;
   /** Invites whose agents the owner let into the city (owner-key agents always may walk). */
@@ -276,6 +284,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.hooks = new Webhooks({ storage: ctx.storage, waitUntil: (p) => ctx.waitUntil(p) });
+    this.events = new Events({ storage: ctx.storage, waitUntil: (p) => ctx.waitUntil(p) });
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}'));
     ctx.blockConcurrencyWhile(() => this.load());
   }
@@ -300,6 +309,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     for (const [, k] of await ctx.storage.list<CustomKind>({ prefix: "kind:" })) this.customKinds[k.kind] = k;
     this.designer = (await ctx.storage.get<string>("designer")) ?? null;
     await this.hooks.load();
+    await this.events.load();
     const rows = ctx.storage.sql.exec<{ id: string; name: string; type: string; w: number; h: number; size: number; by: string; at: number }>(
       "SELECT id, name, type, w, h, size, by, at FROM assets ORDER BY at",
     );
@@ -587,6 +597,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.registered = false;
     this.admin = null;
     this.hooks.clearAll();
+    this.events.clearAll();
     this.cityLink = null;
     this.cityInvites.clear();
     this.cityDirty = false;
@@ -654,6 +665,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
   private async removeAgent(a: AgentRecord): Promise<void> {
     if (this.designer === a.id) await this.setDesigner(null);
     await this.hooks.drop(a.id);
+    await this.events.dropAgent(a.id);
     this.agents.delete(a.id);
     this.byToken.delete(a.tokenHash);
     for (const s of a.sessions) {
@@ -683,6 +695,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.pushChat(msg);
     const meta = this.mustMeta();
     this.hooks.onChat(msg, { id: meta.id, name: meta.name }, this.agents.values(), (ref) => this.displayName(ref));
+    this.events.onChat(msg, meta.id, (id) => this.agents.get(id) ?? null, (id) => this.mayReceive(id), (ref) => this.displayName(ref));
     return msg;
   }
 
@@ -760,13 +773,58 @@ export class Office extends DurableObject<Env> implements ToolHost {
         await this.saveAgent(a);
       }
     }
+    await this.events.prune();
     const city = this.cityPushDue();
     if (this.cityDirty || (city !== null && city <= now)) await this.pushCity();
     await this.scheduleAlarm();
   }
 
   private removeAfter(a: AgentRecord): number {
-    return this.hooks.describe(a.id) ? ON_CALL_REMOVE_MS : REMOVE_MS;
+    return this.hooks.describe(a.id) || this.events.active(a.id).length ? ON_CALL_REMOVE_MS : REMOVE_MS;
+  }
+
+  /** An agent may still get events: it is in the office and the invite it came through was not revoked. */
+  private mayReceive(agentId: string): boolean {
+    const a = this.agents.get(agentId);
+    if (!a) return false;
+    return !a.inviteId || this.mustMeta().keys.join.some((i) => i.id === a.inviteId);
+  }
+
+  async eventsCall(method: EventMethod, params: unknown, ctx: CallCtx): Promise<unknown> {
+    this.mustMeta();
+    if (method === "events/list") return this.events.list(params);
+    const agent = await this.eventPrincipal(ctx, agentTokenOf(params));
+    this.rateLimit(`agent:${agent.id}`, RATE_MAX);
+    if (method === "events/unsubscribe") return this.events.unsubscribe(agent, params, ctx.origin);
+    const result = await this.events.subscribe(agent, params, {
+      origin: ctx.origin,
+      officeId: this.mustMeta().id,
+      history: this.chat,
+      historyFull: this.chat.length >= MAX_CHAT,
+      nameOf: (ref) => this.displayName(ref),
+    });
+    const changed = this.touch(agent);
+    await this.saveAgent(agent, changed);
+    await this.scheduleAlarm();
+    return result;
+  }
+
+  /** Who subscribes: this session's agent, the agentToken (header or arguments), or the agent this OAuth grant last joined as. */
+  private async eventPrincipal(ctx: CallCtx, argToken: string | undefined): Promise<AgentRecord> {
+    let agent: AgentRecord | null;
+    try {
+      agent = await this.resolveAgent(ctx, argToken);
+    } catch (e) {
+      if (e instanceof ToolError) throw new EventError(INVALID_REQUEST, e.message);
+      throw e;
+    }
+    if (!agent && ctx.grant) {
+      const grantId = ctx.grant.id;
+      agent = [...this.agents.values()].filter((a) => a.grantId === grantId).sort((p, q) => q.lastSeen - p.lastSeen)[0] ?? null;
+    }
+    if (!agent) throw new EventError(INVALID_REQUEST, "join the office first: call office_join on this connection, then subscribe (or pass arguments.agentToken from office_join)");
+    if (!this.mayReceive(agent.id)) throw new EventError(INVALID_REQUEST, "the invite this agent joined through was revoked");
+    return agent;
   }
 
   // ---------- tools ----------
@@ -1161,6 +1219,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
       a = { id: `${slug(baseName)}-${shortId()}`, name: "", hue: 0, status: "idle", joinedAt: now, lastSeen: now, tokenHash, lastRead: 0, sessions: [] };
     }
     a.askedName = baseName;
+    if (ctx.grant) a.grantId = ctx.grant.id;
+    else delete a.grantId;
     if (ctx.invite) {
       a.inviteId = ctx.invite.id;
       a.via = ctx.invite.label;

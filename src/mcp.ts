@@ -3,10 +3,13 @@
 // that joins in that session, so later calls need no agentToken.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { McpError, type ServerCapabilities } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 import { randomSecret } from "./auth";
 import { BIG_BODY_MAX, errorResponse, readJson } from "./http";
 import { DESIGN_MODE_PARAM, DESIGN_MODE_VALUE, DESIGN_TOOLS, SPLIT_TOOLS, DESIGNER_PROMPT, INSTRUCTIONS, INSTRUCTIONS_DESIGN, TOOL_NAMES, TOOLS, ToolError, type ToolName } from "./tools";
-import type { CallCtx, ToolHost } from "./office";
+import { EventError } from "./events";
+import type { CallCtx, EventMethod, ToolHost } from "./office";
 
 const READ_ONLY = new Set<ToolName>(["office_look", "office_kinds", "office_chat_read", "office_theme_get"]);
 const DESTRUCTIVE = new Set<ToolName>(["office_edit", "office_remove", "office_leave", "office_delete_kind", "office_delete_asset"]);
@@ -14,6 +17,9 @@ export const SERVER_VERSION = "0.1.0";
 /** Claude Code channels (research preview): with this capability, notifications/claude/channel on the GET stream land in the session. */
 export const CHANNEL_CAPABILITY = "claude/channel";
 export const CHANNEL_METHOD = "notifications/claude/channel";
+/** MCP Events (draft spec, as ChatGPT implements it): declared in the initialize result's capabilities. */
+export const EVENTS_CAPABILITY = "events";
+const EVENT_METHODS: readonly EventMethod[] = ["events/list", "events/subscribe", "events/unsubscribe"];
 
 function isInitialize(body: unknown): boolean {
   const msgs = Array.isArray(body) ? body : [body];
@@ -54,8 +60,25 @@ export function buildServer(host: ToolHost, ctx: CallCtx, design: boolean): McpS
     tools: { listChanged: false }, // the GET stream carries chat pushes only, never list changes
     ...(design ? { prompts: { listChanged: false } } : {}),
     experimental: { [CHANNEL_CAPABILITY]: {} },
-  });
+    [EVENTS_CAPABILITY]: {},
+  } as ServerCapabilities);
+  registerEvents(server, host, ctx);
   return server;
+}
+
+function registerEvents(server: McpServer, host: ToolHost, ctx: CallCtx) {
+  for (const method of EVENT_METHODS) {
+    const schema = z.object({ method: z.literal(method), params: z.record(z.string(), z.unknown()).optional() });
+    server.server.setRequestHandler(schema, async (req) => {
+      const { _meta: _ignored, ...params } = req.params ?? {};
+      try {
+        return (await host.eventsCall(method, params, ctx)) as Record<string, unknown>;
+      } catch (e) {
+        if (e instanceof EventError) throw new McpError(e.code, e.message, e.data);
+        throw e;
+      }
+    });
+  }
 }
 
 function registerDesignerPrompt(server: McpServer) {
