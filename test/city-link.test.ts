@@ -77,6 +77,20 @@ describe("city link flow", () => {
     const joinKey = await SELF.fetch(`${ORIGIN}/api/o/${o.id}/city`, { method: "PUT", headers: { authorization: `Bearer ${o.joinKey}` }, body: "{}" });
     expect(joinKey.status).toBe(403);
   });
+
+  it("the admin can request a link for an office without its ownerKey", async () => {
+    const o = await createOffice();
+    const put = (auth: string) => SELF.fetch(`${ORIGIN}/api/offices/${o.id}/city`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${auth}`, "content-type": "application/json" },
+      body: JSON.stringify({ city: "sf", siteId: "fixture-labs" }),
+    });
+    expect((await put(o.ownerKey)).status).toBe(401);
+    const res = await put(ADMIN);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as any).link).toEqual({ siteId: "fixture-labs", state: "pending" });
+    expect((await admin(`/${o.id}/approve`, "POST")).status).toBe(200);
+  });
 });
 
 describe("city spam limits", () => {

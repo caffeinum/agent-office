@@ -104,7 +104,7 @@ export async function handleCreateOffice(req: Request, env: Env): Promise<Respon
 
 const DO_ID_RE = /^[0-9a-f]{64}$/;
 
-/** Admin office management: GET /api/offices (registry), DELETE /api/offices/:id, GET|DELETE /api/offices/do/:doId. */
+/** Admin office management: GET /api/offices (registry), DELETE /api/offices/:id, PUT /api/offices/:id/city, GET|DELETE /api/offices/do/:doId. */
 export async function handleAdmin(req: Request, env: Env, rest: string): Promise<Response> {
   const refused = await refuseNonAdmin(req, env, "office admin");
   if (refused) return refused;
@@ -123,6 +123,12 @@ export async function handleAdmin(req: Request, env: Env, rest: string): Promise
       return errorResponse(400, `not an Office Durable Object id: ${e instanceof Error ? e.message : String(e)}`);
     }
     return adminOffice(req, env.OFFICE.get(doId), `GET|DELETE /api/offices/do/<doId>`);
+  }
+  const cityLink = /^([^/]+)\/city$/.exec(rest)?.[1];
+  if (cityLink) {
+    if (!OFFICE_ID_RE.test(cityLink)) return errorResponse(404, "no such office");
+    if (req.method !== "PUT") return errorResponse(405, `PUT /api/offices/<id>/city {city, siteId} requests a city link for that office as the admin`);
+    return env.OFFICE.get(env.OFFICE.idFromName(cityLink)).fetch("https://office/internal/admin/city", { method: "PUT", body: await req.text() });
   }
   const id = /^([^/]+)$/.exec(rest)?.[1];
   if (!id || !OFFICE_ID_RE.test(id)) return errorResponse(404, "no such office");

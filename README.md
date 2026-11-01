@@ -364,6 +364,7 @@ With `Authorization: Bearer <ADMIN_KEY>` (503 if the secret isn't set, 401 if it
 | `DELETE /api/offices/<id>` | deletes any office like the owner's delete (viewers get "this office was deleted by an admin"). A 404 also drops a stale registry row. |
 | `GET /api/offices/do/<doId>` | an office by its raw Durable Object id (64 lowercase hex, as the Cloudflare API lists them): id, name, createdAt, admin, agentCount, itemCount, assetCount, viewers, lastActiveAt, lastOwnerAt, joined, graceUntil, expiresAt. No keys. 400 for a malformed id, 404 if that object holds no office. |
 | `DELETE /api/offices/do/<doId>` | deletes that office. |
+| `PUT /api/offices/<id>/city` | `{city: "sf", siteId}` requests a city link for that office as the admin (for an owner who lost the owner key). It starts pending like the owner's request; approve it with `POST /api/city/sf/links/<id>/approve`. |
 
 The registry is a single Durable Object. New offices are added when created; each office refreshes its row (last activity, agent count) at most every 10 minutes while in use, and deleted or expired offices are removed. Offices created before the registry existed add themselves the first time anything opens them, so until then only the `/do/<doId>` endpoints reach them.
 
