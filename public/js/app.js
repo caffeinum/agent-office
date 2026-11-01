@@ -43,11 +43,20 @@ function forgetKey(office) {
   try { sessionStorage.removeItem(keySlot(office)); } catch { /* nothing stored */ }
 }
 
-function initialTheme() {
-  if (params.get("theme") === "night" || params.get("theme") === "day") return params.get("theme");
-  try { const t = localStorage.getItem("office.theme"); if (t === "day" || t === "night") return t; } catch { /* default below */ }
+/** Day or night from the viewer's local clock (night 19:00–07:00). */
+function clockTheme() {
   const h = new Date().getHours();
   return h >= 19 || h < 7 ? "night" : "day";
+}
+
+/** ?theme= wins; a manual toggle sticks only until the clock's day/night phase changes. */
+function initialTheme() {
+  if (params.get("theme") === "night" || params.get("theme") === "day") return params.get("theme");
+  try {
+    const saved = JSON.parse(localStorage.getItem("office.theme") ?? "null");
+    if (saved && (saved.theme === "day" || saved.theme === "night") && saved.phase === clockTheme()) return saved.theme;
+  } catch { /* old plain-string value or no storage: follow the clock */ }
+  return clockTheme();
 }
 
 function boot() {
@@ -147,12 +156,16 @@ function boot() {
     return v;
   }
 
-  function setTheme(t) {
+  function setTheme(t, remember = true) {
     scene.setTheme(t);
     ui.setTheme(t);
-    try { localStorage.setItem("office.theme", t); } catch { /* fine */ }
+    if (!remember) return;
+    try { localStorage.setItem("office.theme", JSON.stringify({ theme: t, phase: clockTheme() })); } catch { /* fine */ }
   }
-  setTheme(initialTheme());
+  setTheme(initialTheme(), false);
+  if (!params.has("theme")) {
+    setInterval(() => { const t = initialTheme(); if (t !== scene.theme) setTheme(t, false); }, 60_000);
+  }
 
   function selectAgent(id) {
     selectedAgent = id;
