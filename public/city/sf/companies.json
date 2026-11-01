@@ -1,7 +1,7 @@
 {
  "version": 2,
  "city": "sf",
- "builtAt": "2026-10-31T22:14:53Z",
+ "builtAt": "2026-11-01T07:07:05Z",
  "sites": [
   {
    "id": "anthropic-500-howard",
@@ -175,7 +175,7 @@
     "parcel": "8721033"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1455+3rd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 44914,
+   "buildingId": 44913,
    "block": {
     "x": 4455,
     "z": 4775
@@ -218,7 +218,7 @@
     "parcel": "8721012"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1515+3rd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 44915,
+   "buildingId": 44914,
    "block": {
     "x": 4424,
     "z": 4794
@@ -310,7 +310,7 @@
     "parcel": "8722024"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1725+3rd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 45258,
+   "buildingId": 45257,
    "block": {
     "x": 4388,
     "z": 4851
@@ -625,7 +625,7 @@
     "parcel": "3710018"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=50+Beale+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 45518,
+   "buildingId": 45517,
    "block": {
     "x": 4844,
     "z": 4062
@@ -668,7 +668,7 @@
     "parcel": "3749062"
    },
    "hintFrom": "https://www.openstreetmap.org/node/3894036010",
-   "buildingId": 44970,
+   "buildingId": 44969,
    "block": {
     "x": 4708,
     "z": 4236
@@ -711,7 +711,7 @@
     "parcel": "3749062"
    },
    "hintFrom": "https://www.openstreetmap.org/node/3894036010",
-   "buildingId": 44970,
+   "buildingId": 44969,
    "block": {
     "x": 4708,
     "z": 4236
@@ -754,7 +754,7 @@
     "parcel": "3721001"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=100+1st+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 46640,
+   "buildingId": 46639,
    "block": {
     "x": 4775,
     "z": 4084
@@ -883,7 +883,7 @@
     "parcel": "3710017"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=350+Mission+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 45472,
+   "buildingId": 45471,
    "block": {
     "x": 4830,
     "z": 4066
@@ -932,7 +932,7 @@
     "parcel": "3710020"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=333+Market+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 46282,
+   "buildingId": 46281,
    "block": {
     "x": 4835,
     "z": 4020
@@ -1019,7 +1019,7 @@
     "parcel": "3741035"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=2+Folsom+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 46662,
+   "buildingId": 46661,
    "block": {
     "x": 4948,
     "z": 4195
@@ -1063,7 +1063,7 @@
     "parcel": "3713006"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1+Market+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 45179,
+   "buildingId": 45178,
    "block": {
     "x": 4946,
     "z": 4020
@@ -1106,7 +1106,7 @@
     "parcel": "0316010"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=420+Taylor+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 46591,
+   "buildingId": 46590,
    "block": {
     "x": 4413,
     "z": 3890
@@ -1150,7 +1150,7 @@
     "parcel": "3740034"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=221+Main+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 46345,
+   "buildingId": 46344,
    "block": {
     "x": 4909,
     "z": 4173
@@ -1329,7 +1329,7 @@
     "parcel": "3701064"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1275+Market+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 46421,
+   "buildingId": 46420,
    "block": {
     "x": 4093,
     "z": 4030
@@ -1600,7 +1600,7 @@
     "parcel": "3717005"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=160+Spear+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 45436,
+   "buildingId": 45435,
    "block": {
     "x": 4916,
     "z": 4116
@@ -1645,7 +1645,7 @@
     "parcel": "0289003"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1+Sansome+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 46393,
+   "buildingId": 46392,
    "block": {
     "x": 4731,
     "z": 3989
@@ -1689,7 +1689,7 @@
     "parcel": "0289003"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=1+Sansome+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 46393,
+   "buildingId": 46392,
    "block": {
     "x": 4731,
     "z": 3989
@@ -1781,7 +1781,7 @@
     "parcel": "8719A008"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=300+Toni+Stone+Crossing%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 45049,
+   "buildingId": 45048,
    "block": {
     "x": 4597,
     "z": 4632
@@ -1830,7 +1830,7 @@
     "parcel": "3735063"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=222+2nd+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 46623,
+   "buildingId": 46622,
    "block": {
     "x": 4679,
     "z": 4154
@@ -1967,7 +1967,7 @@
     "parcel": "3507040"
    },
    "hintFrom": "https://www.openstreetmap.org/node/8410287828",
-   "buildingId": 44904,
+   "buildingId": 44903,
    "block": {
     "x": 3995,
     "z": 4019
@@ -2025,7 +2025,7 @@
     "parcel": "3711013"
    },
    "hintFrom": "https://nominatim.openstreetmap.org/search?q=77+Beale+St%2C+San+Francisco%2C+CA&format=jsonv2&limit=1",
-   "buildingId": 45696,
+   "buildingId": 45695,
    "block": {
     "x": 4866,
     "z": 4055
