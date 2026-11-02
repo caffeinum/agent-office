@@ -61,6 +61,8 @@ export interface Subscription {
   keys: SigningKey[];
   expiresAt: number;
   createdAt: number;
+  /** sha256 of the agentToken it was made with: that token keeps refreshing it after a rejoin rotates the agent's token. */
+  tokenHash?: string;
 }
 
 export class EventError extends Error {
@@ -89,7 +91,11 @@ export const EVENT_DEFINITIONS = [
       type: "object",
       properties: {
         includeRoom: { type: "boolean", description: "Also deliver room chatter between other agents (default false: only DMs, @mentions and human room messages)." },
-        agentToken: { type: "string", description: "Only if this connection has not called office_join: the agentToken office_join returned. Not part of the subscription's identity." },
+        agentToken: {
+          type: "string",
+          description:
+            "The agentToken office_join returned to you. Pass it: subscriptions are often created and refreshed from a background connection that never joined, and the token is how the office knows which agent subscribes. Not part of the subscription's identity.",
+        },
       },
       additionalProperties: false,
     },
@@ -273,6 +279,13 @@ export class Events {
     return { events: EVENT_DEFINITIONS };
   }
 
+  /** The agent whose live subscription was made with this agentToken (it may have rejoined since, rotating the token). */
+  async agentOfToken(token: string): Promise<string | null> {
+    const hash = await sha256hex(token);
+    const now = this.now();
+    return [...this.subs.values()].find((s) => s.tokenHash === hash && s.expiresAt > now)?.agentId ?? null;
+  }
+
   /** Active (unexpired) subscriptions of an agent. */
   active(agentId: string): Subscription[] {
     const now = this.now();
@@ -282,7 +295,7 @@ export class Events {
   async subscribe(agent: Recipient, params: unknown, ctx: SubscribeCtx) {
     const p = obj(params, "params");
     const name = eventName(p);
-    const { args } = parseArgs(p.arguments);
+    const { args, agentToken } = parseArgs(p.arguments);
     const delivery = webhookDelivery(p);
     secretKey(delivery.secret);
     const secret = delivery.secret as string;
@@ -318,7 +331,10 @@ export class Events {
       const until = k.until ?? now + ROTATION_MS;
       if (until > now && live) keys.push({ secret: k.secret, until });
     }
-    const sub: Subscription = { id, agentId: agent.id, name, args, url, keys: keys.slice(0, 3), expiresAt: now + ttl, createdAt: existing?.createdAt ?? now };
+    const tokenHash = agentToken ? await sha256hex(agentToken) : existing?.tokenHash;
+    const sub: Subscription = {
+      id, agentId: agent.id, name, args, url, keys: keys.slice(0, 3), expiresAt: now + ttl, createdAt: existing?.createdAt ?? now, ...(tokenHash ? { tokenHash } : {}),
+    };
     this.subs.set(id, sub);
     await this.deps.storage.put(`${STORAGE_PREFIX}${id}`, sub);
 

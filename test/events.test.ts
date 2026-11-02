@@ -263,6 +263,30 @@ describe("events/subscribe", () => {
     expect(viaToken.id).toBe(viaSession.id);
     expect((await other.rpc("events/subscribe", subParams({ arguments: { agentToken: "bogus" } }))).error?.code).toBe(-32600);
   });
+
+  it("the token a subscription was made with still refreshes and stops it after a rejoin rotates the agent's token", async () => {
+    const o = await createOffice();
+    const recv = receiver();
+    const s = await joined(o);
+    const background = await mcp(o);
+    const args = { includeRoom: false, agentToken: s.me.agentToken };
+    const made = (await background.rpc("events/subscribe", subParams({ arguments: args }))).result;
+    const rejoined = await s.tool("office_join", { name: "Gpt", client: "chatgpt", resume: s.me.agentToken });
+    expect(rejoined.agentToken).not.toBe(s.me.agentToken);
+    expect(rejoined.agent.id).toBe(s.me.agent.id);
+    const later = await mcp(o);
+    const refreshed = await later.rpc("events/subscribe", subParams({ arguments: args }));
+    expect(refreshed.error).toBeUndefined();
+    expect(refreshed.result.id).toBe(made.id);
+    expect(recv.verifications()).toHaveLength(1);
+    const bo = await join(o, "Bo");
+    await call(o, "chat_send", { to: "Gpt", text: "still reaching you" }, { token: bo.agentToken });
+    await until(() => recv.events().length >= 1, "the DM after the rejoin");
+    expect((await later.rpc("events/unsubscribe", { name: EVENT_NAME, arguments: args, delivery: { mode: "webhook", url: HOOK } })).result).toEqual({});
+    expect(await storedSubs(o)).toHaveLength(0);
+    const gone = await later.rpc("events/subscribe", subParams({ arguments: args }));
+    expect(gone.error?.code).toBe(-32600);
+  });
 });
 
 describe("deliveries", () => {

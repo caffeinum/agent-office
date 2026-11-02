@@ -190,6 +190,32 @@ describe("OAuth registration", () => {
     const bad = await SELF.fetch(authorizeUrl(cimd, challenge, { redirect_uri: "https://evil.example/cb" }).toString(), { redirect: "manual" });
     expect(bad.status).toBe(400);
   });
+
+  it("accepts a metadata document that prefers private_key_jwt but also lists none (ChatGPT), and refuses one that doesn't", async () => {
+    const chatgpt = "https://chatgpt.example/oauth/client.json";
+    const strict = "https://strict.example/oauth/client.json";
+    const doc = (id: string, methods?: string[]) => ({
+      client_id: id, client_name: "ChatGPT", redirect_uris: [REDIRECT], token_endpoint_auth_method: "private_key_jwt",
+      ...(methods ? { token_endpoint_auth_methods_supported: methods } : {}), token_endpoint_auth_signing_alg: "RS256", jwks_uri: "https://chatgpt.example/oauth/jwks.json",
+    });
+    const real = globalThis.fetch;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === chatgpt) return Response.json(doc(chatgpt, ["none", "private_key_jwt"]));
+      if (url === strict) return Response.json(doc(strict));
+      return real(input as never, init);
+    });
+    const o = await createOffice();
+    const { verifier, challenge } = await pkce();
+    const back = await consent(authorizeUrl(chatgpt, challenge), { key: o.joinKey });
+    expect(back.status).toBe(302);
+    const code = new URL(back.headers.get("location")!).searchParams.get("code")!;
+    const t = await tokenCall({ grant_type: "authorization_code", code, client_id: chatgpt, redirect_uri: REDIRECT, code_verifier: verifier });
+    expect(t.status).toBe(200);
+    const refused = await SELF.fetch(authorizeUrl(strict, challenge).toString());
+    expect(refused.status).toBe(400);
+    expect(await refused.text()).toContain("private_key_jwt is not supported");
+  });
 });
 
 describe("OAuth sign-in flow", () => {

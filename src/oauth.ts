@@ -293,7 +293,9 @@ async function fetchCimd(clientId: string): Promise<{ client: ClientRecord; ttl:
     const p = redirectUriProblem(u);
     if (p) return `client metadata document: ${p}`;
   }
-  if (doc.token_endpoint_auth_method !== undefined && doc.token_endpoint_auth_method !== "none") {
+  // a client may prefer another method but list "none" among the ones it can do (ChatGPT: private_key_jwt, with "none" too)
+  const methods = Array.isArray(doc.token_endpoint_auth_methods_supported) ? doc.token_endpoint_auth_methods_supported : [];
+  if (doc.token_endpoint_auth_method !== undefined && doc.token_endpoint_auth_method !== "none" && !methods.includes("none")) {
     return `token_endpoint_auth_method ${String(doc.token_endpoint_auth_method)} is not supported here (public clients only: "none")`;
   }
   return { client: { id: clientId, name: doc.client_name.trim().slice(0, 80), redirectUris: doc.redirect_uris as string[], kind: "cimd" }, ttl: cimdTtl(res) };

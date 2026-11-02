@@ -815,14 +815,17 @@ export class Office extends DurableObject<Env> implements ToolHost {
     try {
       agent = await this.resolveAgent(ctx, argToken);
     } catch (e) {
-      if (e instanceof ToolError) throw new EventError(INVALID_REQUEST, e.message);
-      throw e;
+      if (!(e instanceof ToolError)) throw e;
+      // a rejoin rotated the token; the one a live subscription was made with still refreshes or stops it
+      const subscriber = argToken ? await this.events.agentOfToken(argToken) : null;
+      agent = subscriber ? (this.agents.get(subscriber) ?? null) : null;
+      if (!agent) throw new EventError(INVALID_REQUEST, e.message);
     }
     if (!agent && ctx.grant) {
       const grantId = ctx.grant.id;
       agent = [...this.agents.values()].filter((a) => a.grantId === grantId).sort((p, q) => q.lastSeen - p.lastSeen)[0] ?? null;
     }
-    if (!agent) throw new EventError(INVALID_REQUEST, "join the office first: call office_join on this connection, then subscribe (or pass arguments.agentToken from office_join)");
+    if (!agent) throw new EventError(INVALID_REQUEST, "no agent to subscribe: pass arguments.agentToken (the token office_join returned), or join with office_join on this connection, or connect with OAuth");
     if (!this.mayReceive(agent.id)) throw new EventError(INVALID_REQUEST, "the invite this agent joined through was revoked");
     return agent;
   }
