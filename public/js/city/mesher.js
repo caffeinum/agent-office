@@ -483,10 +483,12 @@ function meshTops(grid, scale, { ao, uvs, curb = false, slopeR = scale === 1 ? 3
 /**
  * LOD0 curbs: road tops sit CURB below their ground, so every road cell gets a CURB-high face on each edge whose
  * neighbour is not road and stands at least as high (a sidewalk, a building, a pillar), or is a higher road terrace.
+ * Road under a deck is sunk by meshTops like any other, so it gets curbs too (without them the kerb is an open slot
+ * down to the sea plane).
  */
 function meshCurbs(grid, opaque) {
   const { w } = grid;
-  const road = (c) => grid.segN[c] > 0 && isRoadSurface(grid.topC[c]) && grid.u2hi[c] === 0;
+  const road = (c) => grid.segN[c] > 0 && isRoadSurface(grid.topC[c]);
   for (let j = 0; j < w; j++) {
     for (let i = 0; i < w; i++) {
       const c = cellAt(grid, i, j);
@@ -604,7 +606,7 @@ function wallPieces(lo, hi, base, colorId, kind, accFrom, accC, pos, patterns, e
 /** Unbuilt-land terrace sides face up and take the paper tone at the cell's own hillshade, so far hills read as
  * one shaded surface instead of a stripe per 1-block step. */
 
-function meshSides(grid, scale, { uvs, glow, patterns, paperSides = false, slopeR = 1, slopeStep = 1 }, opaque, walls) {
+function meshSides(grid, scale, { uvs, glow, patterns, paperSides = false, slopeR = 1, slopeStep = 1, skirt = 0 }, opaque, walls) {
   const { w } = grid;
   const pieces = [];
   for (const dir of SIDES) {
@@ -630,7 +632,7 @@ function meshSides(grid, scale, { uvs, glow, patterns, paperSides = false, slope
         pieces.length = 0;
         if (grid.exists[c]) {
           const nb = cellAt(grid, i + dir.di, j + dir.dj);
-          const n1 = grid.unknown[nb] ? Math.min(grid.gMin[c], grid.u1[c]) : grid.u1[nb];
+          const n1 = grid.unknown[nb] ? Math.min(grid.gMin[c], grid.u1[c]) - skirt : grid.u1[nb];
           const n2lo = grid.unknown[nb] ? 0 : grid.u2lo[nb];
           const n2hi = grid.unknown[nb] ? 0 : grid.u2hi[nb];
           const paper = grid.paper[nb] === 1;
@@ -887,8 +889,9 @@ const quantizeUp = (h, f) => (h <= 1 ? h : Math.ceil(h / f) * f);
  * LOD1 (2×2) / LOD2 (4×4) downsample of one region's chunks (≤ 16, all in the same 4×4 region).
  * skip = [[cx, cz], ...] chunks drawn at LOD0: not emitted, but used as neighbour coverage when present
  * in `chunks`. Region chunks neither given nor skipped are absent (open water or unbuilt land). Cells outside
- * the region are unknown: their side faces skirt down to the cell's lowest ground. LOD1 also draws the
- * chunks' props as 1×1 boxes. → {opaque} MeshBuffers (+ glow)
+ * the region are unknown: their side faces skirt down to CURB below the cell's lowest ground, which closes the
+ * slot toward a LOD0 neighbour whose road tops sit CURB lower. LOD1 also draws the chunks' props as 1×1 boxes.
+ * → {opaque} MeshBuffers (+ glow)
  */
 export function meshRegion(chunks, skip, lod) {
   if (lod !== 1 && lod !== 2) throw new Error(`meshRegion: lod must be 1 or 2, got ${lod}`);
@@ -931,7 +934,7 @@ export function meshRegion(chunks, skip, lod) {
     }
   }
   const opaque = createBuilder({ glow: true });
-  const opts = { ao: false, uvs: false, glow: true, patterns: false };
+  const opts = { ao: false, uvs: false, glow: true, patterns: false, skirt: CURB };
   meshTops(grid, f, opts, opaque);
   meshSides(grid, f, opts, opaque, null);
   if (lod === 1) {

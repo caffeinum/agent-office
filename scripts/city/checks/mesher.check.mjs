@@ -705,6 +705,33 @@ test("curb: LOD0 road tops sit CURB below the sidewalk, with a CURB-high face al
   assert.ok(!quads(lod1).some((q) => q.normal[1] === 1 && !Number.isInteger(q.min[1])), "LOD1/2 keep integer tops");
 });
 
+test("curb: road under a deck is sunk and kerbed like open road, with no step where the deck starts", () => {
+  const decked = (cx, cz) => {
+    const c = streetChunk(cx, cz);
+    for (let lz = 20; lz <= 40; lz++) for (let lx = 10; lx < 30; lx++) c.deck[lz * 64 + lx] = 12;
+    return c;
+  };
+  const c = decked(4, 4);
+  const { opaque } = meshChunk(c, around(c, (x, z) => decked(x, z)));
+  const curbs = quads(opaque).filter((q) => q.normal[1] === 0 && Math.abs(q.max[1] - q.min[1] - CURB) < 1e-6);
+  const under = curbs.filter((q) => q.min[0] >= 10 && q.max[0] <= 30);
+  assert.equal(under.length, 2 * 20, "both kerbs under the deck have a face per column");
+  assert.equal(curbs.length, 2 * 64, "no cross-road step at the deck edges");
+  const roadTops = quads(opaque).filter((q) => q.normal[1] === 1 && q.min[2] >= 30 && q.max[2] <= 34 && q.max[1] < 6);
+  assert.ok(roadTops.length > 0 && roadTops.every((q) => Math.abs(q.min[1] - (5 - CURB)) < 1e-6), "road under the deck at ground − CURB");
+});
+
+test("LOD seam: a region skirts CURB below its edge toward a LOD0 chunk, so the sunk road leaves no slot", () => {
+  const a = streetChunk(4, 4, 4);
+  for (const lod of [1, 2]) {
+    const region = meshRegion([a], [[5, 4]], lod).opaque;
+    const facingLod0 = quads(region).filter((q) => q.normal[0] === 1 && q.min[0] === 64 && q.max[0] === 64);
+    const road = facingLod0.filter((q) => q.min[2] >= 28 && q.max[2] <= 36);
+    assert.ok(road.length > 0, `lod ${lod}: the road edge facing the LOD0 chunk has a face`);
+    assert.ok(road.every((q) => Math.abs(q.min[1] - (4 - CURB)) < 1e-6 && q.max[1] === 4), `lod ${lod}: it spans the sunk road top to the region's road top`);
+  }
+});
+
 test("street.bin on a chunk: paint and rails on the road only, furniture on its columns, lamp heads glow", () => {
   const c = streetChunk(4, 4);
   const x4 = (x) => (4 * 64 + x) * STREET_Q, z4 = (z) => (4 * 64 + z) * STREET_Q;
