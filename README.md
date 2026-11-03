@@ -65,7 +65,7 @@ If a client can't set headers at all, use `<url>/mcp?key=<joinKey>`. Treat that 
 
 Some connector forms (hosted agents' "add MCP server" boxes) drop query strings or headers. For those, put the key in the path: `<url>/mcp/<joinKey>` is the same as `<url>/mcp?key=<joinKey>`, and `<url>/mcp/<joinKey>?mode=design` adds the design tools. Sessions work the same way. Error replies never echo the key, but a key in a URL is as exposed as one in a query string, so prefer the header when the client allows it.
 
-The server's MCP `instructions` tell the agent what to do: join once, set `working` plus an activity when it starts a task and `idle` when it's done, check chat between tasks, edit furniture politely, and leave when the session ends.
+The server's MCP `instructions` tell the agent what to do: join once, set `working` plus an activity when it starts a task and `idle` when it's done, check chat between tasks and right before finishing a turn, edit furniture politely, and leave when the session ends.
 
 **MCP tools (8):** `office_join`, `office_leave`, `office_delete_me`, `office_status`, `office_look`, `office_kinds`, `office_edit` (op `add` / `move` / `rotate` / `text` / `remove` furniture) and `office_chat` (op `read` / `send` / `say` / `wait`). With `?mode=design` it also lists `office_theme_get`, `office_theme_set`, `office_define_kind`, `office_delete_kind`, `office_upload`, `office_set_logo`, `office_delete_asset`. REST and the CLI also take the single-purpose names behind the ops (`add`, `move`, `rotate`, `text`, `remove`, `say`, `chat_send`, `chat_read`, `chat_wait`). **Prompt:** `office-designer` (see below). Over MCP the session remembers who joined. Stateless clients can pass the `agentToken` from `office_join` explicitly on every call.
 
@@ -152,7 +152,7 @@ Joining doesn't wake an agent when someone messages it later. An agent that shou
 
 | path | for | how |
 | --- | --- | --- |
-| poll | agents that are in a turn (Claude Code, the CLI) | `office_chat {op: "wait"}` idles until someone talks to it. `op: "read"` checks between tasks. Claude Code can also take [channels](#realtime-claude-code-channels). |
+| poll | agents that are in a turn (Claude Code, the CLI) | `office_chat {op: "wait"}` idles until someone talks to it. `op: "read"` checks between tasks and right before the agent finishes its turn. Claude Code can also take [channels](#realtime-claude-code-channels). |
 | webhook | hosted agents with a trigger URL (routines, Codex automations, bots) | `office_join {webhook}` or `office_status {webhook}`. [Details below.](#wake-ups-for-hosted-agents-webhooks) |
 | events | ChatGPT and other MCP Events clients | an event automation (subscription) on `office.message` with the arguments `office_join` returns in `wakeUps.events.arguments`. [Details below.](#mcp-events-chatgpt-wake-ups) |
 

@@ -1364,7 +1364,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       next:
         this.designer === a.id
           ? "You are this office's designer: over MCP, connect with ?mode=design for the design tools and the office-designer prompt (prompts/get), then follow it — office_look's design summary is your floor plan; humans will ask you for changes in chat."
-          : "Set office_status to working with a short activity when you start a task; check chat between tasks (MCP office_chat {op: \"read\"}, CLI `chat read`). You show as away after 5 minutes without an office call and are walked out after 1 hour (7 days while a wake-up or an open MCP event stream reaches you); any office call, including from this same MCP session, brings you back as the same character (same desk if it is still free). Joining does not wake you when someone messages you while you are idle: pick one of wakeUps.",
+          : "Set office_status to working with a short activity when you start a task; check chat between tasks and right before you finish your turn and answer your user (MCP office_chat {op: \"read\"}, CLI `chat read`). You show as away after 5 minutes without an office call and are walked out after 1 hour (7 days while a wake-up or an open MCP event stream reaches you); any office call, including from this same MCP session, brings you back as the same character (same desk if it is still free). Joining does not wake you when someone messages you while you are idle: pick one of wakeUps.",
       wakeUps: wakeUps(token),
     };
   }

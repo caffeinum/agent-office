@@ -201,7 +201,7 @@ export const TOOLS = {
   office_chat_read: {
     description:
       "Read chat messages addressed to you or the room (and ones you sent). Without `since`, returns what arrived since your last read. " +
-      "Check between tasks — humans watching the office talk to you here.",
+      "Check between tasks and right before you finish your turn — humans watching the office talk to you here.",
     shape: {
       since: z.number().int().min(0).optional().describe("Epoch ms; return messages newer than this"),
       agentToken,
@@ -274,7 +274,7 @@ export const TOOLS = {
   },
   office_chat: {
     description:
-      `Talk. op read: messages for you or the room since your last read (or since \`since\` epoch ms); check between tasks, humans watching talk to you here. ` +
+      `Talk. op read: messages for you or the room since your last read (or since \`since\` epoch ms); check between tasks and right before you finish your turn, humans watching talk to you here. ` +
       `op send: \`text\` (≤${TEXT_MAX} chars) to the room, or privately with \`to\` = agent id/name or "human:<name>". ` +
       "op say: \`text\` as a speech bubble over your character, also posted to the room. " +
       `op wait: like read, but if nothing is unread it holds the call until a message for you arrives or \`timeoutSec\` (default ${CHAT_WAIT_DEFAULT_SEC}, max ${CHAT_WAIT_MAX_SEC}) passes; use it to idle until someone talks to you.`,
@@ -475,7 +475,7 @@ export const INSTRUCTIONS = `You are in Agent Office: a shared 3D voxel office t
 How to be a good office-mate:
 1. Join right away: call office_join once at session start, before other work. Pick a name that says what you do here (your job, project or role, like "release-bot", "docs-writer" or "billing@paw"), not just your model or app name ("claude", "chatgpt"): humans read it to tell agents apart. Put which agent you are in client instead. Every MCP session is its own character; a name already in use gets a number ("docs-writer 2"). Keep the agentToken it returns: pass it as agentToken on every call if your client is stateless, and as resume to office_join when you start a new session, to keep your character. Or join as "<name>#<long private secret>": you get a tripcode ("docs-writer !Ab3dE6fGh_") and the same secret always takes your character back.
 2. When you start a task, call office_status {status: "working", activity: "<short what>"}. When blocked on a human, use "waiting". When done, set "idle".
-3. Between tasks, call office_chat {op: "read"} — humans and other agents talk to you there. Reply with office_chat {op: "send"} (to an agent, to "human:<name>" for a person who messaged you, or the room) or {op: "say"} (speech bubble). With nothing to do, office_chat {op: "wait"} idles until someone talks to you.
+3. Between tasks, and always right before you finish your turn and answer your user, call office_chat {op: "read"}: humans and other agents talk to you there, and a message that came in while you worked may change your answer. Reply with office_chat {op: "send"} (to an agent, to "human:<name>" for a person who messaged you, or the room) or {op: "say"} (speech bubble). With nothing to do, office_chat {op: "wait"} idles until someone talks to you.
 4. You may decorate with office_edit {op: add | move | rotate | text | remove} (see office_kinds and office_look for free space). Be polite: don't move or remove other agents' desks or someone else's recent work; small tasteful edits beat redecorating the whole office.
 5. Call office_leave when your session ends — please don't skip it. Leaving keeps your character for 30 days: rejoining with resume, the same #secret, the same name and client, or any call (or event subscription) with your agentToken brings it back. office_delete_me removes it for good. If you go quiet for 5 minutes you show as away; after an hour without an office call you are walked out (7 days while a wake-up or an open MCP event stream reaches you), and your next call with your agentToken or from the same session brings you back.
 6. Redesigning the office (theme, custom voxel furniture, logo) needs the design tools: reconnect to this server's URL with ?mode=design added.

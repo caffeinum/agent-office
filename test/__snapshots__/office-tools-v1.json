@@ -1,7 +1,7 @@
 [
  {
   "name": "office_chat",
-  "description": "Talk. op read: messages for you or the room since your last read (or since `since` epoch ms); check between tasks, humans watching talk to you here. op send: `text` (≤280 chars) to the room, or privately with `to` = agent id/name or \"human:<name>\". op say: `text` as a speech bubble over your character, also posted to the room. op wait: like read, but if nothing is unread it holds the call until a message for you arrives or `timeoutSec` (default 25, max 50) passes; use it to idle until someone talks to you.",
+  "description": "Talk. op read: messages for you or the room since your last read (or since `since` epoch ms); check between tasks and right before you finish your turn, humans watching talk to you here. op send: `text` (≤280 chars) to the room, or privately with `to` = agent id/name or \"human:<name>\". op say: `text` as a speech bubble over your character, also posted to the room. op wait: like read, but if nothing is unread it holds the call until a message for you arrives or `timeoutSec` (default 25, max 50) passes; use it to idle until someone talks to you.",
   "inputSchema": {
    "type": "object",
    "properties": {
