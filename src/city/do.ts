@@ -14,6 +14,7 @@ import {
 import { route as walkRoute, ROUTE_MAX_EXPANSIONS, type RouteResult } from "./route";
 import { resolvePlace, type PlaceContext } from "./places";
 import { CHAT_WAIT_DEFAULT_SEC } from "../tools";
+import { defangTags } from "../shared/catalog";
 import {
   BLOCK_M, CHAT_READ_MAX, CHAT_RING, CHAT_TAIL, CITY_AWAY_MS, CITY_CHAT_LIMITS, CITY_REMOVE_MS, FLUSH_MS, GO_LIMITS, GRAPH_CHECK_MS, GRAPH_RETRY_MAX_MS,
   GRAPH_RETRY_MS, legAt, LOOK_LIMITS, LOOK_PLACES_BLOCKS, LOOK_PLACES_MAX, MAX_CITY_AGENTS, MAX_CITY_VIEWERS, MAX_OFFICE_WALKERS, MAX_PENDING_LINKS,
@@ -839,7 +840,7 @@ export class City extends DurableObject<Env> {
       if (why === "message") return this.readChat(still);
       return { messages: [], more: false, now: this.clock(), timedOut: true };
     }
-    const text = args.text?.trim();
+    const text = args.text?.trim() ? defangTags(args.text.trim()) : "";
     if (!text) throw new CityError(400, `office_city chat ${op} needs \`text\``);
     if (op === "say" && w.inside) throw new CityError(400, 'you are inside your building, where nobody on the street sees a speech bubble; go {to: "outside"} first');
     const now = this.clock();

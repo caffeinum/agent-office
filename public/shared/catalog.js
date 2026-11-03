@@ -24,6 +24,15 @@ export const LAYERS = Object.freeze(["floor", "object", "wall"]);
 export const SPOOF_CHARS_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
 /** Same, plus newline and tab: for one-line names and labels. */
 export const SPOOF_LINE_RE = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
+/**
+ * A "<" (or full-width "＜", small "﹤") that opens something tag-shaped: "<system-reminder>", "</channel>", "<!--". Agents get
+ * office text inside tags (Claude Code channels, tool results), so a fake closing or system tag could pass as the agent's own context.
+ */
+export const TAG_OPEN_RE = /[<\uFF1C\uFE64](?=\/?[A-Za-z!?]|\s*\/)/gu;
+/** Turns every tag-opening "<" into "‹" (U+2039): the text still reads the same, but nothing in it can open or close a tag. */
+export function defangTags(text) {
+  return text.replace(TAG_OPEN_RE, "\u2039");
+}
 
 const k = (w, d, label, layer, extra = {}) => Object.freeze({ w, d, label, layer, ...extra });
 

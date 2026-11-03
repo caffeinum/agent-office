@@ -93,3 +93,5 @@ export function defaultLayout(now?: number): Item[];
 
 export const SPOOF_CHARS_RE: RegExp;
 export const SPOOF_LINE_RE: RegExp;
+export const TAG_OPEN_RE: RegExp;
+export function defangTags(text: string): string;

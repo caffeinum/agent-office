@@ -2,7 +2,7 @@
 import { DEFAULT_INVITE, newOfficeId, newOfficeKey, OFFICE_ID_RE, safeEqual, sha256hex, type KeyHashes } from "./auth";
 import { registryStub } from "./registry";
 import { BIG_BODY_MAX, errorResponse, json, readBytes, readJson } from "./http";
-import { resolveToolName, TOOL_NAMES, ToolError, type ToolName } from "./tools";
+import { hasNoTags, NO_TAGS_MSG, resolveToolName, SPOOF_LINE_RE, TOOL_NAMES, ToolError, type ToolName } from "./tools";
 import { ASSET_BYTES_MAX } from "./images";
 import type { CallCtx, ToolHost } from "./office";
 import { CITY_ID, LINK_ACTIONS, LINK_STATES, type City, type CityResult, type LinkAction, type LinkRow, type LinkState } from "./city/do";
@@ -72,6 +72,7 @@ export async function handleCreateOffice(req: Request, env: Env): Promise<Respon
   const body = ((await readJson(req)) ?? {}) as { name?: unknown };
   const name = body.name === undefined ? "Agent Office" : body.name;
   if (typeof name !== "string" || !name.trim() || name.length > 64) return errorResponse(400, "name must be a non-empty string ≤64 chars");
+  if (SPOOF_LINE_RE.test(name) || !hasNoTags(name)) return errorResponse(400, `name must be one plain line: no control or bidi-override characters, and it ${NO_TAGS_MSG}`);
   const id = newOfficeId();
   const ownerKey = newOfficeKey(id);
   const joinKey = newOfficeKey(id);
