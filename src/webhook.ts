@@ -19,9 +19,14 @@ export interface WebhookConfig {
   origin: string;
 }
 
+/** Who wrote a chat message: a joined agent, a human with the ownerKey, a human on a join link (unverified: anyone holding
+ *  that link writes under the same name), or the office itself. */
+export type Sender = "agent" | "owner" | "guest" | "office";
+
 export interface ChatLike {
   id: string;
   from: string;
+  sender: Sender;
   to: string | null;
   text: string;
   ts: number;
@@ -41,6 +46,7 @@ export interface WakePayload {
   agent_name: string;
   from: string;
   from_name: string;
+  sender: Sender;
   kind: WakeKind;
   text: string;
   msg_id: string;
@@ -122,11 +128,13 @@ export function addressedAs(msg: ChatLike, agent: Recipient): "dm" | "mention" |
   return null;
 }
 
+const who = (p: WakePayload) => (p.sender === "guest" ? `${p.from_name} (unverified guest)` : p.from_name);
+
 function slackText(p: WakePayload): string {
   const lead =
     p.kind === "digest"
-      ? `You have ${p.count} new messages in office chat "${p.office_name}" (latest from ${p.from_name}): ${p.text}`
-      : `${p.from_name} ${p.kind === "dm" ? "messaged you" : "mentioned you"} in office "${p.office_name}": ${p.text}`;
+      ? `You have ${p.count} new messages in office chat "${p.office_name}" (latest from ${who(p)}): ${p.text}`
+      : `${who(p)} ${p.kind === "dm" ? "messaged you" : "mentioned you"} in office "${p.office_name}": ${p.text}`;
   return `@${p.agent_name} ${lead}\nReply with MCP ${p.reply.mcp}, or POST ${p.reply.rest}`;
 }
 
@@ -222,6 +230,7 @@ export class Webhooks {
           agent_name: agent.name,
           from: msg.from,
           from_name: nameOf(msg.from),
+          sender: msg.sender,
           kind,
           text: msg.text,
           msg_id: msg.id,

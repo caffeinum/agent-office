@@ -358,14 +358,14 @@ describe("deliveries", () => {
       eventId: expect.stringMatching(/^evt_/),
       name: "office.message",
       timestamp: new Date(dm.json.data.ts).toISOString(),
-      data: { office: o.id, from: bo.agent.id, fromName: "Bo", to: s.me.agent.id, kind: "dm", text: "dm for gpt", ts: expect.any(Number), messageId: expect.stringMatching(/^m-/) },
+      data: { office: o.id, from: bo.agent.id, fromName: "Bo", sender: "agent", to: s.me.agent.id, kind: "dm", text: "dm for gpt", ts: expect.any(Number), messageId: expect.stringMatching(/^m-/) },
       cursor: `c1.${dm.json.data.messageId}`,
     });
     expect(dm.headers.get("webhook-id")).toBe(dm.json.eventId);
     expect(dm.headers.get("x-mcp-subscription-id")).toBe(sub.id);
     expect(dm.headers.get("content-type")).toBe("application/json");
     await expectSigned(dm.headers, dm.body, SECRET);
-    expect(evs[2]!.json.data).toMatchObject({ from: "human:aleks", fromName: "aleks", to: null });
+    expect(evs[2]!.json.data).toMatchObject({ from: "human:aleks", fromName: "aleks", sender: "owner", to: null });
     owner.ws.close();
   });
 
@@ -472,7 +472,7 @@ describe("deliveries", () => {
       });
       await fresh.load();
       expect(fresh.active(s.me.agent.id).map((x) => x.id)).toEqual([sub.id]);
-      fresh.onChat({ id: "m-1-x", from: "human:owner", to: s.me.agent.id, text: "after restart", ts: Date.now() }, o.id, () => ({ id: s.me.agent.id, name: "Gpt" }), () => true, (r) => r);
+      fresh.onChat({ id: "m-1-x", from: "human:owner", sender: "owner", to: s.me.agent.id, text: "after restart", ts: Date.now() }, o.id, () => ({ id: s.me.agent.id, name: "Gpt" }), () => true, (r) => r);
       await until(() => sent.length >= 1, "delivery after reload");
       expect(JSON.parse(sent[0]!).data.text).toBe("after restart");
     });
@@ -481,7 +481,7 @@ describe("deliveries", () => {
 
 describe("Events delivery policy (unit)", () => {
   const agent = { id: "gpt-1", name: "Gpt" };
-  const msg = (id: string, text = "hi") => ({ id, from: "human:owner", to: agent.id, text, ts: Date.now() });
+  const msg = (id: string, text = "hi") => ({ id, from: "human:owner", sender: "owner" as const, to: agent.id, text, ts: Date.now() });
 
   function memStorage(): DurableObjectStorage {
     const m = new Map<string, unknown>();

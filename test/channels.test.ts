@@ -76,7 +76,7 @@ describe("Claude Code channels over the GET /mcp stream", () => {
     expect(stream.frames[0]).toEqual({
       jsonrpc: "2.0",
       method: "notifications/claude/channel",
-      params: { content: "a dm for you", meta: { from: bo.agent.id, from_name: "Bo", kind: "dm", msg_id: expect.stringMatching(/^m-/) } },
+      params: { content: "a dm for you", meta: { from: bo.agent.id, from_name: "Bo", sender: "agent", kind: "dm", msg_id: expect.stringMatching(/^m-/) } },
     });
     await call(o, "chat_send", { text: "hey @mia can you look" }, { token: bo.agentToken });
     await call(o, "chat_send", { text: "@miami is not you" }, { token: bo.agentToken });

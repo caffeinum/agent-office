@@ -73,7 +73,7 @@ describe("webhook URL validation (SSRF)", () => {
 
 describe("addressing", () => {
   const intern = { id: "intern-abc123", name: "Intern" };
-  const msg = (from: string, to: string | null, text: string) => ({ id: "m", from, to, text, ts: 1 });
+  const msg = (from: string, to: string | null, text: string) => ({ id: "m", from, sender: "agent" as const, to, text, ts: 1 });
   it("DMs and @-mentions, not room chatter or own messages", () => {
     expect(addressedAs(msg("human:owner", intern.id, "meow"), intern)).toBe("dm");
     expect(addressedAs(msg("ada-1", intern.id, "hi"), intern)).toBe("dm");
@@ -98,7 +98,7 @@ describe("signature", () => {
 describe("dispatcher (rate limit, coalescing, failures)", () => {
   const office = { id: "off", name: "Office" };
   const agents = [{ id: "intern-1", name: "Intern" }];
-  const dm = (n: number) => ({ id: `m${n}`, from: "human:owner", to: "intern-1", text: `msg ${n}`, ts: n });
+  const dm = (n: number) => ({ id: `m${n}`, from: "human:owner", sender: "owner" as const, to: "intern-1", text: `msg ${n}`, ts: n });
 
   function setup(fetchImpl: (url: string, init: RequestInit) => Promise<Response>) {
     const waits: Promise<unknown>[] = [];
@@ -216,6 +216,7 @@ describe("webhooks end to end", () => {
       agent_name: "Intern",
       from: ada.agent.id,
       from_name: "Ada",
+      sender: "agent",
       kind: "dm",
       text: "meow",
       msg_id: sent.body.msg.id,
