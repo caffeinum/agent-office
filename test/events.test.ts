@@ -142,7 +142,26 @@ describe("events/subscribe", () => {
     const r = await rpc("events/subscribe", subParams());
     expect(r.error?.code).toBe(-32600);
     expect(r.error?.message).toMatch(/office_join/);
+    expect(r.error?.message).toMatch(/agentToken/);
     expect(recv.hits).toHaveLength(0);
+  });
+
+  it("office_join hands back the exact event arguments, token included, and says joining alone doesn't wake", async () => {
+    const o = await createOffice();
+    const { me } = await joined(o);
+    expect(me.next).toMatch(/does not wake/);
+    expect(me.wakeUps.events).toMatchObject({ event: "office.message", arguments: { includeRoom: false, agentToken: me.agentToken } });
+    expect(Object.keys(me.wakeUps)).toEqual(["poll", "webhook", "events"]);
+  });
+
+  it("a background connection that never joined subscribes with the join result's arguments", async () => {
+    const o = await createOffice();
+    receiver();
+    const { me } = await joined(o);
+    const { rpc } = await mcp(o);
+    const r = await rpc("events/subscribe", subParams({ arguments: me.wakeUps.events.arguments }));
+    expect(r.error).toBeUndefined();
+    expect(r.result.id).toBeTruthy();
   });
 
   it("verifies the callback with a signed challenge, then stores the subscription", async () => {

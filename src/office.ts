@@ -16,7 +16,7 @@ import { grantFromRequest, type OAuthGrant } from "./oauth";
 import { handleRest } from "./api";
 import { registryStub } from "./registry";
 import { validateWebhookUrl, WebhookError, Webhooks } from "./webhook";
-import { agentTokenOf, EventError, Events, INVALID_REQUEST } from "./events";
+import { agentTokenOf, EVENT_NAME, EventError, Events, INVALID_REQUEST } from "./events";
 import { CITY_ID, NO_LINK, type BridgeAgent, type CityArgs, type CityResult, type LinkRow, type LinkState } from "./city/do";
 
 export const MAX_CHAT = 200;
@@ -244,6 +244,19 @@ function mentions(text: string, name: string): boolean {
   if (at < 0) return false;
   const after = text.charAt(at + name.length + 1);
   return after === "" || !/[\p{L}\p{N}_]/u.test(after);
+}
+
+/** How a joined agent gets woken while idle; office_join returns this so a client sets one up instead of assuming joining is enough. */
+function wakeUps(agentToken: string) {
+  return {
+    poll: 'office_chat {op: "wait"} idles until someone talks to you (or op "read" between tasks). Only works while you are in a turn.',
+    webhook: "office_status {webhook} (or office_join {webhook}): the office POSTs to your URL on a DM or @-mention. For hosted agents with a trigger URL.",
+    events: {
+      how: "ChatGPT and other MCP Events clients: create an event automation (a subscription) on this event. Joining alone does not wake an idle chat. Keep agentToken in the arguments: the subscription is made from a background connection that never joined.",
+      event: EVENT_NAME,
+      arguments: { includeRoom: false, agentToken },
+    },
+  };
 }
 
 function sendSocket(ws: WebSocket, data: string): void {
@@ -834,7 +847,12 @@ export class Office extends DurableObject<Env> implements ToolHost {
       const grantId = ctx.grant.id;
       agent = [...this.agents.values()].filter((a) => a.grantId === grantId).sort((p, q) => q.lastSeen - p.lastSeen)[0] ?? null;
     }
-    if (!agent) throw new EventError(INVALID_REQUEST, "no agent to subscribe: pass arguments.agentToken (the token office_join returned), or join with office_join on this connection, or connect with OAuth");
+    if (!agent) {
+      throw new EventError(
+        INVALID_REQUEST,
+        "no agent to subscribe: this connection never called office_join (ChatGPT subscribes from a background connection), so put the agentToken office_join returned in the event arguments: {\"includeRoom\": false, \"agentToken\": \"<token>\"}. Connecting with OAuth also works without it, once the agent has joined.",
+      );
+    }
     if (!this.mayReceive(agent.id)) throw new EventError(INVALID_REQUEST, "the invite this agent joined through was revoked");
     return agent;
   }
@@ -1255,7 +1273,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
       next:
         this.designer === a.id
           ? "You are this office's designer: over MCP, connect with ?mode=design for the design tools and the office-designer prompt (prompts/get), then follow it — office_look's design summary is your floor plan; humans will ask you for changes in chat."
-          : "Set office_status to working with a short activity when you start a task; check chat between tasks (MCP office_chat {op: \"read\"}, CLI `chat read`).",
+          : "Set office_status to working with a short activity when you start a task; check chat between tasks (MCP office_chat {op: \"read\"}, CLI `chat read`). Joining does not wake you when someone messages you while you are idle: pick one of wakeUps.",
+      wakeUps: wakeUps(token),
     };
   }
 
