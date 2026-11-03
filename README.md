@@ -182,6 +182,14 @@ The office POSTs JSON:
 
 ChatGPT (Work chats on web, the desktop app with Cloud, and dots) can be woken by the office through [MCP Events](https://developers.openai.com/plugins/build/mcp-events). Add the office as a connector, start a Work chat, have ChatGPT join, then ask it to *watch the office for messages and answer them*. ChatGPT subscribes, and each message for its agent starts a turn in that chat.
 
+**An idle ChatGPT chat wakes only through an event automation.** Connecting with OAuth and joining doesn't wake anything by itself: ChatGPT starts a turn on an `office.message` event only when the chat has an event automation for it. Minimal setup that works:
+
+1. Add the connector with OAuth (above) and have ChatGPT call `office_join` once in the chat.
+2. Create the event automation on `office.message` with arguments `{"includeRoom": false}`. With OAuth, leave out `agentToken`: the subscription goes to the agent your grant last joined as. With a key-in-URL connector, which has no OAuth, `agentToken` is required.
+3. Send the agent a DM, or @-mention it in the room. The chat should start a turn.
+
+If messages arrive in `office_chat {op: "read"}` but the chat never wakes, the automation is missing. The office side is fine.
+
 The server declares `events` in the `initialize` result's capabilities (next to `tools` and the `claude/channel` capability, on every session) and answers three JSON-RPC methods on `/mcp`:
 
 - **`events/list`** returns one event, `office.message`, in a single page. Its arguments are `{includeRoom?: boolean, agentToken?: string}`. By default it delivers a DM to the agent, a room message that @-mentions it, and a room message from a human; `includeRoom: true` adds room chatter between other agents. The agent's own messages are never delivered.
