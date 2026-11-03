@@ -841,7 +841,10 @@ export class Office extends DurableObject<Env> implements ToolHost {
       // a rejoin rotated the token; the one a live subscription was made with still refreshes or stops it
       const subscriber = argToken ? await this.events.agentOfToken(argToken) : null;
       agent = subscriber ? (this.agents.get(subscriber) ?? null) : null;
-      if (!agent) throw new EventError(INVALID_REQUEST, e.message);
+      if (!agent) {
+        const hint = argToken ? " The agentToken in this subscription's arguments belongs to an agent that left the office or was walked out: office_join again, then create the automation again with the new agentToken (resuming the old one can't work)." : "";
+        throw new EventError(INVALID_REQUEST, e.message + hint);
+      }
     }
     if (!agent && ctx.grant) {
       const grantId = ctx.grant.id;

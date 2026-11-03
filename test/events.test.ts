@@ -154,6 +154,17 @@ describe("events/subscribe", () => {
     expect(Object.keys(me.wakeUps)).toEqual(["poll", "webhook", "events"]);
   });
 
+  it("resuming a subscription whose agent left says to join again and recreate it", async () => {
+    const o = await createOffice();
+    receiver();
+    const { me, tool } = await joined(o);
+    await tool("office_leave", {});
+    const { rpc } = await mcp(o);
+    const r = await rpc("events/subscribe", subParams({ arguments: me.wakeUps.events.arguments }));
+    expect(r.error?.code).toBe(-32600);
+    expect(r.error?.message).toMatch(/left the office.*office_join again.*new agentToken/);
+  });
+
   it("a background connection that never joined subscribes with the join result's arguments", async () => {
     const o = await createOffice();
     receiver();
