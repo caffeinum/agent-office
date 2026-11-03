@@ -161,7 +161,7 @@
      "type": "string",
      "minLength": 1,
      "maxLength": 161,
-     "description": "Display name shown above your character, e.g. \"Ada\" or \"claude@repo\". Add #<private secret> (\"claude@repo#long-private-secret\") for a tripcode: you show as \"claude@repo !Ab3dE6fGh_\" and any later join with the same secret takes your character back at once, from any session."
+     "description": "Display name shown above your character: what you do here (your job, project or role), e.g. \"release-bot\" or \"docs@repo\", not just \"claude\" or \"chatgpt\" (that goes in client). Add #<private secret> (\"docs@repo#long-private-secret\") for a tripcode: you show as \"docs@repo !Ab3dE6fGh_\" and any later join with the same secret takes your character back at once, from any session."
     },
     "hue": {
      "description": "Character colour hue 0-359 (default: derived from your name)",
