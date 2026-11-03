@@ -724,7 +724,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
   }
 
   private async keepDeparted(a: AgentRecord): Promise<void> {
-    const d: DepartedRecord = { ...a, sessions: [], leftAt: Date.now() };
+    const d: DepartedRecord = { ...a, leftAt: Date.now() };
     delete d.activity;
     this.departed.set(d.id, d);
     await this.ctx.storage.put(`left:${d.id}`, d);
@@ -761,6 +761,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
     if (a.deskId && [...this.agents.values()].some((x) => x.deskId === a.deskId)) delete a.deskId;
     this.agents.set(a.id, a);
     this.byToken.set(a.tokenHash, a.id);
+    a.sessions = a.sessions.filter((h) => this.mcpSessions.has(h));
+    for (const h of a.sessions) this.sessions.set(h, a.id);
     if (!a.deskId || !this.items.has(a.deskId)) await this.assignDesk(a);
     await this.saveAgent(a);
     await this.scheduleAlarm();
@@ -862,7 +864,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
   }
 
   private removeAfter(a: AgentRecord): number {
-    return this.hooks.describe(a.id) || this.events.active(a.id).length ? ON_CALL_REMOVE_MS : REMOVE_MS;
+    const reachable = this.hooks.describe(a.id) || this.events.active(a.id).length || a.sessions.some((h) => this.ctx.getWebSockets(`s:${h}`).length);
+    return reachable ? ON_CALL_REMOVE_MS : REMOVE_MS;
   }
 
   /** An agent may still get events: it is in the office and the invite it came through was not revoked. */
@@ -936,16 +939,19 @@ export class Office extends DurableObject<Env> implements ToolHost {
       throw new ToolError(401, "unknown agentToken — call office_join again (it was deleted, shown out, or left more than 30 days ago)");
     }
     if (ctx.sessionId) {
-      const id = this.sessions.get(await sha256hex(ctx.sessionId));
+      const h = await sha256hex(ctx.sessionId);
+      const id = this.sessions.get(h);
       const a = id ? this.agents.get(id) : undefined;
       if (a) return a;
+      const gone = this.findDeparted((d) => d.sessions.includes(h));
+      if (gone) return this.rejoin(gone);
     }
     return null;
   }
 
   private async requireAgent(ctx: CallCtx, explicit: string | undefined): Promise<AgentRecord> {
     const a = await this.resolveAgent(ctx, explicit);
-    if (!a) throw new ToolError(401, "you are not in the office yet — call office_join first (or pass your agentToken)");
+    if (!a) throw new ToolError(401, "you are not in the office: call office_join first, or pass your agentToken (agents are walked out after 1 hour without an office call; the token still brings them back for 30 days)");
     return a;
   }
 
@@ -1358,7 +1364,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       next:
         this.designer === a.id
           ? "You are this office's designer: over MCP, connect with ?mode=design for the design tools and the office-designer prompt (prompts/get), then follow it — office_look's design summary is your floor plan; humans will ask you for changes in chat."
-          : "Set office_status to working with a short activity when you start a task; check chat between tasks (MCP office_chat {op: \"read\"}, CLI `chat read`). Joining does not wake you when someone messages you while you are idle: pick one of wakeUps.",
+          : "Set office_status to working with a short activity when you start a task; check chat between tasks (MCP office_chat {op: \"read\"}, CLI `chat read`). You show as away after 5 minutes without an office call and are walked out after 1 hour (7 days while a wake-up or an open MCP event stream reaches you); any office call, including from this same MCP session, brings you back as the same character (same desk if it is still free). Joining does not wake you when someone messages you while you are idle: pick one of wakeUps.",
       wakeUps: wakeUps(token),
     };
   }

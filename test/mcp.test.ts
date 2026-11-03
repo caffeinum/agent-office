@@ -90,6 +90,9 @@ describe("MCP over Streamable HTTP", () => {
     expect(((await client.callTool({ name: "office_add", arguments: { kind: "plant", x: 1, z: 1 } })) as { isError?: boolean }).isError).toBe(true);
 
     expect((await tool(client, "office_leave")).body.left).toBe(me);
+    const back = await tool(client, "office_status", { status: "idle" });
+    expect(back.isError).toBeFalsy(); // the same session brings a departed agent back
+    expect((await tool(client, "office_delete_me")).body.deleted).toBe(me);
     const gone = await tool(client, "office_status", { status: "idle" });
     expect(gone.isError).toBe(true);
     expect(gone.body.error).toMatch(/office_join/);
