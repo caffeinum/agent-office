@@ -50,6 +50,9 @@ export const RECLAIM_AFTER_MS = 20_000;
 /** Open GET /mcp streams per session (a reconnecting client replaces its oldest) and per office. */
 export const MAX_STREAMS_PER_SESSION = 2;
 export const MAX_STREAMS = 500;
+/** An agent that left (office_leave or the silence walk-out) keeps its identity this long; its token, #secret or grant brings it back. */
+export const DEPARTED_KEEP_MS = 30 * 24 * 60 * 60_000;
+export const MAX_DEPARTED = 200;
 /** Storage schema: 1 = meta/items/agents/chat only; 2 = + theme, custom kinds ("kind:<slug>"), assets table, designer. */
 export const SCHEMA_VERSION = 2;
 export const UPLOAD_WINDOW_MS = 60_000;
@@ -87,6 +90,13 @@ export interface Agent {
   says?: { text: string; ts: number };
   /** Out walking the city map (office_city): the desk shows an "in the city" tag. */
   inCity?: true;
+}
+
+/** Why an agent stopped being in the office: "left" and "walked-out" keep it for a comeback, "deleted" doesn't. */
+type Departure = "left" | "walked-out" | "deleted";
+
+interface DepartedRecord extends AgentRecord {
+  leftAt: number;
 }
 
 interface AgentRecord extends Agent {
@@ -283,6 +293,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
   private meta: Meta | null = null;
   private items = new Map<string, Item>();
   private agents = new Map<string, AgentRecord>();
+  /** Agents that left but may come back (storage "left:<id>"); not in the office, not shown. */
+  private departed = new Map<string, DepartedRecord>();
   private chat: ChatMsg[] = [];
   private byToken = new Map<string, string>();
   private sessions = new Map<string, string>();
@@ -331,6 +343,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       this.byToken.set(a.tokenHash, a.id);
       for (const s of a.sessions) this.sessions.set(s, a.id);
     }
+    for (const [, d] of await ctx.storage.list<DepartedRecord>({ prefix: "left:" })) this.departed.set(d.id, d);
     this.chat = (await ctx.storage.get<ChatMsg[]>("chat")) ?? [];
     for (const [k, at] of await ctx.storage.list<number>({ prefix: "mcps:" })) this.mcpSessions.set(k.slice(5), at);
     this.alarmAt = await ctx.storage.getAlarm();
@@ -608,6 +621,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.meta = null;
     this.items.clear();
     this.agents.clear();
+    this.departed.clear();
     this.chat = [];
     this.byToken.clear();
     this.sessions.clear();
@@ -684,7 +698,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.markCityDirty();
   }
 
-  private async removeAgent(a: AgentRecord): Promise<void> {
+  private async removeAgent(a: AgentRecord, why: Departure): Promise<void> {
     if (this.designer === a.id) await this.setDesigner(null);
     await this.hooks.drop(a.id);
     await this.events.dropAgent(a.id);
@@ -696,6 +710,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
     }
     this.waiters.get(a.id)?.("gone");
     await this.ctx.storage.delete(`agent:${a.id}`);
+    if (why === "deleted") await this.forgetDeparted((d) => d.id === a.id);
+    else await this.keepDeparted(a);
     this.broadcast({ type: "agent-left", id: a.id });
     if (this.cityLink) {
       try {
@@ -705,6 +721,50 @@ export class Office extends DurableObject<Env> implements ToolHost {
       }
       this.markCityDirty();
     }
+  }
+
+  private async keepDeparted(a: AgentRecord): Promise<void> {
+    const d: DepartedRecord = { ...a, sessions: [], leftAt: Date.now() };
+    delete d.activity;
+    this.departed.set(d.id, d);
+    await this.ctx.storage.put(`left:${d.id}`, d);
+    const now = Date.now();
+    const old = [...this.departed.values()].filter((x) => now - x.leftAt > DEPARTED_KEEP_MS);
+    const over = [...this.departed.values()].sort((p, q) => p.leftAt - q.leftAt).slice(0, Math.max(0, this.departed.size - MAX_DEPARTED));
+    const drop = new Set([...old, ...over].map((x) => x.id));
+    if (drop.size) await this.forgetDeparted((x) => drop.has(x.id));
+  }
+
+  private async forgetDeparted(match: (d: DepartedRecord) => boolean): Promise<void> {
+    for (const d of [...this.departed.values()].filter(match)) {
+      this.departed.delete(d.id);
+      await this.ctx.storage.delete(`left:${d.id}`);
+    }
+  }
+
+  /** A departed agent this token, grant or tripcode belongs to, if it may still come back. */
+  private findDeparted(match: (d: DepartedRecord) => boolean): DepartedRecord | null {
+    const now = Date.now();
+    const live = (d: DepartedRecord) => now - d.leftAt <= DEPARTED_KEEP_MS && (!d.inviteId || this.mustMeta().keys.join.some((i) => i.id === d.inviteId));
+    return [...this.departed.values()].filter((d) => live(d) && match(d)).sort((p, q) => q.leftAt - p.leftAt)[0] ?? null;
+  }
+
+  /** Brings a departed agent back in: same id, name (renumbered if someone took it), hue, client and token; a free desk. */
+  private async rejoin(d: DepartedRecord): Promise<AgentRecord> {
+    if (this.agents.size >= MAX_AGENTS) throw new ToolError(409, `the office is full (${MAX_AGENTS} agents) — try again later`);
+    await this.forgetDeparted((x) => x.id === d.id);
+    const { leftAt: _l, ...a } = d;
+    const now = Date.now();
+    a.status = "idle";
+    a.lastSeen = now;
+    a.name = this.uniqueName(a.tripcode ? `${a.askedName ?? a.name} !${a.tripcode}` : (a.askedName ?? a.name), a.id);
+    if (a.deskId && [...this.agents.values()].some((x) => x.deskId === a.deskId)) delete a.deskId;
+    this.agents.set(a.id, a);
+    this.byToken.set(a.tokenHash, a.id);
+    if (!a.deskId || !this.items.has(a.deskId)) await this.assignDesk(a);
+    await this.saveAgent(a);
+    await this.scheduleAlarm();
+    return a;
   }
 
   private async postChat(from: string, to: string | null, text: string): Promise<ChatMsg> {
@@ -789,7 +849,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     }
     for (const a of [...this.agents.values()]) {
       const idle = now - a.lastSeen;
-      if (idle >= this.removeAfter(a)) await this.removeAgent(a);
+      if (idle >= this.removeAfter(a)) await this.removeAgent(a, "walked-out");
       else if (idle >= AWAY_MS && a.status !== "away") {
         a.status = "away";
         await this.saveAgent(a);
@@ -842,13 +902,15 @@ export class Office extends DurableObject<Env> implements ToolHost {
       const subscriber = argToken ? await this.events.agentOfToken(argToken) : null;
       agent = subscriber ? (this.agents.get(subscriber) ?? null) : null;
       if (!agent) {
-        const hint = argToken ? " The agentToken in this subscription's arguments belongs to an agent that left the office or was walked out: office_join again, then create the automation again with the new agentToken (resuming the old one can't work)." : "";
+        const hint = argToken ? " The agentToken in this subscription's arguments belongs to an agent that was deleted (office_delete_me), shown out, or left more than 30 days ago: office_join again, then create the automation again with the new agentToken (resuming the old one can't work)." : "";
         throw new EventError(INVALID_REQUEST, e.message + hint);
       }
     }
     if (!agent && ctx.grant) {
       const grantId = ctx.grant.id;
       agent = [...this.agents.values()].filter((a) => a.grantId === grantId).sort((p, q) => q.lastSeen - p.lastSeen)[0] ?? null;
+      const gone = agent ? null : this.findDeparted((d) => d.grantId === grantId);
+      if (gone) agent = await this.rejoin(gone);
     }
     if (!agent) {
       throw new EventError(
@@ -865,10 +927,13 @@ export class Office extends DurableObject<Env> implements ToolHost {
   private async resolveAgent(ctx: CallCtx, explicit: string | undefined): Promise<AgentRecord | null> {
     const token = explicit ?? ctx.token;
     if (token) {
-      const id = this.byToken.get(await sha256hex(token));
+      const tokenHash = await sha256hex(token);
+      const id = this.byToken.get(tokenHash);
       const a = id ? this.agents.get(id) : undefined;
-      if (!a) throw new ToolError(401, "unknown agentToken — call office_join again (agents are walked out after 1h of silence)");
-      return a;
+      if (a) return a;
+      const gone = this.findDeparted((d) => d.tokenHash === tokenHash);
+      if (gone) return this.rejoin(gone);
+      throw new ToolError(401, "unknown agentToken — call office_join again (it was deleted, shown out, or left more than 30 days ago)");
     }
     if (ctx.sessionId) {
       const id = this.sessions.get(await sha256hex(ctx.sessionId));
@@ -1009,8 +1074,11 @@ export class Office extends DurableObject<Env> implements ToolHost {
     let result: unknown;
     switch (name) {
       case "office_leave":
-        await this.removeAgent(agent);
-        return { ok: true, left: agent.id };
+        await this.removeAgent(agent, "left");
+        return { ok: true, left: agent.id, comeBack: "your agentToken (as resume or on any call), your #secret, or joining with the same name and client brings this character back for 30 days; office_delete_me removes it for good" };
+      case "office_delete_me":
+        await this.removeAgent(agent, "deleted");
+        return { ok: true, deleted: agent.id };
       case "office_status": {
         const { status, activity, webhook } = args as ToolArgs<"office_status">;
         if (webhook !== undefined) await this.setWebhook(agent.id, webhook, ctx.origin, name);
@@ -1214,14 +1282,28 @@ export class Office extends DurableObject<Env> implements ToolHost {
     const hash = args.name.indexOf("#");
     const baseName = (hash < 0 ? args.name : args.name.slice(0, hash)).trim();
     const trip = hash < 0 ? null : await tripcode(args.name.slice(hash + 1));
-    const resumed = args.resume ? this.agents.get(this.byToken.get(await sha256hex(args.resume)) ?? "") ?? null : null;
-    const tripped = trip ? ([...this.agents.values()].filter((x) => x.tripcode === trip).sort((p, q) => q.lastSeen - p.lastSeen)[0] ?? null) : null;
+    const resumeHash = args.resume ? await sha256hex(args.resume) : null;
+    let resumed = resumeHash ? (this.agents.get(this.byToken.get(resumeHash) ?? "") ?? null) : null;
+    if (!resumed && resumeHash) {
+      const gone = this.findDeparted((d) => d.tokenHash === resumeHash);
+      if (gone) resumed = await this.rejoin(gone);
+    }
+    let tripped = trip ? ([...this.agents.values()].filter((x) => x.tripcode === trip).sort((p, q) => q.lastSeen - p.lastSeen)[0] ?? null) : null;
+    if (!resumed && !tripped && trip) {
+      const gone = this.findDeparted((d) => d.tripcode === trip);
+      if (gone) tripped = await this.rejoin(gone);
+    }
     const claimed = resumed ?? tripped;
     if (claimed && own && own !== claimed && sessionHash) {
       own.sessions = own.sessions.filter((s) => s !== sessionHash);
       await this.saveAgent(own, false);
     }
     let a = claimed ?? own ?? this.reclaimable(baseName, args.client, trip, now);
+    if (!a) {
+      const n = baseName.toLowerCase();
+      const gone = this.findDeparted((d) => (d.askedName ?? d.name).toLowerCase() === n && (d.client ?? "") === (args.client ?? "") && (d.tripcode ?? null) === trip);
+      if (gone) a = await this.rejoin(gone);
+    }
     if (a) {
       this.byToken.delete(a.tokenHash);
       a.tokenHash = tokenHash;
@@ -1494,7 +1576,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     if (typeof rawId !== "string" || !rawId) throw new ToolError(400, "kick needs {id: <agent id or name>}");
     const id = this.findAgentRef(rawId);
     const a = this.agents.get(id)!;
-    await this.removeAgent(a);
+    await this.removeAgent(a, "deleted");
     await this.postChat("office", null, `${a.name} was shown out by ${by.replace(/^human:/, "")}`);
     return { ok: true, kicked: id };
   }
@@ -1568,7 +1650,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
       await this.ctx.storage.put({ meta: this.meta, [JOIN_KEYS_SLOT]: kept, cityInvites: [...this.cityInvites] });
       for (const ws of this.ctx.getWebSockets(`k:${invite.hash}`)) ws.close(4401, "this invite was revoked");
       const theirs = body.kick === false ? [] : [...this.agents.values()].filter((a) => a.inviteId === invite.id);
-      for (const a of theirs) await this.removeAgent(a);
+      for (const a of theirs) await this.removeAgent(a, "deleted");
+      await this.forgetDeparted((d) => d.inviteId === invite.id);
       if (theirs.length) await this.postChat("office", null, `${theirs.map((a) => a.name).join(", ")} left: ${invite.label}'s invite was revoked`);
       return { ok: true, revoked: invite.id, label: invite.label, kicked: theirs.map((a) => a.id) };
     }

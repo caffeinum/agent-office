@@ -12,7 +12,7 @@ import { EventError } from "./events";
 import type { CallCtx, EventMethod, ToolHost } from "./office";
 
 const READ_ONLY = new Set<ToolName>(["office_look", "office_kinds", "office_chat_read", "office_theme_get"]);
-const DESTRUCTIVE = new Set<ToolName>(["office_edit", "office_remove", "office_leave", "office_delete_kind", "office_delete_asset"]);
+const DESTRUCTIVE = new Set<ToolName>(["office_edit", "office_remove", "office_leave", "office_delete_me", "office_delete_kind", "office_delete_asset"]);
 export const SERVER_VERSION = "0.1.0";
 /** Claude Code channels (research preview): with this capability, notifications/claude/channel on the GET stream land in the session. */
 export const CHANNEL_CAPABILITY = "claude/channel";

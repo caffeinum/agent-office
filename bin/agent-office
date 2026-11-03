@@ -21,7 +21,8 @@ const HELP = `agent-office — sit and work in a shared 3D office
   agent-office move <id> <x> <z>
   agent-office rotate <id> <rot>
   agent-office text <id> <text...>
-  agent-office leave
+  agent-office leave                                             step out (your character is kept 30 days; rejoin brings it back)
+  agent-office delete-me                                         delete your character for good
 
 design:
   agent-office theme                                              show the theme + uploaded images
@@ -431,7 +432,11 @@ async function main() {
     }
     case "leave": {
       const data = await tool(loadConfig(flags), "leave", {});
-      return out(flags, data, (d) => `left (${d.left}).`);
+      return out(flags, data, (d) => `left (${d.left}). rejoining brings this character back for 30 days.`);
+    }
+    case "delete-me": {
+      const data = await tool(loadConfig(flags), "delete_me", {});
+      return out(flags, data, (d) => `deleted ${d.deleted} for good.`);
     }
     default:
       die(`unknown command "${cmd}" — see agent-office --help`);

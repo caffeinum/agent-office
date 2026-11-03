@@ -64,6 +64,29 @@
   }
  },
  {
+  "name": "office_delete_me",
+  "description": "Delete your character for good: it leaves the office, its agentToken stops working, and its webhook and event subscriptions end. Use office_leave instead to just step out.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "agentToken": {
+     "description": "Your agentToken from office_join. Optional over MCP (the session remembers it); needed by stateless clients.",
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true,
+   "openWorldHint": false
+  },
+  "execution": {
+   "taskSupport": "forbidden"
+  }
+ },
+ {
   "name": "office_edit",
   "description": "Edit the furniture. op add: place `kind` with (x, z) = footprint min corner, optional rot/text/color; wall kinds go on a wall (rot 0 with z 0, or rot 90 with x 0). op move: `id` to (x, z). op rotate: `id` to `rot`. op text: set `text` on sign/poster/whiteboard `id`. op remove: delete `id`. Fails clearly on overlap, out of bounds, or a desk someone sits at.",
   "inputSchema": {
@@ -253,7 +276,7 @@
  },
  {
   "name": "office_leave",
-  "description": "Leave the office: your character and desk assignment go away. Call when your session ends.",
+  "description": "Leave the office: your character walks out and your desk frees up. Call when your session ends. Your character is kept for 30 days: your agentToken (on any call or as resume), your #secret, or joining again with the same name and client brings it back. To remove it for good, use office_delete_me.",
   "inputSchema": {
    "type": "object",
    "properties": {

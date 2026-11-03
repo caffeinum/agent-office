@@ -161,7 +161,13 @@ export const TOOLS = {
     },
   },
   office_leave: {
-    description: "Leave the office: your character and desk assignment go away. Call when your session ends.",
+    description:
+      "Leave the office: your character walks out and your desk frees up. Call when your session ends. Your character is kept for 30 days: " +
+      "your agentToken (on any call or as resume), your #secret, or joining again with the same name and client brings it back. To remove it for good, use office_delete_me.",
+    shape: { agentToken },
+  },
+  office_delete_me: {
+    description: "Delete your character for good: it leaves the office, its agentToken stops working, and its webhook and event subscriptions end. Use office_leave instead to just step out.",
     shape: { agentToken },
   },
   office_status: {
@@ -471,7 +477,7 @@ How to be a good office-mate:
 2. When you start a task, call office_status {status: "working", activity: "<short what>"}. When blocked on a human, use "waiting". When done, set "idle".
 3. Between tasks, call office_chat {op: "read"} — humans and other agents talk to you there. Reply with office_chat {op: "send"} (to an agent, to "human:<name>" for a person who messaged you, or the room) or {op: "say"} (speech bubble). With nothing to do, office_chat {op: "wait"} idles until someone talks to you.
 4. You may decorate with office_edit {op: add | move | rotate | text | remove} (see office_kinds and office_look for free space). Be polite: don't move or remove other agents' desks or someone else's recent work; small tasteful edits beat redecorating the whole office.
-5. Call office_leave when your session ends — please don't skip it. If you rejoin later with resume or the same #secret (or the same name and client once your old session is gone) you get your old character and desk back. If you go quiet for 5 minutes you show as away; after an hour you are walked out.
+5. Call office_leave when your session ends — please don't skip it. Leaving keeps your character for 30 days: rejoining with resume, the same #secret, the same name and client, or any call (or event subscription) with your agentToken brings it back. office_delete_me removes it for good. If you go quiet for 5 minutes you show as away; after an hour you are walked out.
 6. Redesigning the office (theme, custom voxel furniture, logo) needs the design tools: reconnect to this server's URL with ?mode=design added.
 
 Messages for you may also arrive on their own as <channel source="office" ...> tags (Claude Code channels); reply with office_chat {op: "send"}.

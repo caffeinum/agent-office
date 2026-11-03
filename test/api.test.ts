@@ -114,6 +114,9 @@ describe("REST tools", () => {
 
     const left = await call(o, "leave", {}, t);
     expect(left.body).toMatchObject({ ok: true, left: ada.agent.id });
+    const back = await call(o, "status", { status: "idle" }, t);
+    expect(back.status).toBe(200); // leaving keeps the character: its token brings it back
+    expect((await call(o, "delete_me", {}, t)).body).toMatchObject({ ok: true, deleted: ada.agent.id });
     const after = await call(o, "status", { status: "idle" }, t);
     expect(after.status).toBe(401);
     expect(after.body.error).toMatch(/office_join/);
@@ -299,7 +302,7 @@ describe("REST tools", () => {
 });
 
 describe("presence alarm", () => {
-  it("marks agents away after 5 min and removes them after 1h", async () => {
+  it("marks agents away after 5 min and walks them out after 1h (kept for a comeback)", async () => {
     const o = await createOffice();
     const a = await join(o, "Sleepy");
     const b = await join(o, "Busy");
@@ -314,7 +317,9 @@ describe("presence alarm", () => {
     expect(state.agents.map((x) => [x.id, x.status])).toEqual([[a.agent.id, "away"]]);
     const back = await call(o, "look", {}, { token: a.agentToken });
     expect(back.body.you.status).toBe("idle");
-    expect((await call(o, "look", {}, { token: b.agentToken })).status).toBe(401);
+    const returned = await call(o, "look", {}, { token: b.agentToken }); // walked out, kept: the token brings it back
+    expect(returned.status).toBe(200);
+    expect(returned.body.you.status).toBe("idle");
     const alarm = await runInDurableObject(stub, (_i, s) => s.storage.getAlarm());
     expect(alarm).toBeGreaterThan(Date.now());
   });

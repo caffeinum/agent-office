@@ -154,15 +154,28 @@ describe("events/subscribe", () => {
     expect(Object.keys(me.wakeUps)).toEqual(["poll", "webhook", "events"]);
   });
 
-  it("resuming a subscription whose agent left says to join again and recreate it", async () => {
+  it("resuming a subscription after the agent left brings the agent back in (subscribe auto-joins)", async () => {
     const o = await createOffice();
     receiver();
     const { me, tool } = await joined(o);
     await tool("office_leave", {});
     const { rpc } = await mcp(o);
     const r = await rpc("events/subscribe", subParams({ arguments: me.wakeUps.events.arguments }));
+    expect(r.error).toBeUndefined();
+    const look = await call(o, "look", {}, { token: me.agentToken });
+    expect(look.status).toBe(200);
+    expect(look.body.you.status).toBe("idle");
+  });
+
+  it("resuming a subscription whose agent was deleted says to join again and recreate it", async () => {
+    const o = await createOffice();
+    receiver();
+    const { me, tool } = await joined(o);
+    await tool("office_delete_me", {});
+    const { rpc } = await mcp(o);
+    const r = await rpc("events/subscribe", subParams({ arguments: me.wakeUps.events.arguments }));
     expect(r.error?.code).toBe(-32600);
-    expect(r.error?.message).toMatch(/left the office.*office_join again.*new agentToken/);
+    expect(r.error?.message).toMatch(/deleted.*office_join again.*new agentToken/);
   });
 
   it("a background connection that never joined subscribes with the join result's arguments", async () => {
