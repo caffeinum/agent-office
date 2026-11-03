@@ -47,8 +47,6 @@ export const MAX_MCP_SESSIONS = 2000;
 export const MCP_SESSION_TTL_MS = 7 * 24 * 60 * 60_000;
 /** A same-name+client agent counts as "still at work" (and is not reclaimed by a new join) while seen this recently, unless its MCP sessions are all gone. */
 export const RECLAIM_AFTER_MS = 20_000;
-/** Comment line sent on idle MCP event streams so proxies keep them open. */
-export const STREAM_KEEPALIVE_MS = 25_000;
 /** Open GET /mcp streams per session (a reconnecting client replaces its oldest) and per office. */
 export const MAX_STREAMS_PER_SESSION = 2;
 export const MAX_STREAMS = 500;
@@ -64,9 +62,9 @@ export const IDLE_EXPIRE_MS = 90 * 24 * 60 * 60_000;
 export const ACTIVITY_PERSIST_MS = 10 * 60_000;
 /** Close code viewers get when the office is deleted (by its owner, an admin, or expiry). */
 export const WS_CLOSE_DELETED = 4404;
-/** The city presence bridge pushes at most this often, plus a heartbeat (the City DO drops presence after 3 min). */
+/** The city presence bridge pushes at most this often, plus a rare heartbeat (the City DO drops presence after PRESENCE_TTL_MS). */
 export const CITY_PUSH_MS = 5000;
-export const CITY_HEARTBEAT_MS = 60_000;
+export const CITY_HEARTBEAT_MS = 30 * 60_000;
 export const CITY_SITE_RE = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const ASSETS_DDL =
   "CREATE TABLE IF NOT EXISTS assets (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, w INTEGER NOT NULL, h INTEGER NOT NULL, size INTEGER NOT NULL, by TEXT NOT NULL, at INTEGER NOT NULL, bytes BLOB NOT NULL)";
@@ -181,19 +179,16 @@ export interface ToolHost {
   startSession(sessionId: string): Promise<void>;
   hasSession(sessionId: string): Promise<boolean>;
   endSession(sessionId: string): Promise<void>;
-  /** GET /mcp: an SSE stream for a known session; chat for its agent is pushed as channel notifications. */
-  openStream(sessionId: string): Promise<Response>;
+  /**
+   * GET /mcp: a hibernatable WebSocket for a known session; chat for its agent is sent on it as JSON-RPC notifications.
+   * The Worker turns it into the client's SSE stream (see sse-bridge.ts), so an open stream doesn't keep this object awake.
+   */
+  openStream(sessionId: string, req: Request): Promise<Response>;
   /** MCP Events: events/list, events/subscribe, events/unsubscribe. Throws EventError for JSON-RPC errors. */
   eventsCall(method: EventMethod, params: unknown, ctx: CallCtx): Promise<unknown>;
 }
 
 export type EventMethod = "events/list" | "events/subscribe" | "events/unsubscribe";
-
-/** One open GET /mcp event stream. */
-interface McpStream {
-  writer: WritableStreamDefaultWriter<Uint8Array>;
-  keepalive: ReturnType<typeof setInterval>;
-}
 
 type Frame =
   | { type: "snapshot"; state: OfficeState; role: Role; as?: string }
@@ -223,6 +218,13 @@ interface WsAttachment {
   label?: string;
 }
 
+/** The Worker's end of one GET /mcp event stream (tags "mcp" and "s:<session hash>"). */
+interface McpAttachment {
+  role: "mcp";
+  h: string;
+  at: number;
+}
+
 const publicAgent = ({ tokenHash: _t, lastRead: _r, sessions: _s, askedName: _n, mcp: _m, inviteId: _i, grantId: _g, ...a }: AgentRecord): Agent => a;
 
 function hueOf(name: string): number {
@@ -244,6 +246,22 @@ function mentions(text: string, name: string): boolean {
   return after === "" || !/[\p{L}\p{N}_]/u.test(after);
 }
 
+function sendSocket(ws: WebSocket, data: string): void {
+  try {
+    ws.send(data);
+  } catch {
+    // socket already closing; the hibernation API cleans it up
+  }
+}
+
+function closeSocket(ws: WebSocket, code: number, reason: string): void {
+  try {
+    ws.close(code, reason);
+  } catch {
+    // already closed
+  }
+}
+
 function shortId(): string {
   return randomSecret().replace(/[^a-z0-9]/gi, "").slice(0, 6).toLowerCase();
 }
@@ -258,8 +276,6 @@ export class Office extends DurableObject<Env> implements ToolHost {
   private hits = new Map<string, number[]>();
   private wsWarned = new Map<string, number>();
   private mcpSessions = new Map<string, number>();
-  /** Open GET /mcp event streams by session hash (not persisted: they die with the instance). */
-  private streams = new Map<string, McpStream[]>();
   /** One pending office_chat wait per agent id. */
   private waiters = new Map<string, (why: WakeReason) => void>();
   private alarmAt: number | null = null;
@@ -551,7 +567,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     const meta = this.mustMeta();
     return {
       id: meta.id, name: meta.name, createdAt: meta.createdAt, admin: this.admin, agentCount: this.agents.size, itemCount: this.items.size,
-      assetCount: this.assets.size, viewers: this.ctx.getWebSockets().length, ...this.mustActivity(), expiresAt: this.expiresAt(),
+      assetCount: this.assets.size, viewers: this.ctx.getWebSockets("viewer").length, streams: this.ctx.getWebSockets("mcp").length, ...this.mustActivity(), expiresAt: this.expiresAt(),
     };
   }
 
@@ -586,7 +602,6 @@ export class Office extends DurableObject<Env> implements ToolHost {
     this.wsWarned.clear();
     this.mcpSessions.clear();
     for (const wake of [...this.waiters.values()]) wake("gone");
-    for (const h of [...this.streams.keys()]) this.closeStreams(h);
     this.alarmAt = null;
     this.theme = validateTheme(DEFAULT_THEME);
     this.customKinds = {};
@@ -646,13 +661,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   private broadcast(frame: Frame): void {
     const data = JSON.stringify(frame);
-    for (const ws of this.ctx.getWebSockets()) {
-      try {
-        ws.send(data);
-      } catch {
-        // socket already closing; hibernation API cleans it up
-      }
-    }
+    for (const ws of this.ctx.getWebSockets("viewer")) sendSocket(ws, data);
   }
 
   private async saveAgent(a: AgentRecord, broadcast = true): Promise<void> {
@@ -907,42 +916,21 @@ export class Office extends DurableObject<Env> implements ToolHost {
     await this.saveAgent(a, false);
   }
 
-  async openStream(sessionId: string): Promise<Response> {
+  async openStream(sessionId: string, req: Request): Promise<Response> {
+    if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return errorResponse(426, "the office serves GET /mcp as a WebSocket to the Worker");
     const h = await sha256hex(sessionId);
-    const total = [...this.streams.values()].reduce((n, l) => n + l.length, 0);
-    if (total >= MAX_STREAMS) return errorResponse(503, `too many open event streams (${MAX_STREAMS}); POST still works`);
-    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-    const writer = writable.getWriter();
-    const stream: McpStream = {
-      writer,
-      keepalive: setInterval(() => this.writeStream(h, stream, ": keepalive\n\n"), STREAM_KEEPALIVE_MS),
-    };
-    const list = this.streams.get(h) ?? [];
-    while (list.length >= MAX_STREAMS_PER_SESSION) this.endStream(h, list[0]!);
-    this.streams.set(h, [...(this.streams.get(h) ?? []), stream]);
-    this.writeStream(h, stream, ": agent-office event stream\n\n");
-    return new Response(readable, {
-      status: 200,
-      headers: { "content-type": "text/event-stream", "cache-control": "no-cache, no-transform", "x-accel-buffering": "no", ...CORS_HEADERS },
-    });
-  }
-
-  private writeStream(h: string, stream: McpStream, text: string): void {
-    stream.writer.write(new TextEncoder().encode(text)).catch(() => this.endStream(h, stream)); // the client went away
-  }
-
-  private endStream(h: string, stream: McpStream): void {
-    clearInterval(stream.keepalive);
-    const left = (this.streams.get(h) ?? []).filter((s) => s !== stream);
-    if (left.length) this.streams.set(h, left);
-    else this.streams.delete(h);
-    stream.writer.close().catch(() => {
-      // already errored or closed
-    });
+    if (this.ctx.getWebSockets("mcp").length >= MAX_STREAMS) return errorResponse(503, `too many open event streams (${MAX_STREAMS}); POST still works`);
+    const mine = this.ctx.getWebSockets(`s:${h}`).sort((p, q) => (p.deserializeAttachment() as McpAttachment).at - (q.deserializeAttachment() as McpAttachment).at);
+    for (const old of mine.slice(0, Math.max(0, mine.length - MAX_STREAMS_PER_SESSION + 1))) closeSocket(old, 1000, "replaced by a newer stream");
+    const pair = new WebSocketPair();
+    const [client, server] = [pair[0], pair[1]];
+    this.ctx.acceptWebSocket(server, ["mcp", `s:${h}`]);
+    server.serializeAttachment({ role: "mcp", h, at: Date.now() } satisfies McpAttachment);
+    return new Response(null, { status: 101, webSocket: client });
   }
 
   private closeStreams(h: string): void {
-    for (const s of this.streams.get(h) ?? []) this.endStream(h, s);
+    for (const ws of this.ctx.getWebSockets(`s:${h}`)) closeSocket(ws, 1000, "session ended");
   }
 
   /**
@@ -950,14 +938,14 @@ export class Office extends DurableObject<Env> implements ToolHost {
    * message that @-mentions its name. Plain room chatter between agents is not pushed. Pushed messages stay unread.
    */
   private pushChat(msg: ChatMsg): void {
-    if (msg.from === "office" || this.streams.size === 0) return;
+    if (msg.from === "office" || this.ctx.getWebSockets("mcp").length === 0) return;
     const fromName = this.agents.get(msg.from)?.name ?? (msg.from.startsWith("human:") ? msg.from.slice(6) : msg.from);
     for (const a of this.agents.values()) {
       if (a.id === msg.from) continue;
       const kind = msg.to === a.id ? "dm" : msg.to !== null ? null : mentions(msg.text, a.name) ? "mention" : msg.from.startsWith("human:") ? "room" : null;
       if (!kind) continue;
       const frame = JSON.stringify({ jsonrpc: "2.0", method: CHANNEL_METHOD, params: { content: msg.text, meta: { from: msg.from, from_name: fromName, kind, msg_id: msg.id } } });
-      for (const h of a.sessions) for (const s of this.streams.get(h) ?? []) this.writeStream(h, s, `event: message\ndata: ${frame}\n\n`);
+      for (const h of a.sessions) for (const ws of this.ctx.getWebSockets(`s:${h}`)) sendSocket(ws, frame);
     }
   }
 
@@ -1774,10 +1762,10 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   private acceptViewer(req: Request, role: Role, keyHash: string, invite: Invite | null): Response {
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return errorResponse(426, "expected a WebSocket upgrade");
-    if (this.ctx.getWebSockets().length >= MAX_VIEWERS) return errorResponse(503, `too many viewers (${MAX_VIEWERS})`);
+    if (this.ctx.getWebSockets("viewer").length >= MAX_VIEWERS) return errorResponse(503, `too many viewers (${MAX_VIEWERS})`);
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
-    this.ctx.acceptWebSocket(server, [role, `k:${keyHash}`]);
+    this.ctx.acceptWebSocket(server, ["viewer", role, `k:${keyHash}`]);
     server.serializeAttachment({ role, sid: shortId() + shortId(), ...(invite ? { label: invite.label } : {}) } satisfies WsAttachment);
     server.send(JSON.stringify({ type: "snapshot", state: this.state(), role, ...(invite ? { as: invite.label } : {}) } satisfies Frame));
     const offered = (req.headers.get("sec-websocket-protocol") ?? "").split(",").map((p) => p.trim());
@@ -1787,7 +1775,9 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     const send = (f: Frame) => ws.send(JSON.stringify(f));
-    const { role, sid, label } = ws.deserializeAttachment() as WsAttachment;
+    const attached = ws.deserializeAttachment() as WsAttachment | McpAttachment;
+    if (attached.role === "mcp") return; // the Worker's stream bridge only listens (its pings are auto-answered)
+    const { role, sid, label } = attached;
     try {
       this.rateLimit(`ws:${sid}`, WS_RATE_MAX);
     } catch (e) {

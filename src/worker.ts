@@ -4,6 +4,7 @@ import { keyFromRequest, OFFICE_ID_RE, officeOfKey } from "./auth";
 import { handleAdmin, handleCityAdmin, handleCreateOffice } from "./api";
 import { CITY_ID } from "./city/do";
 import { CORS_HEADERS, errorResponse, HttpError, json, withCors } from "./http";
+import { isMcpStreamRequest, openMcpStream } from "./sse-bridge";
 import { bearerOf, handleOAuth, isAccessToken, isOAuthPath, mcpViaOAuth, withChallenge, withoutGrantHeader } from "./oauth";
 
 export { Office } from "./office";
@@ -46,7 +47,7 @@ async function route(req: Request, env: Env): Promise<Response> {
   if (path === "/health") return json(200, { ok: true });
   if (path === "/api/offices" && req.method === "POST") return handleCreateOffice(req, env);
   if (path === "/api/offices" || path.startsWith("/api/offices/")) return withCors(await handleAdmin(req, env, path.slice("/api/offices/".length)));
-  const forward = (office: string, r: Request) => officeStub(env, office).fetch(r);
+  const forward = (office: string, r: Request) => (isMcpStreamRequest(r) ? openMcpStream(r, (up) => officeStub(env, office).fetch(up)) : officeStub(env, office).fetch(r));
   if (isOAuthPath(path)) return handleOAuth(req, env, forward);
   if (path === "/mcp") {
     const bearer = bearerOf(req);

@@ -1003,8 +1003,17 @@ export class City extends DurableObject<Env> {
     }
   }
 
+  private watched(): boolean {
+    return this.ctx.getWebSockets("viewer").length > 0;
+  }
+
   private flush(now: number): void {
-    if (this.pending.size === 0 || now - this.lastFlush < FLUSH_MS) return;
+    if (this.pending.size === 0) return;
+    if (!this.watched()) {
+      this.pending.clear();
+      return;
+    }
+    if (now - this.lastFlush < FLUSH_MS) return;
     const frames = [...this.pending.values()];
     this.pending.clear();
     this.lastFlush = now;
@@ -1038,15 +1047,16 @@ export class City extends DurableObject<Env> {
     const floor = this.graph ? -Infinity : this.graphRetryAt;
     const walkerAt = (t: number | null) => at(t === null ? null : Math.max(t, floor));
     const now = this.clock();
+    // leg and flush wake-ups only feed viewers; unwatched, a new viewer's snapshot carries each walker's current leg
+    const watched = this.watched();
     for (const w of this.walkers.values()) {
       walkerAt(this.arrivalAt(w));
-      if (this.graph) walkerAt(this.nextLegAt(w, now));
+      if (this.graph && watched) walkerAt(this.nextLegAt(w, now));
       walkerAt(w.lastSeen + CITY_REMOVE_MS);
       if (w.status !== "away") walkerAt(w.lastSeen + CITY_AWAY_MS);
     }
     for (const p of this.presence.values()) at(p.ts + PRESENCE_TTL_MS);
-    if (this.pending.size) at(this.lastFlush + FLUSH_MS);
-    if (this.walkers.size) walkerAt(this.graphCheckedAt + GRAPH_CHECK_MS);
+    if (this.pending.size && watched) at(this.lastFlush + FLUSH_MS);
     return next;
   }
 
@@ -1133,10 +1143,10 @@ export class City extends DurableObject<Env> {
         const tag = `ip:${ip}`;
         if (this.ctx.getWebSockets(tag).length >= MAX_VIEWERS_PER_IP) return Response.json({ error: `too many city viewers from one address (${MAX_VIEWERS_PER_IP})` }, { status: 429 });
         const g = await this.ensureGraph();
-        this.afterChange();
         const pair = new WebSocketPair();
         const [client, server] = [pair[0], pair[1]];
         this.ctx.acceptWebSocket(server, ["viewer", tag]);
+        this.afterChange(); // now watched: leg and flush wake-ups resume
         server.serializeAttachment({ since: this.clock() });
         const chatTail = this.rows("WHERE scope != 'dm' AND seq > ?", this.seq - CHAT_RING).slice(-CHAT_TAIL).map((r) => this.publicChat(r));
         server.send(JSON.stringify({ type: "snapshot", ...this.snapshot(g), chatTail }));

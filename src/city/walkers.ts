@@ -11,7 +11,8 @@ export const RIDE_SPEED = 8;
 export const RIDE_OVER_BLOCKS = 300;
 export const CITY_AWAY_MS = 5 * 60_000;
 export const CITY_REMOVE_MS = 60 * 60_000;
-export const PRESENCE_TTL_MS = 3 * 60_000;
+/** An office re-sends presence every CITY_HEARTBEAT_MS (30 min) and on every change; this drops an office that went silent. */
+export const PRESENCE_TTL_MS = 75 * 60_000;
 export const FLUSH_MS = 1000;
 export const GRAPH_CHECK_MS = 60_000;
 export const NEAR_BLOCKS = 40;

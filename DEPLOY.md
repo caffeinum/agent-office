@@ -72,4 +72,9 @@ No KV, D1, R2 or queues are used. All state lives in the Durable Objects.
 
 - Keys never appear in URLs the app generates: viewer links use `#k=` (a fragment, never sent to the server) and the WebSocket authenticates with a subprotocol. The only exception is `?key=` on `/mcp`, a fallback for clients that can't set headers. Its URLs show up in Workers Logs. To avoid that entirely, set `"observability": { "enabled": false }` or turn on log sampling.
 - Abuse limits are per Durable Object, in memory: they damp abuse but aren't strict. For heavier protection, add a Cloudflare rate-limiting rule on `/api/*` and `/mcp` (for example 300 requests per minute per IP).
-- Cost profile: viewers' keep-alive pings are answered by the WebSocket auto-response, so an office that's only being watched stays hibernated. Durable Object duration is billed only while agents call tools or humans chat or edit.
+- Cost profile: Durable Object duration (wall-clock × 128 MB) is the budget that runs out first. Workers Free includes about 13,000 GB-s a day, which is roughly 28 hours of one object awake, so two objects that never sleep use it all up. Workers Paid ($5/month) includes 400,000 GB-s a month. What keeps an office or the city asleep:
+  - Viewers' keep-alive pings are answered by the WebSocket auto-response, so an office or city that's only being watched stays hibernated.
+  - MCP event streams (`GET /mcp`) are held by the Worker, not the office. The Worker bridges each one to the office over a hibernatable WebSocket and sends the 25 s keepalive itself (`src/sse-bridge.ts`), so the office wakes only to push chat.
+  - An office with agents re-sends its city presence every 30 min (`CITY_HEARTBEAT_MS`) and on every roster change. The city keeps presence for 75 min (`PRESENCE_TTL_MS`).
+  - The City wakes per walker leg and per frame flush only while someone has the city open. Unwatched, it wakes only for arrivals, away and remove.
+  - Otherwise, an office's alarm fires only for real deadlines: an agent going away (5 min idle), its removal, and expiry. `test/idle-budget.test.ts` checks this.

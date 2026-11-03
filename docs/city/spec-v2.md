@@ -374,7 +374,7 @@ Orientation: `axisDeg` comes from the OSM polygon's long axis, so recipes stay r
   |---|---|---|
   | `links` | officeId PK, siteId, state (pending\|approved\|rejected\|revoked), officeName, requestedAt, decidedAt | |
   | `walkers` | id PK (`<officeId>:<agentId>`), officeId, agentId, name, hue, siteId, path (JSON ≤64 pts), t0, speed, mode (walk\|ride), at (placeId or lat/lon JSON), inside, lastSeen, status | |
-  | `presence` | officeId PK, siteId, agents (JSON), ts | TTL 3 min |
+  | `presence` | officeId PK, siteId, agents (JSON), ts | TTL 75 min (was 3 min; heartbeat is 30 min to fit the Workers Free duration budget) |
   | `chat` | seq PK, ts, fromWalker, scope (near\|city\|dm), to, text, x, z | 500-row ring; DMs never leave the DO except to sender and recipient |
   | `meta` | key PK, value | `builtAt`, `graphCheckedAt` |
 

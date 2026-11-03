@@ -98,7 +98,7 @@ export async function handleMcp(req: Request, host: ToolHost, base: CallCtx): Pr
     // the standalone server→client stream: chat for this session's agent, as Claude Code channel notifications
     if (!sessionHeader) return errorResponse(400, "GET /mcp opens the event stream of a session: send the Mcp-Session-Id from initialize");
     if (!(await host.hasSession(sessionHeader))) return errorResponse(404, "unknown or expired Mcp-Session-Id: initialize a new session");
-    return host.openStream(sessionHeader);
+    return host.openStream(sessionHeader, req);
   }
   if (req.method === "DELETE") {
     if (!sessionHeader) return errorResponse(400, "DELETE /mcp needs an Mcp-Session-Id header");
