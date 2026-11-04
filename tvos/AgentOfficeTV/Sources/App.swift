@@ -178,7 +178,7 @@ struct Sidebar: View {
                     (Text(m.from).bold() + Text(m.to.map { " → \($0)" } ?? "") + Text(": \(m.text)")).font(.caption2).lineLimit(3)
                 }
             }
-            Text("play/pause hides · ◀ ▶ follow · ▲ home · swirl to turn").font(.caption2).foregroundStyle(.tertiary)
+            Text("swipe: orbit / tilt · circle the ring: zoom · ◀ ▶ follow · ▲ reset · play/pause: this list").font(.caption2).foregroundStyle(.tertiary)
         }
         .padding(28)
         .frame(width: 560, alignment: .leading)

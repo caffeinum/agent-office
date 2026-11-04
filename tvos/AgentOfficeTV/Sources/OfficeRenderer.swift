@@ -24,11 +24,13 @@ final class OfficeRenderer: NSObject {
 
     // camera: the web's homeView() angles (azimuth π/4.6, polar 0.93 rad, 30° vertical fov), orbited by the remote's wheel
     private var azimuth: Float = .pi / 4.6
-    private let polar: Float = 0.93
+    private var polar: Float = 0.93
+    private var zoom: Float = 1
     private var camTarget = SCNVector3Zero
     private var camDist: Float = 30
     private(set) var follow: String?
-    private var wheelAngle: Float?
+    private var touch: (mode: TouchMode, x: Float, y: Float, angle: Float)?
+    private enum TouchMode { case drag, wheel }
 
     override init() {
         super.init()
@@ -200,10 +202,10 @@ final class OfficeRenderer: NSObject {
         var wantDist: Float
         if let id = follow, let n = agents[id] {
             wantTarget = SCNVector3(n.node.position.x, 0.8, n.node.position.z)
-            wantDist = 9
+            wantDist = 9 * zoom
         } else {
             wantTarget = SCNVector3(Float(s.grid.w) / 2, 0, Float(s.grid.d) / 2)
-            wantDist = homeDistance(s.grid, aspect: aspect)
+            wantDist = homeDistance(s.grid, aspect: aspect) * zoom
         }
         let k = min(1, dt * 4)
         camTarget = SCNVector3(camTarget.x + (wantTarget.x - camTarget.x) * k, camTarget.y + (wantTarget.y - camTarget.y) * k, camTarget.z + (wantTarget.z - camTarget.z) * k)
@@ -270,6 +272,9 @@ final class OfficeRenderer: NSObject {
             follow = order[((i ?? (step > 0 ? -1 : 0)) + step + order.count) % order.count]
         case .upArrow:
             follow = nil
+            zoom = 1
+            polar = 0.93
+            azimuth = .pi / 4.6
         case .select:
             follow = follow == nil ? order.first : nil
         default:
@@ -289,18 +294,27 @@ final class OfficeRenderer: NSObject {
     private func listen(_ c: GCController) {
         guard let pad = c.microGamepad else { return }
         pad.reportsAbsoluteDpadValues = true
+        // A touch that starts on the outer ring is a wheel (circle clockwise to zoom in); anywhere else it drags the
+        // camera: left/right orbits, up/down tilts. Lifting the finger reports (0, 0).
         pad.dpad.valueChangedHandler = { [weak self] _, x, y in
             guard let self else { return }
-            let r = (x * x + y * y).squareRoot()
-            guard r > 0.55 else { self.wheelAngle = nil; return }
-            let a = atan2(y, x)
-            if let prev = self.wheelAngle {
-                var d = a - prev
+            if x == 0 && y == 0 { self.touch = nil; return }
+            let r = (x * x + y * y).squareRoot(), a = atan2(y, x)
+            guard let t = self.touch else {
+                self.touch = (r > 0.75 ? .wheel : .drag, x, y, a)
+                return
+            }
+            switch t.mode {
+            case .drag:
+                self.azimuth -= (x - t.x) * 1.6
+                self.polar = min(1.35, max(0.3, self.polar + (y - t.y) * 0.9))
+            case .wheel:
+                var d = a - t.angle
                 while d > .pi { d -= 2 * .pi }
                 while d < -.pi { d += 2 * .pi }
-                self.azimuth -= d
+                self.zoom = min(2.2, max(0.25, self.zoom * exp(d * 0.35)))
             }
-            self.wheelAngle = a
+            self.touch = (t.mode, x, y, a)
         }
     }
 }
