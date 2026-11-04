@@ -29,3 +29,7 @@ private func hsl(_ h: Double, _ s: Double, _ l: Double) -> UIColor {
     let m = l - c / 2
     return UIColor(red: r + m, green: g + m, blue: b + m, alpha: 1)
 }
+
+import SceneKit
+
+func * (v: SCNVector3, k: Float) -> SCNVector3 { SCNVector3(v.x * k, v.y * k, v.z * k) }

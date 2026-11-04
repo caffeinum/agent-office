@@ -74,9 +74,52 @@ function voxMat(key, opts) {
   return sharedMats.get(key);
 }
 
+/**
+ * The character as data: each part's pivot (relative to its parent) and its box lists. buildCharacter turns it into
+ * three.js groups; the Apple TV viewer builds the same rig in SceneKit from this exact description.
+ */
+export function characterRig(agent) {
+  const look = lookFor(agent);
+  const parts = {
+    hips: { parent: null, at: [0, LEG_H, 0], boxes: [] },
+    legL: { parent: "hips", at: [0.105, 0, 0], boxes: [vbox(0, -LEG_H + 0.08, 0, 0.19, LEG_H - 0.08, 0.2, look.pants), vbox(0, -LEG_H, 0.02, 0.2, 0.09, 0.24, "#2b2b33")] },
+    legR: { parent: "hips", at: [-0.105, 0, 0], boxes: [vbox(0, -LEG_H + 0.08, 0, 0.19, LEG_H - 0.08, 0.2, look.pants), vbox(0, -LEG_H, 0.02, 0.2, 0.09, 0.24, "#2b2b33")] },
+    torso: {
+      parent: "hips", at: [0, 0, 0],
+      boxes: [
+        vbox(0, 0, 0, 0.42, BODY_H, 0.24, look.shirt),
+        vbox(0, BODY_H - 0.06, 0.005, 0.18, 0.06, 0.245, look.skin),
+        vbox(0, 0, 0.005, 0.43, 0.06, 0.245, look.shirtDark),
+        vbox(0.11, 0.3, 0.121, 0.08, 0.08, 0.01, look.accent, { faces: [4] }),
+      ],
+    },
+    head: { parent: "torso", at: [0, BODY_H, 0], boxes: [vbox(0, 0, 0, HEAD, HEAD, HEAD, look.skin), ...hairBoxes(look.style, look.hair, look.shirt)], face: faceBoxes(look) },
+    eyes: {
+      parent: "head", at: [0, 0.185, 0],
+      boxes: [
+        vbox(-0.11, 0.14 - 0.185, HEAD / 2 + 0.006, 0.08, 0.09, 0.01, "#25222b", { faces: [4] }),
+        vbox(0.11, 0.14 - 0.185, HEAD / 2 + 0.006, 0.08, 0.09, 0.01, "#25222b", { faces: [4] }),
+        vbox(-0.09, 0.19 - 0.185, HEAD / 2 + 0.008, 0.03, 0.03, 0.01, "#ffffff", { faces: [4] }),
+        vbox(0.13, 0.19 - 0.185, HEAD / 2 + 0.008, 0.03, 0.03, 0.01, "#ffffff", { faces: [4] }),
+      ],
+    },
+    armL: { parent: "torso", at: [0.29, BODY_H - 0.06, 0], boxes: [vbox(0, -0.2, 0, 0.15, 0.24, 0.16, look.shirt), vbox(0, -0.4, 0, 0.14, 0.2, 0.15, look.skin)] },
+    armR: { parent: "torso", at: [-0.29, BODY_H - 0.06, 0], boxes: [vbox(0, -0.2, 0, 0.15, 0.24, 0.16, look.shirt), vbox(0, -0.4, 0, 0.14, 0.2, 0.15, look.skin)] },
+  };
+  // little hand props, shown per activity (applyProps); the hand sits at y ≈ -0.46 on the arm pivot
+  const props = {
+    mug: { parent: "armR", boxes: [vbox(0, -0.56, 0.1, 0.1, 0.12, 0.1, "#fdfaf3"), vbox(0.065, -0.53, 0.1, 0.03, 0.06, 0.04, "#fdfaf3"), vbox(0, -0.45, 0.1, 0.08, 0.01, 0.08, "#6b4630")] },
+    snack: { parent: "armL", boxes: [vbox(0, -0.54, 0.09, 0.12, 0.06, 0.1, "#e8b25a"), vbox(0, -0.49, 0.09, 0.1, 0.02, 0.08, "#f6e3b4")] },
+    book: { parent: "armL", boxes: [vbox(-0.12, -0.5, 0.14, 0.26, 0.2, 0.03, "#c4523f"), vbox(-0.12, -0.5, 0.155, 0.24, 0.18, 0.01, "#fdf6e6")] },
+    can: { parent: "armR", boxes: [vbox(0, -0.6, 0.12, 0.12, 0.14, 0.18, "#5fa7a0"), vbox(0, -0.52, 0.26, 0.04, 0.04, 0.16, "#5fa7a0"), vbox(0, -0.46, 0.12, 0.03, 0.06, 0.12, "#3f7f78")] },
+    marker: { parent: "armR", boxes: [vbox(0, -0.58, 0.04, 0.03, 0.12, 0.03, "#2f6fd0")] },
+  };
+  return { look, parts, props };
+}
+
 /** Build one character. Returns a Group with userData.parts (pivots) and userData.dispose(). */
 export function buildCharacter(agent, grain) {
-  const look = lookFor(agent);
+  const rig = characterRig(agent);
   const m = voxMat("base", { map: grain });
   const geos = [];
   const mk = (boxes, opts) => { const g = buildGeometry(boxes, { ao: true, floorY: -99, ...opts }); geos.push(g); return g; };
@@ -88,77 +131,32 @@ export function buildCharacter(agent, grain) {
   };
 
   const root = new THREE.Group();
-  const hips = new THREE.Group();
-  hips.position.y = LEG_H;
-  root.add(hips);
-
-  const leg = (side) => {
-    const p = new THREE.Group();
-    p.position.set(side * 0.105, 0, 0);
-    p.add(mesh(mk([
-      vbox(0, -LEG_H + 0.08, 0, 0.19, LEG_H - 0.08, 0.2, look.pants),
-      vbox(0, -LEG_H, 0.02, 0.2, 0.09, 0.24, "#2b2b33"),
-    ])));
-    hips.add(p);
-    return p;
-  };
-  const legL = leg(1), legR = leg(-1);
-
-  const torso = new THREE.Group();
-  hips.add(torso);
-  torso.add(mesh(mk([
-    vbox(0, 0, 0, 0.42, BODY_H, 0.24, look.shirt),
-    vbox(0, BODY_H - 0.06, 0.005, 0.18, 0.06, 0.245, look.skin),
-    vbox(0, 0, 0.005, 0.43, 0.06, 0.245, look.shirtDark),
-    vbox(0.11, 0.3, 0.121, 0.08, 0.08, 0.01, look.accent, { faces: [4] }),
-  ])));
-
-  const head = new THREE.Group();
-  head.position.y = BODY_H;
-  torso.add(head);
-  head.add(mesh(mk([vbox(0, 0, 0, HEAD, HEAD, HEAD, look.skin), ...hairBoxes(look.style, look.hair, look.shirt)])));
-  head.add(mesh(mk(faceBoxes(look), { ao: false })));
-  const eyes = mesh(mk([
-    vbox(-0.11, 0.14, HEAD / 2 + 0.006, 0.08, 0.09, 0.01, "#25222b", { faces: [4] }),
-    vbox(0.11, 0.14, HEAD / 2 + 0.006, 0.08, 0.09, 0.01, "#25222b", { faces: [4] }),
-    vbox(-0.09, 0.19, HEAD / 2 + 0.008, 0.03, 0.03, 0.01, "#ffffff", { faces: [4] }),
-    vbox(0.13, 0.19, HEAD / 2 + 0.008, 0.03, 0.03, 0.01, "#ffffff", { faces: [4] }),
-  ], { ao: false }));
-  eyes.castShadow = false;
-  eyes.geometry.translate(0, -0.185, 0);
-  eyes.position.y = 0.185;
-  head.add(eyes);
-
-  const arm = (side) => {
-    const p = new THREE.Group();
-    p.position.set(side * 0.29, BODY_H - 0.06, 0);
-    p.add(mesh(mk([
-      vbox(0, -0.2, 0, 0.15, 0.24, 0.16, look.shirt),
-      vbox(0, -0.4, 0, 0.14, 0.2, 0.15, look.skin),
-    ])));
-    torso.add(p);
-    return p;
-  };
-  const armL = arm(1), armR = arm(-1);
-
-  // little hand props, shown per activity (applyProps); the hand sits at y ≈ -0.46 on the arm pivot
-  const prop = (parent, boxes) => {
-    const o = mesh(mk(boxes, { ao: false }));
+  const groups = {};
+  for (const [name, part] of Object.entries(rig.parts)) {
+    const g = new THREE.Group();
+    g.position.set(...part.at);
+    (part.parent ? groups[part.parent] : root).add(g);
+    groups[name] = g;
+    const flat = name === "eyes";
+    if (part.boxes.length) {
+      const o = mesh(mk(part.boxes, flat ? { ao: false } : {}));
+      if (flat) o.castShadow = false;
+      g.add(o);
+    }
+    if (part.face) g.add(mesh(mk(part.face, { ao: false })));
+  }
+  const props = {};
+  for (const [name, prop] of Object.entries(rig.props)) {
+    const o = mesh(mk(prop.boxes, { ao: false }));
     o.castShadow = false;
     o.visible = false;
-    parent.add(o);
-    return o;
-  };
-  const props = {
-    mug: prop(armR, [vbox(0, -0.56, 0.1, 0.1, 0.12, 0.1, "#fdfaf3"), vbox(0.065, -0.53, 0.1, 0.03, 0.06, 0.04, "#fdfaf3"), vbox(0, -0.45, 0.1, 0.08, 0.01, 0.08, "#6b4630")]),
-    snack: prop(armL, [vbox(0, -0.54, 0.09, 0.12, 0.06, 0.1, "#e8b25a"), vbox(0, -0.49, 0.09, 0.1, 0.02, 0.08, "#f6e3b4")]),
-    book: prop(armL, [vbox(-0.12, -0.5, 0.14, 0.26, 0.2, 0.03, "#c4523f"), vbox(-0.12, -0.5, 0.155, 0.24, 0.18, 0.01, "#fdf6e6")]),
-    can: prop(armR, [vbox(0, -0.6, 0.12, 0.12, 0.14, 0.18, "#5fa7a0"), vbox(0, -0.52, 0.26, 0.04, 0.04, 0.16, "#5fa7a0"), vbox(0, -0.46, 0.12, 0.03, 0.06, 0.12, "#3f7f78")]),
-    marker: prop(armR, [vbox(0, -0.58, 0.04, 0.03, 0.12, 0.03, "#2f6fd0")]),
-  };
+    groups[prop.parent].add(o);
+    props[name] = o;
+  }
 
+  const { hips, torso, head, eyes, armL, armR, legL, legR } = groups;
   root.userData.parts = { hips, torso, head, eyes, armL, armR, legL, legR, props };
-  root.userData.look = look;
+  root.userData.look = rig.look;
   root.userData.dispose = () => { for (const g of geos) g.dispose(); };
   return root;
 }

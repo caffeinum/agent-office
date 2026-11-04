@@ -31,6 +31,28 @@ final class Bridge {
         return try JSONDecoder().decode(OfficeScene?.self, from: Data(json.utf8))
     }
 
+    /// The web's A* walk between two floor points.
+    func route(from: (Double, Double), to: (Double, Double)) throws -> [(Double, Double)] {
+        let json = try call("route", [from.0, from.1, to.0, to.1]).toString() ?? "[]"
+        return try JSONDecoder().decode([[Double]].self, from: Data(json.utf8)).map { ($0[0], $0[1]) }
+    }
+
+    /// limbAngles() for each (pose, phase) at clock t.
+    func limbs(_ poses: [(pose: String, phase: Double)], t: Double) throws -> [LimbAngles] {
+        let input = try JSONSerialization.data(withJSONObject: poses.map { ["pose": $0.pose, "phase": $0.phase] })
+        let json = try call("limbs", [String(decoding: input, as: UTF8.self), t]).toString() ?? "[]"
+        return try JSONDecoder().decode([LimbAngles].self, from: Data(json.utf8))
+    }
+
+    struct LabelRect: Encodable { let id: String; let x, y, w, h, depth: Double; let status: String; let selected, speaking, kept: Bool }
+
+    /// The web overlay's cullLabels(): which labels stay visible.
+    func cull(_ rects: [LabelRect]) throws -> Set<String> {
+        let input = String(decoding: try JSONEncoder().encode(rects), as: UTF8.self)
+        let json = try call("cull", [input]).toString() ?? "[]"
+        return Set(try JSONDecoder().decode([String].self, from: Data(json.utf8)))
+    }
+
     private func call(_ name: String, _ args: [Any]) throws -> JSValue {
         var thrown: String?
         context.exceptionHandler = { _, e in thrown = e?.toString() }

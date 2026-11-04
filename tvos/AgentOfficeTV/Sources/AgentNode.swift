@@ -1,125 +1,110 @@
 import SceneKit
 import UIKit
 
-/// One blocky character (proportions from the web viewer's character.js) with a name tag; walks straight to its target.
+/// One character built from the web viewer's characterRig() and posed with its limbAngles(), walking the web's A* path.
 final class AgentNode {
     let node = SCNNode()
-    private let body = SCNNode()
-    private let legs = SCNNode()
-    private let tag = SCNNode()
-    private var agent: OfficeScene.Agent
+    private(set) var agent: OfficeScene.Agent
+    private var parts: [String: SCNNode] = [:]
+    private var props: [String: SCNNode] = [:]
+    private var path: [(Double, Double)] = []
+    private var targetKey = ""
+    private(set) var walking = false
 
-    private static let legH = 0.4, bodyH = 0.46, head = 0.46
-    private static let seated: Set<String> = ["type", "handup", "doze", "sit", "lounge"]
+    /// The web viewer's walk speed (scene.js WALK_SPEED) and which poses hold which hand prop (character.js POSE_PROPS).
+    static let walkSpeed: Float = 1.7
+    private static let poseProps = ["sip": "mug", "coffee": "mug", "snack": "snack", "read": "book", "water-plants": "can", "whiteboard": "marker"]
 
     init(_ a: OfficeScene.Agent) {
         agent = a
-        let look = a.look
-        legs.addChildNode(boxNode(at: [-0.11, 0, 0], size: [0.18, Self.legH, 0.2], color: cssColor(look.pants)))
-        legs.addChildNode(boxNode(at: [0.11, 0, 0], size: [0.18, Self.legH, 0.2], color: cssColor(look.pants)))
-        body.addChildNode(boxNode(at: [0, 0, 0], size: [0.46, Self.bodyH, 0.26], color: cssColor(look.shirt)))
-        body.addChildNode(boxNode(at: [-0.3, 0.06, 0], size: [0.13, 0.4, 0.16], color: cssColor(look.shirtDark)))
-        body.addChildNode(boxNode(at: [0.3, 0.06, 0], size: [0.13, 0.4, 0.16], color: cssColor(look.shirtDark)))
-        body.addChildNode(boxNode(at: [0, Self.bodyH, 0], size: [Self.head, Self.head, Self.head], color: cssColor(look.skin)))
-        body.addChildNode(boxNode(at: [0, Self.bodyH + Self.head - 0.1, -0.02], size: [Self.head + 0.04, 0.14, Self.head + 0.04], color: cssColor(look.hair)))
-        body.addChildNode(boxNode(at: [-0.1, Self.bodyH + 0.26, Self.head / 2 + 0.005], size: [0.06, 0.08, 0.01], color: .black))
-        body.addChildNode(boxNode(at: [0.1, Self.bodyH + 0.26, Self.head / 2 + 0.005], size: [0.06, 0.08, 0.01], color: .black))
-        node.addChildNode(legs)
-        node.addChildNode(body)
-        let billboard = SCNBillboardConstraint()
-        billboard.freeAxes = .all
-        tag.constraints = [billboard]
-        node.addChildNode(tag)
-        node.castsShadow = true
-        update(a)
+        build(a.rig)
+        node.position = SCNVector3(a.target.x, 0, a.target.z)
         node.eulerAngles.y = Float(a.target.yaw)
+        targetKey = a.target.key
+        node.opacity = a.status == "away" ? 0.55 : 1
     }
 
-    func update(_ a: OfficeScene.Agent) {
-        let relabel = a.name != agent.name || a.status != agent.status || a.activity != agent.activity || tag.geometry == nil
+    var pose: String { walking ? "walk" : agent.target.pose }
+    var crownY: Float { (parts["hips"]?.position.y ?? 0.4) + 0.46 + 0.46 + 0.06 }
+
+    private func build(_ rig: OfficeScene.Rig) {
+        parts.values.forEach { $0.removeFromParentNode() }
+        parts = [:]
+        props = [:]
+        var pending = rig.parts
+        while !pending.isEmpty {
+            let ready = pending.filter { $0.value.parent == nil || parts[$0.value.parent!] != nil }
+            precondition(!ready.isEmpty, "characterRig has a part whose parent never appears")
+            for (name, part) in ready {
+                let g = SCNNode()
+                g.position = SCNVector3(part.at[0], part.at[1], part.at[2])
+                for b in part.boxes + (part.face ?? []) { g.addChildNode(boxNode(at: b.at, size: b.size, color: cssColor(b.color ?? "#ffffff"))) }
+                (part.parent.flatMap { parts[$0] } ?? node).addChildNode(g)
+                parts[name] = g
+                pending[name] = nil
+            }
+        }
+        for (name, prop) in rig.props {
+            guard let parent = parts[prop.parent] else { preconditionFailure("prop \(name) hangs on missing part \(prop.parent)") }
+            let g = SCNNode()
+            for b in prop.boxes { g.addChildNode(boxNode(at: b.at, size: b.size, color: cssColor(b.color ?? "#ffffff"))) }
+            g.isHidden = true
+            parent.addChildNode(g)
+            props[name] = g
+        }
+    }
+
+    func update(_ a: OfficeScene.Agent, route: (_ from: (Double, Double), _ to: (Double, Double)) -> [(Double, Double)]) {
+        if a.rig != agent.rig { build(a.rig) }
+        if a.target.key != targetKey {
+            targetKey = a.target.key
+            path = route((Double(node.position.x), Double(node.position.z)), (a.target.x, a.target.z))
+        }
+        node.opacity = a.status == "away" ? 0.55 : 1
         agent = a
-        if relabel { drawTag() }
     }
 
-    func step(dt: Float, speed: Float) {
+    func step(dt: Float) {
         let t = agent.target
-        let dx = Float(t.x) - node.position.x, dz = Float(t.z) - node.position.z
+        if path.isEmpty, hypot(Float(t.x) - node.position.x, Float(t.z) - node.position.z) > 0.02 { path = [(t.x, t.z)] }
+        walking = !path.isEmpty
+        guard let wp = path.first else {
+            turn(toward: Float(t.yaw), rate: 8, dt: dt)
+            return
+        }
+        let dx = Float(wp.0) - node.position.x, dz = Float(wp.1) - node.position.z
         let dist = (dx * dx + dz * dz).squareRoot()
-        let walking = dist > 0.02
-        if walking {
-            let s = min(dist, speed * dt)
+        let s = Self.walkSpeed * dt
+        if dist <= s {
+            node.position.x = Float(wp.0)
+            node.position.z = Float(wp.1)
+            path.removeFirst()
+        } else {
             node.position.x += dx / dist * s
             node.position.z += dz / dist * s
-            turn(toward: atan2(dx, dz), dt: dt)
-        } else {
-            turn(toward: Float(t.yaw), dt: dt)
         }
-        pose(walking ? "walk" : t.pose, seatY: Float(t.seatY))
+        if dist > 0.01 { turn(toward: atan2(dx, dz), rate: 10, dt: dt) }
     }
 
-    private func turn(toward yaw: Float, dt: Float) {
+    /// character.js applyLimbs + applyProps + blink.
+    func apply(_ a: LimbAngles, clock: Double) {
+        parts["legL"]?.eulerAngles.x = Float(a.legL)
+        parts["legR"]?.eulerAngles.x = Float(a.legR)
+        parts["armL"]?.eulerAngles = SCNVector3(Float(a.armL), 0, Float(a.armLz))
+        parts["armR"]?.eulerAngles = SCNVector3(Float(a.armR), 0, Float(-a.armRz))
+        parts["head"]?.eulerAngles = SCNVector3(Float(a.headTilt), Float(a.head), 0)
+        parts["torso"]?.eulerAngles.x = Float(a.lean)
+        parts["hips"]?.position.y = Float((a.seated ? agent.target.seatY + 0.02 : 0.4) + a.bob)
+        let want = Self.poseProps[pose]
+        for (name, p) in props { p.isHidden = name != want }
+        let k = (clock + agent.phase * 3.7).truncatingRemainder(dividingBy: 4.2)
+        parts["eyes"]?.scale.y = k < 0.12 ? 0.15 : 1
+    }
+
+    private func turn(toward yaw: Float, rate: Float, dt: Float) {
         var d = yaw - node.eulerAngles.y
         while d > .pi { d -= 2 * .pi }
         while d < -.pi { d += 2 * .pi }
-        node.eulerAngles.y += d * min(1, dt * 8)
-    }
-
-    private func pose(_ p: String, seatY: Float) {
-        if Self.seated.contains(p) {
-            body.position.y = seatY - 0.02
-            legs.position = SCNVector3(0, seatY - 0.1, 0.12)
-            legs.eulerAngles.x = -.pi / 2
-            legs.scale = SCNVector3(1, 0.9, 1)
-        } else {
-            body.position.y = Float(Self.legH)
-            legs.position = SCNVector3(0, 0, 0)
-            legs.eulerAngles.x = 0
-            legs.scale = SCNVector3(1, 1, 1)
-        }
-        let bob: Float = p == "walk" ? abs(sin(Float(CACurrentMediaTime()) * 10)) * 0.04 : 0
-        body.position.y += bob
-        tag.position = SCNVector3(0, body.position.y + Float(Self.bodyH + Self.head) + 0.45, 0)
-    }
-
-    private func drawTag() {
-        let status: String = switch agent.status {
-        case "working": agent.activity ?? "working"
-        case "waiting": "needs input"
-        case "away": "away"
-        default: ""
-        }
-        let dot: UIColor = switch agent.status {
-        case "working": UIColor(red: 0.3, green: 0.8, blue: 0.45, alpha: 1)
-        case "waiting": UIColor(red: 1, green: 0.7, blue: 0.2, alpha: 1)
-        case "away": UIColor(white: 0.6, alpha: 1)
-        default: UIColor(red: 0.45, green: 0.6, blue: 0.95, alpha: 1)
-        }
-        let name = agent.name as NSString
-        let font = UIFont.systemFont(ofSize: 34, weight: .semibold), small = UIFont.systemFont(ofSize: 26, weight: .medium)
-        let nameW = name.size(withAttributes: [.font: font]).width
-        let statusW = status.isEmpty ? 0 : (status as NSString).size(withAttributes: [.font: small]).width
-        let w = max(nameW + 76, statusW + 40), h: CGFloat = status.isEmpty ? 64 : 108
-        let img = UIGraphicsImageRenderer(size: CGSize(width: w, height: h)).image { _ in
-            UIColor(white: 1, alpha: 0.94).setFill()
-            UIBezierPath(roundedRect: CGRect(x: 0, y: 0, width: w, height: 64), cornerRadius: 32).fill()
-            dot.setFill()
-            UIBezierPath(ovalIn: CGRect(x: 20, y: 22, width: 20, height: 20)).fill()
-            name.draw(at: CGPoint(x: 52, y: 12), withAttributes: [.font: font, .foregroundColor: UIColor(white: 0.12, alpha: 1)])
-            if !status.isEmpty {
-                dot.withAlphaComponent(0.92).setFill()
-                UIBezierPath(roundedRect: CGRect(x: (w - statusW - 28) / 2, y: 70, width: statusW + 28, height: 36), cornerRadius: 18).fill()
-                (status as NSString).draw(at: CGPoint(x: (w - statusW) / 2, y: 73), withAttributes: [.font: small, .foregroundColor: UIColor.white])
-            }
-        }
-        let scale: CGFloat = 0.011
-        let plane = SCNPlane(width: w * scale, height: h * scale)
-        let m = SCNMaterial()
-        m.diffuse.contents = img
-        m.lightingModel = .constant
-        m.isDoubleSided = true
-        m.readsFromDepthBuffer = false
-        plane.materials = [m]
-        tag.geometry = plane
-        tag.renderingOrder = 100
+        node.eulerAngles.y += d * min(1, dt * rate)
     }
 }

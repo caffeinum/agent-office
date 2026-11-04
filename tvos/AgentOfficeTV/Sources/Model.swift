@@ -15,8 +15,13 @@ struct OfficeScene: Decodable, Equatable {
     struct Kind: Decodable, Equatable { let defaultColor: String?; let glowColor: String?; let parts: [Part] }
     struct Item: Decodable, Equatable { let id: String; let kind: String; let x: Double; let z: Double; let yaw: Double; let color: String? }
     struct Target: Decodable, Equatable { let key: String; let x: Double; let z: Double; let yaw: Double; let pose: String; let seatY: Double }
-    struct Look: Decodable, Equatable { let skin: String; let hair: String; let pants: String; let style: String; let shirt: String; let shirtDark: String; let accent: String }
-    struct Agent: Decodable, Equatable { let id: String; let name: String; let status: String; let activity: String?; let look: Look; let target: Target }
+    struct RigPart: Decodable, Equatable { let parent: String?; let at: [Double]; let boxes: [Box]; let face: [Box]? }
+    struct RigProp: Decodable, Equatable { let parent: String; let boxes: [Box] }
+    struct Rig: Decodable, Equatable { let parts: [String: RigPart]; let props: [String: RigProp] }
+    struct Agent: Decodable, Equatable {
+        let id: String; let name: String; let emoji: String?; let status: String; let activity: String?
+        let css: String; let phase: Double; let says: String?; let rig: Rig; let target: Target
+    }
     struct Chat: Decodable, Equatable { let from: String; let to: String?; let text: String; let ts: Double }
 
     let id: String
@@ -28,4 +33,10 @@ struct OfficeScene: Decodable, Equatable {
     let items: [Item]
     let agents: [Agent]
     let chat: [Chat]
+}
+
+/// limbAngles() output from the web viewer (radians; bob in units).
+struct LimbAngles: Decodable {
+    let legL, legR, armL, armR, armLz, armRz, head, headTilt, lean, bob: Double
+    let seated: Bool
 }

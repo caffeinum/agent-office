@@ -4,13 +4,14 @@
 import { MODELS, SEAT_Y, WALL_H } from "../../public/js/furniture.js";
 import {
   applyFrame, assignSpots, deskSeating, entryPoint, hashStr, idleSpots, kindGeometryPlan, layoutBatches, poseFor, seatOf,
-  usableSpots, wanderSalt, hueColors,
+  usableSpots, wanderSalt, limbAngles, route, cullLabels, labelPriority,
 } from "../../public/js/model.js";
 import { blockedCells } from "../../public/shared/kinds.js";
 import { kindOf } from "../../public/shared/catalog.js";
-import { lookFor } from "../../public/js/character.js";
+import { characterRig } from "../../public/js/character.js";
 
 let state = null;
+let walk = null; // {blocked, grid} of the last scene, for route()
 
 const boxesOf = (list) => (list ?? []).map((b) => ({ at: b.at, size: b.size, color: b.color }));
 
@@ -92,7 +93,23 @@ function nameOf(ref) {
   return state.agents.find((a) => a.id === ref)?.name ?? ref;
 }
 
+const hueCss = (hue) => `hsl(${((Math.round(hue ?? 0) % 360) + 360) % 360} 70% 60%)`;
+
 globalThis.AO = {
+  /** The web viewer's A* walk from one point to another (cell centres, then the exact goal), as JSON [[x, z], …]. */
+  route(fx, fz, tx, tz) {
+    if (!walk) return "[]";
+    return JSON.stringify(route(walk.blocked, walk.grid, { x: fx, z: fz }, { x: tx, z: tz }).map((p) => [p.x, p.z]));
+  },
+  /** The web overlay's label culling: JSON [{id, x, y, w, h, depth, status, selected, speaking, kept}] → JSON [kept ids]. */
+  cull(json) {
+    const rects = JSON.parse(json).map((r) => ({ ...r, priority: labelPriority(r) + (r.kept ? 5 : 0) }));
+    return JSON.stringify([...cullLabels(rects)]);
+  },
+  /** limbAngles() for many characters at once: JSON [{pose, phase}] at clock t → JSON [angles]. */
+  limbs(json, t) {
+    return JSON.stringify(JSON.parse(json).map((c) => limbAngles(c.pose, t, c.phase)));
+  },
   /** One WebSocket frame (JSON text); returns its type. */
   frame(text) {
     const f = JSON.parse(text);
@@ -109,6 +126,7 @@ globalThis.AO = {
     const kinds = {};
     for (const it of items) if (!kinds[it.kind]) kinds[it.kind] = kindParts(it.kind, custom);
     const t = targets(now);
+    walk = { blocked: blockedCells(state.items, state.grid, custom), grid: state.grid };
     return JSON.stringify({
       id: state.id,
       name: state.name ?? null,
@@ -118,8 +136,9 @@ globalThis.AO = {
       kinds,
       items,
       agents: state.agents.map((a) => ({
-        id: a.id, name: a.name, status: a.status, activity: a.activity ?? null, hue: a.hue,
-        look: lookFor(a), target: t.get(a.id),
+        id: a.id, name: a.name, emoji: a.emoji ?? null, status: a.status, activity: a.activity ?? null, hue: a.hue,
+        css: hueCss(a.hue), phase: (hashStr(a.id) % 1000) / 100, says: a.says && now - a.says.ts < 9000 ? a.says.text : null,
+        rig: characterRig(a), target: t.get(a.id),
       })),
       chat: state.chat.slice(-6).map((m) => ({ from: nameOf(m.from), to: m.to ? nameOf(m.to) : null, text: m.text, ts: m.ts })),
     });

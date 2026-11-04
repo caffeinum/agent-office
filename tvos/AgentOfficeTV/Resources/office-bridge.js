@@ -480,6 +480,145 @@
         throw new Error(`agent ${agent.id}: unknown status ${JSON.stringify(agent.status)}`);
     }
   }
+  var SEATED = /* @__PURE__ */ new Set(["type", "handup", "doze", "sit"]);
+  function limbAngles(pose, t, phase = 0) {
+    const a = { legL: 0, legR: 0, armL: 0, armR: 0, armLz: 0, armRz: 0, head: 0, headTilt: 0, lean: 0, bob: 0, seated: false };
+    const s = t + phase;
+    if (pose === "walk") {
+      const w = Math.sin(s * 9);
+      a.legL = 38 * D2R * w;
+      a.legR = -38 * D2R * w;
+      a.armL = -32 * D2R * w;
+      a.armR = 32 * D2R * w;
+      a.bob = Math.abs(Math.cos(s * 9)) * 0.05;
+      return a;
+    }
+    if (SEATED.has(pose)) {
+      a.seated = true;
+      a.legL = a.legR = -88 * D2R;
+      a.bob = Math.sin(s * 2) * 6e-3;
+      if (pose === "type") {
+        a.armL = -72 * D2R + Math.sin(s * 14) * 7 * D2R;
+        a.armR = -72 * D2R + Math.sin(s * 14 + Math.PI) * 7 * D2R;
+        a.lean = 7 * D2R;
+        a.head = Math.sin(s * 0.45) * 7 * D2R;
+        a.headTilt = 6 * D2R + Math.max(0, Math.sin(s * 0.9)) * 4 * D2R;
+      } else if (pose === "handup") {
+        a.armL = -45 * D2R;
+        a.armR = -170 * D2R;
+        a.armRz = Math.sin(s * 5) * 14 * D2R;
+        a.head = Math.sin(s * 0.8) * 18 * D2R;
+        a.headTilt = -6 * D2R;
+      } else if (pose === "doze") {
+        a.armL = a.armR = -55 * D2R;
+        a.lean = 22 * D2R;
+        a.headTilt = 24 * D2R + Math.sin(s * 1.2) * 3 * D2R;
+      } else {
+        a.armL = a.armR = -18 * D2R;
+        a.head = Math.sin(s * 0.3) * 25 * D2R;
+      }
+      return a;
+    }
+    if (pose === "sip" || pose === "coffee") {
+      const lift = Math.max(0, Math.sin(s * 0.9)) ** 3;
+      a.armR = (-55 - 70 * lift) * D2R;
+      a.armRz = 14 * D2R;
+      a.armL = Math.sin(s * 1.1) * 3 * D2R;
+      a.headTilt = (-14 * lift + 3) * D2R;
+      a.head = Math.sin(s * 0.3) * 12 * D2R * (1 - lift);
+      a.bob = Math.sin(s * 2) * 8e-3;
+      return a;
+    }
+    if (pose === "snack") {
+      const bite = Math.max(0, Math.sin(s * 2.2)) ** 2;
+      a.armL = (-60 - 60 * bite) * D2R;
+      a.armLz = 16 * D2R;
+      a.headTilt = (-4 + 6 * bite) * D2R;
+      a.bob = Math.sin(s * 4.4) * 6e-3 * bite;
+      return a;
+    }
+    if (pose === "read") {
+      a.armL = a.armR = -62 * D2R;
+      a.armLz = a.armRz = 12 * D2R;
+      a.headTilt = 22 * D2R;
+      const turn = Math.max(0, Math.sin(s * 0.55) - 0.9) * 10;
+      a.armRz = (12 + 30 * turn) * D2R;
+      a.head = Math.sin(s * 0.7) * 4 * D2R;
+      a.bob = Math.sin(s * 1.6) * 6e-3;
+      return a;
+    }
+    if (pose === "play") {
+      a.armL = -78 * D2R + Math.sin(s * 17) * 6 * D2R;
+      a.armR = -80 * D2R + Math.sin(s * 23 + 1) * 9 * D2R;
+      a.armLz = Math.sin(s * 5) * 8 * D2R;
+      a.lean = (8 + Math.sin(s * 3) * 3) * D2R;
+      a.head = Math.sin(s * 1.3) * 3 * D2R;
+      a.headTilt = 4 * D2R;
+      a.bob = Math.abs(Math.sin(s * 6)) * 0.02;
+      return a;
+    }
+    if (pose === "water-plants") {
+      a.armR = (-70 + Math.sin(s * 1.2) * 14) * D2R;
+      a.armRz = 6 * D2R;
+      a.armL = Math.sin(s * 1.1) * 3 * D2R;
+      a.lean = 10 * D2R;
+      a.headTilt = 18 * D2R;
+      a.bob = Math.sin(s * 2) * 8e-3;
+      return a;
+    }
+    if (pose === "whiteboard") {
+      a.armR = (-128 + Math.sin(s * 7) * 6) * D2R;
+      a.armRz = Math.sin(s * 0.9) * 22 * D2R;
+      a.armL = Math.sin(s * 0.8) * 4 * D2R;
+      a.head = Math.sin(s * 0.9) * 10 * D2R;
+      a.headTilt = -8 * D2R;
+      a.bob = Math.sin(s * 2) * 6e-3;
+      return a;
+    }
+    if (pose === "chat") {
+      const talk = Math.sin(s * 0.6) > 0;
+      a.armL = (talk ? -35 + Math.sin(s * 4) * 18 : 0) * D2R;
+      a.armLz = 10 * D2R;
+      a.armR = (talk ? -25 + Math.sin(s * 3 + 1) * 14 : 0) * D2R;
+      a.headTilt = (talk ? -3 : Math.sin(s * 5) * 6) * D2R;
+      a.head = Math.sin(s * 0.4) * 8 * D2R;
+      a.bob = Math.sin(s * 2) * 8e-3;
+      return a;
+    }
+    if (pose === "think") {
+      a.armR = -128 * D2R;
+      a.armRz = -30 * D2R;
+      a.armL = -40 * D2R;
+      a.armLz = -24 * D2R;
+      a.headTilt = (-14 + Math.sin(s * 0.5) * 5) * D2R;
+      a.head = Math.sin(s * 0.35) * 18 * D2R;
+      a.lean = Math.sin(s * 0.4) * 2 * D2R;
+      a.bob = Math.sin(s * 1.2) * 6e-3;
+      return a;
+    }
+    if (pose === "watch") {
+      const laugh = Math.max(0, Math.sin(s * 0.7) - 0.85) * 6;
+      a.armL = a.armR = -70 * D2R;
+      a.armLz = -38 * D2R;
+      a.armRz = -38 * D2R;
+      a.headTilt = (-4 - laugh * 8) * D2R;
+      a.head = Math.sin(s * 0.25) * 6 * D2R;
+      a.lean = -3 * D2R;
+      a.bob = Math.sin(s * 2) * 6e-3 + Math.abs(Math.sin(s * 14)) * 0.02 * laugh;
+      return a;
+    }
+    if (pose === "wave") {
+      a.armR = -168 * D2R;
+      a.armRz = Math.sin(s * 8) * 26 * D2R;
+      a.bob = Math.sin(s * 2) * 8e-3;
+      return a;
+    }
+    a.bob = Math.sin(s * 2) * 8e-3;
+    a.armL = Math.sin(s * 1.1) * 3 * D2R;
+    a.armR = -a.armL;
+    a.head = Math.max(0, Math.sin(s * 0.5) - 0.6) * 70 * D2R * (Math.sin(s * 0.17) > 0 ? 1 : -1);
+    return a;
+  }
   function deskSeating(agents, items) {
     const desks = new Map(items.filter((it) => it.kind === "desk").map((d) => [d.id, d]));
     const taken = /* @__PURE__ */ new Set();
@@ -544,6 +683,83 @@
     }
     return out;
   }
+  var cellOf = (p, grid) => ({ x: Math.min(grid.w - 1, Math.max(0, Math.floor(p.x))), z: Math.min(grid.d - 1, Math.max(0, Math.floor(p.z))) });
+  function route(blocked, grid, from, to) {
+    const W = grid.w, D = grid.d;
+    const s = cellOf(from, grid), g = cellOf(to, grid);
+    const si = s.z * W + s.x, gi = g.z * W + g.x;
+    const free = (x, z) => x >= 0 && z >= 0 && x < W && z < D && (!blocked[z * W + x] || z * W + x === gi || z * W + x === si);
+    const gScore = new Float32Array(W * D).fill(Infinity);
+    const came = new Int32Array(W * D).fill(-1);
+    const closed = new Uint8Array(W * D);
+    const h = (i) => Math.hypot(i % W - g.x, Math.floor(i / W) - g.z);
+    const open = [si];
+    gScore[si] = 0;
+    const f = new Float32Array(W * D).fill(Infinity);
+    f[si] = h(si);
+    let found = si === gi;
+    while (open.length && !found) {
+      let bi = 0;
+      for (let i = 1; i < open.length; i++) if (f[open[i]] < f[open[bi]]) bi = i;
+      const cur = open[bi];
+      open[bi] = open[open.length - 1];
+      open.pop();
+      if (cur === gi) {
+        found = true;
+        break;
+      }
+      closed[cur] = 1;
+      const cx = cur % W, cz = Math.floor(cur / W);
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+        if (!dx && !dz) continue;
+        const nx = cx + dx, nz = cz + dz;
+        if (!free(nx, nz)) continue;
+        if (dx && dz && (!free(cx + dx, cz) || !free(cx, cz + dz))) continue;
+        const ni = nz * W + nx;
+        if (closed[ni]) continue;
+        const ng = gScore[cur] + (dx && dz ? Math.SQRT2 : 1);
+        if (ng < gScore[ni]) {
+          gScore[ni] = ng;
+          came[ni] = cur;
+          f[ni] = ng + h(ni);
+          if (!open.includes(ni)) open.push(ni);
+        }
+      }
+    }
+    if (!found) return [{ x: to.x, z: to.z }];
+    const cells = [];
+    for (let i = gi; i !== -1 && i !== si; i = came[i]) cells.push(i);
+    cells.reverse();
+    const pts = cells.slice(0, -1).map((i) => ({ x: i % W + 0.5, z: Math.floor(i / W) + 0.5 }));
+    pts.push({ x: to.x, z: to.z });
+    return smooth([{ x: from.x, z: from.z }, ...pts], blocked, grid, si, gi).slice(1);
+  }
+  function smooth(pts, blocked, grid, si, gi) {
+    if (pts.length < 3) return pts;
+    const W = grid.w;
+    const clear = (a, b) => {
+      const n = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) * 4);
+      for (let k2 = 1; k2 < n; k2++) {
+        const x = a.x + (b.x - a.x) * k2 / n, z = a.z + (b.z - a.z) * k2 / n;
+        for (const [ox, oz] of [[0.22, 0.22], [-0.22, 0.22], [0.22, -0.22], [-0.22, -0.22]]) {
+          const cx = Math.floor(x + ox), cz = Math.floor(z + oz);
+          if (cx < 0 || cz < 0 || cx >= W || cz >= grid.d) return false;
+          const i2 = cz * W + cx;
+          if (blocked[i2] && i2 !== si && i2 !== gi) return false;
+        }
+      }
+      return true;
+    };
+    const out = [pts[0]];
+    let i = 0;
+    while (i < pts.length - 1) {
+      let j = pts.length - 1;
+      while (j > i + 1 && !clear(pts[i], pts[j])) j--;
+      out.push(pts[j]);
+      i = j;
+    }
+    return out;
+  }
   function entryPoint(blocked, grid) {
     const tx = grid.w / 2, tz = grid.d - 0.5;
     let best = null, bd = Infinity;
@@ -579,6 +795,20 @@
       if (kind.textable) texts.push({ ...inst, text: it.text ?? "" });
     }
     return { batches, texts };
+  }
+  function labelPriority({ selected, status, speaking }) {
+    if (selected) return 100;
+    if (speaking) return 60;
+    return { waiting: 50, working: 40, idle: 20, away: 10 }[status] ?? 0;
+  }
+  function cullLabels(rects) {
+    const sorted = [...rects].sort((a, b) => b.priority - a.priority || (a.depth ?? 0) - (b.depth ?? 0));
+    const kept = [];
+    for (const r of sorted) {
+      const hit = kept.some((k2) => r.x < k2.x + k2.w && r.x + r.w > k2.x && r.y < k2.y + k2.h && r.y + r.h > k2.y);
+      if (!hit) kept.push(r);
+    }
+    return new Set(kept.map((r) => r.id));
   }
   function hueColors(hue) {
     const h = (Math.round(hue) % 360 + 360) % 360;
@@ -650,9 +880,88 @@
       ...hueColors(agent.hue ?? 0)
     };
   }
+  function hairBoxes(style, hair, accent) {
+    const H = HEAD, top = H;
+    const b = [];
+    if (style === "cap") {
+      b.push(vbox(0, top - 0.1, 0, H + 0.04, 0.16, H + 0.04, accent));
+      b.push(vbox(0, top - 0.1, H / 2 + 0.1, H * 0.8, 0.04, 0.22, accent));
+      b.push(vbox(0, top - 0.24, -0.02, H + 0.03, 0.14, H - 0.02, hair));
+      return b;
+    }
+    b.push(vbox(0, top - 0.08, 0, H + 0.04, 0.12, H + 0.04, hair));
+    b.push(vbox(0, top - 0.3, -H / 2 + 0.03, H + 0.04, 0.24, 0.1, hair));
+    if (style === "crop") {
+      b.push(vbox(0, top - 0.14, H / 2 - 0.02, H + 0.04, 0.08, 0.06, hair));
+    } else if (style === "bob") {
+      b.push(vbox(-H / 2 - 0.01, top - 0.38, 0, 0.06, 0.34, H + 0.02, hair));
+      b.push(vbox(H / 2 + 0.01, top - 0.38, 0, 0.06, 0.34, H + 0.02, hair));
+      b.push(vbox(0, top - 0.42, -H / 2 + 0.03, H + 0.06, 0.34, 0.1, hair));
+      b.push(vbox(0.08, top - 0.16, H / 2, H * 0.7, 0.1, 0.06, hair));
+    } else if (style === "bun") {
+      b.push(vbox(0, top + 0.02, -0.08, 0.2, 0.16, 0.2, hair));
+      b.push(vbox(0, top - 0.14, H / 2 - 0.02, H + 0.04, 0.08, 0.06, hair));
+    } else if (style === "spiky") {
+      for (const [x, z, s] of [[-0.12, 0.08, 0.12], [0.1, 0.1, 0.1], [0, -0.08, 0.14], [0.14, -0.1, 0.1], [-0.14, -0.12, 0.1]]) {
+        b.push(vbox(x, top + 0.02, z, s, s, s, hair));
+      }
+      b.push(vbox(0, top - 0.14, H / 2 - 0.02, H + 0.04, 0.08, 0.06, hair));
+    }
+    return b;
+  }
+  function faceBoxes(look) {
+    const z = HEAD / 2 + 5e-3;
+    return [
+      vbox(-0.11, 0.255, z, 0.1, 0.03, 0.01, look.hair, { faces: [4] }),
+      vbox(0.11, 0.255, z, 0.1, 0.03, 0.01, look.hair, { faces: [4] }),
+      vbox(-0.175, 0.1, z, 0.07, 0.04, 0.01, "#f29a9a", { faces: [4] }),
+      vbox(0.175, 0.1, z, 0.07, 0.04, 0.01, "#f29a9a", { faces: [4] }),
+      vbox(0, 0.075, z, 0.08, 0.025, 0.01, "#9c4f45", { faces: [4] })
+    ];
+  }
+  function characterRig(agent) {
+    const look = lookFor(agent);
+    const parts = {
+      hips: { parent: null, at: [0, LEG_H, 0], boxes: [] },
+      legL: { parent: "hips", at: [0.105, 0, 0], boxes: [vbox(0, -LEG_H + 0.08, 0, 0.19, LEG_H - 0.08, 0.2, look.pants), vbox(0, -LEG_H, 0.02, 0.2, 0.09, 0.24, "#2b2b33")] },
+      legR: { parent: "hips", at: [-0.105, 0, 0], boxes: [vbox(0, -LEG_H + 0.08, 0, 0.19, LEG_H - 0.08, 0.2, look.pants), vbox(0, -LEG_H, 0.02, 0.2, 0.09, 0.24, "#2b2b33")] },
+      torso: {
+        parent: "hips",
+        at: [0, 0, 0],
+        boxes: [
+          vbox(0, 0, 0, 0.42, BODY_H, 0.24, look.shirt),
+          vbox(0, BODY_H - 0.06, 5e-3, 0.18, 0.06, 0.245, look.skin),
+          vbox(0, 0, 5e-3, 0.43, 0.06, 0.245, look.shirtDark),
+          vbox(0.11, 0.3, 0.121, 0.08, 0.08, 0.01, look.accent, { faces: [4] })
+        ]
+      },
+      head: { parent: "torso", at: [0, BODY_H, 0], boxes: [vbox(0, 0, 0, HEAD, HEAD, HEAD, look.skin), ...hairBoxes(look.style, look.hair, look.shirt)], face: faceBoxes(look) },
+      eyes: {
+        parent: "head",
+        at: [0, 0.185, 0],
+        boxes: [
+          vbox(-0.11, 0.14 - 0.185, HEAD / 2 + 6e-3, 0.08, 0.09, 0.01, "#25222b", { faces: [4] }),
+          vbox(0.11, 0.14 - 0.185, HEAD / 2 + 6e-3, 0.08, 0.09, 0.01, "#25222b", { faces: [4] }),
+          vbox(-0.09, 0.19 - 0.185, HEAD / 2 + 8e-3, 0.03, 0.03, 0.01, "#ffffff", { faces: [4] }),
+          vbox(0.13, 0.19 - 0.185, HEAD / 2 + 8e-3, 0.03, 0.03, 0.01, "#ffffff", { faces: [4] })
+        ]
+      },
+      armL: { parent: "torso", at: [0.29, BODY_H - 0.06, 0], boxes: [vbox(0, -0.2, 0, 0.15, 0.24, 0.16, look.shirt), vbox(0, -0.4, 0, 0.14, 0.2, 0.15, look.skin)] },
+      armR: { parent: "torso", at: [-0.29, BODY_H - 0.06, 0], boxes: [vbox(0, -0.2, 0, 0.15, 0.24, 0.16, look.shirt), vbox(0, -0.4, 0, 0.14, 0.2, 0.15, look.skin)] }
+    };
+    const props = {
+      mug: { parent: "armR", boxes: [vbox(0, -0.56, 0.1, 0.1, 0.12, 0.1, "#fdfaf3"), vbox(0.065, -0.53, 0.1, 0.03, 0.06, 0.04, "#fdfaf3"), vbox(0, -0.45, 0.1, 0.08, 0.01, 0.08, "#6b4630")] },
+      snack: { parent: "armL", boxes: [vbox(0, -0.54, 0.09, 0.12, 0.06, 0.1, "#e8b25a"), vbox(0, -0.49, 0.09, 0.1, 0.02, 0.08, "#f6e3b4")] },
+      book: { parent: "armL", boxes: [vbox(-0.12, -0.5, 0.14, 0.26, 0.2, 0.03, "#c4523f"), vbox(-0.12, -0.5, 0.155, 0.24, 0.18, 0.01, "#fdf6e6")] },
+      can: { parent: "armR", boxes: [vbox(0, -0.6, 0.12, 0.12, 0.14, 0.18, "#5fa7a0"), vbox(0, -0.52, 0.26, 0.04, 0.04, 0.16, "#5fa7a0"), vbox(0, -0.46, 0.12, 0.03, 0.06, 0.12, "#3f7f78")] },
+      marker: { parent: "armR", boxes: [vbox(0, -0.58, 0.04, 0.03, 0.12, 0.03, "#2f6fd0")] }
+    };
+    return { look, parts, props };
+  }
 
   // tvos/bridge/entry.js
   var state = null;
+  var walk = null;
   var boxesOf = (list2) => (list2 ?? []).map((b) => ({ at: b.at, size: b.size, color: b.color }));
   function kindParts(kind, custom) {
     if (MODELS[kind]) {
@@ -724,7 +1033,22 @@
     if (ref.startsWith("human:")) return ref.slice(6);
     return state.agents.find((a) => a.id === ref)?.name ?? ref;
   }
+  var hueCss = (hue) => `hsl(${(Math.round(hue ?? 0) % 360 + 360) % 360} 70% 60%)`;
   globalThis.AO = {
+    /** The web viewer's A* walk from one point to another (cell centres, then the exact goal), as JSON [[x, z], …]. */
+    route(fx, fz, tx, tz) {
+      if (!walk) return "[]";
+      return JSON.stringify(route(walk.blocked, walk.grid, { x: fx, z: fz }, { x: tx, z: tz }).map((p) => [p.x, p.z]));
+    },
+    /** The web overlay's label culling: JSON [{id, x, y, w, h, depth, status, selected, speaking, kept}] → JSON [kept ids]. */
+    cull(json) {
+      const rects = JSON.parse(json).map((r) => ({ ...r, priority: labelPriority(r) + (r.kept ? 5 : 0) }));
+      return JSON.stringify([...cullLabels(rects)]);
+    },
+    /** limbAngles() for many characters at once: JSON [{pose, phase}] at clock t → JSON [angles]. */
+    limbs(json, t) {
+      return JSON.stringify(JSON.parse(json).map((c) => limbAngles(c.pose, t, c.phase)));
+    },
     /** One WebSocket frame (JSON text); returns its type. */
     frame(text) {
       const f = JSON.parse(text);
@@ -741,6 +1065,7 @@
       const kinds = {};
       for (const it of items) if (!kinds[it.kind]) kinds[it.kind] = kindParts(it.kind, custom);
       const t = targets(now);
+      walk = { blocked: blockedCells(state.items, state.grid, custom), grid: state.grid };
       return JSON.stringify({
         id: state.id,
         name: state.name ?? null,
@@ -752,10 +1077,14 @@
         agents: state.agents.map((a) => ({
           id: a.id,
           name: a.name,
+          emoji: a.emoji ?? null,
           status: a.status,
           activity: a.activity ?? null,
           hue: a.hue,
-          look: lookFor(a),
+          css: hueCss(a.hue),
+          phase: hashStr(a.id) % 1e3 / 100,
+          says: a.says && now - a.says.ts < 9e3 ? a.says.text : null,
+          rig: characterRig(a),
           target: t.get(a.id)
         })),
         chat: state.chat.slice(-6).map((m) => ({ from: nameOf(m.from), to: m.to ? nameOf(m.to) : null, text: m.text, ts: m.ts }))
