@@ -323,6 +323,13 @@ export function usableSpots(spots, blocked, grid) {
 export const SEAT_SECONDS = 50;
 
 /** Deterministic spot choice: hash order, skipping spots already taken (and `avoid`). null if all are taken. */
+/** An idle agent's wander slot at wall-clock `now`: it moves to another seat or station each time this changes. Every
+ *  viewer gets the same slot from the same id and clock, so all of them show the agent in the same place. */
+export function wanderSalt(agentId, now) {
+  const period = 30_000 + (hashStr(`${agentId}:period`) % 20_000);
+  return Math.floor((now + (hashStr(`${agentId}:phase`) % period)) / period);
+}
+
 export function pickSpot(agentId, spots, taken, salt = 0, avoid = null) {
   if (!spots.length) return null;
   const start = hashStr(`${agentId}:${salt}`) % spots.length;

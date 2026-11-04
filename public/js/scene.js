@@ -12,7 +12,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { footprint, kindOf } from "../shared/catalog.js";
 import { DEFAULT_THEME } from "../shared/theme.js";
 import {
-  SEATED, assignSpots, blockedCells, deskSeating, entryPoint, hashStr, idleSpots, kindGeometryPlan, layoutBatches, limbAngles, poseFor,
+  SEATED, wanderSalt, assignSpots, blockedCells, deskSeating, entryPoint, hashStr, idleSpots, kindGeometryPlan, layoutBatches, limbAngles, poseFor,
   route, seatOf, themeLook, usableSpots,
 } from "./model.js";
 import { MODELS, SEAT_Y, WALL_H } from "./furniture.js";
@@ -539,7 +539,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     const c = {
       id: agent.id, agent, obj, hit, blob, pos: { x: S.entry.x, z: S.entry.z }, yaw: Math.PI,
       path: [], target: null, pose: "stand", phase: (hashStr(agent.id) % 1000) / 100, pop: { kind: "in", t0: now }, leaving: false,
-      seatY: SEAT_Y, until: 0, arrivedAt: 0, salt: 0, spotId: null, restless: false, away: false, waveUntil: initial ? 0 : now + 2200,
+      seatY: SEAT_Y, salt: wanderSalt(agent.id, Date.now()), spotId: null, away: false, waveUntil: initial ? 0 : now + 2200,
     };
     if (initial) c.placeOnArrive = true;
     obj.position.set(c.pos.x, 0, c.pos.z);
@@ -572,15 +572,15 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
 
   function retarget() {
     const live = [...S.chars.values()].filter((c) => !c.leaving);
-    // lounge-bound agents (idle, or deskless) share the seats and stations, one each, stable
+    // lounge-bound agents (idle, or deskless) share the seats and stations, one each. Every viewer computes the same
+    // assignment: it depends only on the office state and each agent's wall-clock wander slot, never on this tab's history.
     const wanters = live.filter((c) => poseFor(c.agent, S.seating.has(c.agent.id)).place === "lounge")
-      .map((c) => ({ id: c.id, joinedAt: c.agent.joinedAt, salt: c.salt, current: c.spotId, restless: c.restless }));
+      .map((c) => ({ id: c.id, joinedAt: c.agent.joinedAt, salt: c.salt, current: null, restless: false }));
     S.assign = assignSpots(wanters, S.spots);
     for (const c of live) {
       const spot = S.assign.get(c.id) ?? null;
       const t = targetFor(c.agent, spot, c.salt);
       c.spotId = spot?.id ?? null;
-      c.restless = false;
       if (c.placeOnArrive) {
         // first snapshot: everyone is already where they belong, no parade from the door
         c.placeOnArrive = false;
@@ -588,17 +588,25 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
         c.yaw = t.yaw;
         c.target = t;
         c.path = [];
-        c.arrivedAt = performance.now() - Math.random() * 20000;
-        c.until = 0;
       } else if (!c.target || c.target.key !== t.key) {
         c.target = t;
         c.path = route(S.blocked, S.grid, c.pos, t.at);
-        c.until = 0;
       } else {
         c.target = { ...c.target, pose: t.pose, yaw: t.yaw, seatY: t.seatY, duration: t.duration };
       }
       setAway(c, c.agent.status === "away");
     }
+  }
+
+  /** Moves idle agents on when their wander slot turns over; the slot comes from the wall clock, shared by every viewer. */
+  function wander() {
+    const t = Date.now();
+    let changed = false;
+    for (const c of S.chars.values()) {
+      const salt = wanderSalt(c.id, t);
+      if (salt !== c.salt) { c.salt = salt; changed = true; }
+    }
+    if (changed) retarget();
   }
 
   function stepChar(c, dt, now) {
@@ -614,14 +622,6 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     } else if (c.target) {
       c.yaw += angDiff(c.yaw, c.target.yaw) * Math.min(1, dt * 8);
       pose = c.waveUntil > now ? "wave" : c.target.pose;
-      // settled on a seat/station: stay for its duration (± a little), then move on to another
-      if (!c.until) c.until = (c.arrivedAt || now) + ((c.target.duration ?? 40) * (0.8 + Math.random() * 0.4)) * 1000;
-      c.arrivedAt = 0;
-      if (c.agent.status === "idle" && now > c.until && !c.leaving) {
-        c.salt++;
-        c.restless = true;
-        retarget();
-      }
     } else pose = "stand";
     if (c.leaving) pose = "wave";
     c.pose = pose;
@@ -1177,6 +1177,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     const dt = Math.min(0.05, (now - S.last) / 1000);
     S.last = now;
     S.clock += dt;
+    if (now - (S.wanderAt ?? 0) > 1000) { S.wanderAt = now; wander(); }
     stepCam(now);
     stepKeys(dt);
     stepFollow(dt);
