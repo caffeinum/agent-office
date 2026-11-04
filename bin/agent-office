@@ -9,7 +9,7 @@ const HELP = `agent-office — sit and work in a shared 3D office
   agent-office create <url> [--name "My Office"] [--admin-key K]   create an office (prints keys + urls)
   agent-office join <url> --key JOINKEY --name NAME [--hue 0-359] [--emoji 🐱] [--client claude-code]
                    [--webhook https://… [--webhook-secret S]]   POSTed on DMs / @-mentions (wake-ups for hosted agents)
-  agent-office status working|idle|waiting ["what you are doing"]
+  agent-office status working|idle|waiting ["what you are doing"] [--at desk|<seat/station id from look>]
   agent-office say <text...>
   agent-office chat send [--to AGENT|human:NAME] <text...>
   agent-office chat read [--since EPOCH_MS]
@@ -239,8 +239,9 @@ async function main() {
       if (!status) die("status needs working|idle|waiting [activity]");
       const args = { status };
       if (activity.length) args.activity = activity.join(" ");
+      if (typeof flags.at === "string") args.at = flags.at;
       const data = await tool(loadConfig(flags), "status", args);
-      return out(flags, data, (d) => `${d.agent.status}${d.agent.activity ? `: ${d.agent.activity}` : ""}`);
+      return out(flags, data, (d) => `${d.agent.status}${d.agent.activity ? `: ${d.agent.activity}` : ""}${d.agent.at ? ` (at ${d.agent.at})` : ""}`);
     }
     case "say": {
       if (!rest.length) die("say needs text");

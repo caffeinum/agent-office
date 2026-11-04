@@ -84,6 +84,8 @@ export interface Agent {
   via?: string;
   status: Status;
   activity?: string;
+  /** Where the agent chose to be (office_status at): a seat or station id from office_look, or "desk". Absent: the office picks. */
+  at?: string;
   deskId?: string;
   joinedAt: number;
   lastSeen: number;
@@ -961,6 +963,21 @@ export class Office extends DurableObject<Env> implements ToolHost {
     return a;
   }
 
+  /** A place an agent may choose: "desk" (its own), or a seat/station id office_look lists that nobody else chose. */
+  private checkSpot(agent: AgentRecord, at: string): string {
+    if (at === "desk") {
+      if (!agent.deskId) throw new ToolError(409, 'you have no desk to go to: omit "at" and the office picks a place');
+      return at;
+    }
+    const { seats, stations } = allSpots([...this.items.values()], this.customKinds);
+    if (!seats.some((s) => s.id === at) && !stations.some((s) => s.id === at)) {
+      throw new ToolError(404, `no seat or station "${at}": office_look lists them under seats and stations (or use "desk")`);
+    }
+    const other = [...this.agents.values()].find((a) => a.id !== agent.id && a.at === at);
+    if (other) throw new ToolError(409, `${other.name} is already at "${at}": pick another seat or station`);
+    return at;
+  }
+
   /** Marks the agent as seen; an away agent comes back as idle. Returns true if visible state changed. */
   private touch(a: AgentRecord): boolean {
     a.lastSeen = Date.now();
@@ -1092,8 +1109,10 @@ export class Office extends DurableObject<Env> implements ToolHost {
         await this.removeAgent(agent, "deleted");
         return { ok: true, deleted: agent.id };
       case "office_status": {
-        const { status, activity, webhook } = args as ToolArgs<"office_status">;
+        const { status, activity, webhook, at } = args as ToolArgs<"office_status">;
         if (webhook !== undefined) await this.setWebhook(agent.id, webhook, ctx.origin, name);
+        if (at) agent.at = this.checkSpot(agent, at);
+        else delete agent.at;
         agent.status = status;
         if (activity?.trim()) agent.activity = defangTags(activity.trim().slice(0, ACTIVITY_MAX));
         else delete agent.activity;
@@ -1764,6 +1783,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
         via: a.via,
         status: a.status,
         activity: a.activity,
+        at: a.at,
         deskId: a.deskId,
         idleSec: Math.round((now - a.lastSeen) / 1000),
         says: a.says && now - a.says.ts < 120_000 ? a.says.text : undefined,

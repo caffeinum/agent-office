@@ -322,7 +322,7 @@
  },
  {
   "name": "office_status",
-  "description": "Set what you are doing. Use status 'working' with a short activity (\"fixing flaky tests\") when you start a task, 'waiting' when blocked on a human, and 'idle' when done. Shown above your character.",
+  "description": "Set what you are doing. Use status 'working' with a short activity (\"fixing flaky tests\") when you start a task, 'waiting' when blocked on a human, and 'idle' when done. Shown above your character. Your character goes to its desk while working or waiting and wanders to seats and stations when idle; pass `at` to choose the place yourself.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -339,6 +339,12 @@
      "description": "Short text, ≤120 chars. Omit to clear.",
      "type": "string",
      "maxLength": 120
+    },
+    "at": {
+     "description": "Where to be: a seat or station id from office_look (\"seats\"/\"stations\", e.g. a sofa seat or the coffee station), or \"desk\" to stay at your desk. Kept until your next office_status; omit it to let the office pick. One agent per seat or station.",
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 64
     },
     "webhook": {
      "description": "Wake-up webhook for hosted agents that don't poll chat: POSTed when a DM or an @-mention of your name arrives (≤1 per 10s, bursts coalesced). null removes it; omit to keep the current one.",

@@ -555,10 +555,17 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
   }
 
   /** Where an agent should go: its desk while working, else the seat/station it was assigned, else mill about. */
-  function targetFor(agent, spot, salt = 0) {
+  /** At its own desk whatever the status: typing while working, else sitting. */
+  function deskTarget(agent) {
+    const s = seatOf(S.seating.get(agent.id));
+    const pose = agent.status === "idle" ? "sit" : poseFor(agent, true).pose;
+    return { key: `desk:${S.seating.get(agent.id).id}`, at: { x: s.x, z: s.z }, yaw: s.yaw, pose, seatY: SEAT_Y };
+  }
+
+  function targetFor(agent, spot, salt = 0, chosen = false) {
     const desk = S.seating.get(agent.id);
     const { pose, place } = poseFor(agent, !!desk);
-    if (place === "desk" && desk) {
+    if (place === "desk" && desk && !chosen) {
       const s = seatOf(desk);
       return { key: `desk:${desk.id}`, at: { x: s.x, z: s.z }, yaw: s.yaw, pose, seatY: SEAT_Y };
     }
@@ -574,12 +581,21 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     const live = [...S.chars.values()].filter((c) => !c.leaving);
     // lounge-bound agents (idle, or deskless) share the seats and stations, one each. Every viewer computes the same
     // assignment: it depends only on the office state and each agent's wall-clock wander slot, never on this tab's history.
-    const wanters = live.filter((c) => poseFor(c.agent, S.seating.has(c.agent.id)).place === "lounge")
-      .map((c) => ({ id: c.id, joinedAt: c.agent.joinedAt, salt: c.salt, current: null, restless: false }));
-    S.assign = assignSpots(wanters, S.spots);
+    // a place the agent chose (office_status at) wins; a chosen spot that no longer exists falls back to the office's pick
+    const chosen = new Map();
     for (const c of live) {
-      const spot = S.assign.get(c.id) ?? null;
-      const t = targetFor(c.agent, spot, c.salt);
+      const at = c.agent.at;
+      if (at === "desk" && S.seating.has(c.agent.id)) chosen.set(c.id, "desk");
+      else if (at) { const spot = S.spots.find((s) => s.id === at); if (spot) chosen.set(c.id, spot); }
+    }
+    const free = S.spots.filter((s) => ![...chosen.values()].includes(s));
+    const wanters = live.filter((c) => !chosen.has(c.id) && poseFor(c.agent, S.seating.has(c.agent.id)).place === "lounge")
+      .map((c) => ({ id: c.id, joinedAt: c.agent.joinedAt, salt: c.salt, current: null, restless: false }));
+    S.assign = assignSpots(wanters, free);
+    for (const c of live) {
+      const pick = chosen.get(c.id);
+      const spot = pick && pick !== "desk" ? pick : (S.assign.get(c.id) ?? null);
+      const t = pick === "desk" ? deskTarget(c.agent) : targetFor(c.agent, spot, c.salt, !!pick);
       c.spotId = spot?.id ?? null;
       if (c.placeOnArrive) {
         // first snapshot: everyone is already where they belong, no parade from the door
