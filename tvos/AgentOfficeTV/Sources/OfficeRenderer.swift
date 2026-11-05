@@ -311,8 +311,8 @@ final class OfficeRenderer: NSObject {
         }
         let objects = s.items.filter { !["rug", "window", "poster", "whiteboard", "sign"].contains($0.kind) }.count
         let density = min(1, Double(objects) / (Double(s.grid.w * s.grid.d) * 0.12))
-        lampLights.addChildNode(omni(color: cssColor(mood.fill), intensity: t.point * (2.2 + 1.6 * density) * Self.fillScale, reach: hypot(Double(s.grid.w), Double(s.grid.d)),
-                                     at: SCNVector3(Double(s.grid.w) / 2, 4.5, Double(s.grid.d) / 2)))
+        lampLights.addChildNode(omni(color: cssColor(mood.fill), intensity: t.point * (2.2 + 1.6 * density) * 1.2 * Self.fillScale, reach: hypot(Double(s.grid.w), Double(s.grid.d)) + 9,
+                                     at: SCNVector3(Double(s.grid.w) / 2, 9, Double(s.grid.d) / 2)))
     }
 
     /// A three.js PointLight(color, intensity, distance) as a SceneKit omni light fading out at `reach`.

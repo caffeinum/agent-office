@@ -8,7 +8,7 @@ import { ACTIVITIES, validateKindDef } from "../public/shared/kinds.js";
 import {
   applyFrame, poseFor, lingering, DESK_LINGER_MS, limbAngles, deskSeating, idleSpots, pickSpot, assignSpots, blockedCells, route, entryPoint, layoutBatches,
   wallOf, cullLabels, labelPriority, chatWith, roomChat, lastLineOf, speakerName, activeSay, CHAT_KEEP, SAY_MS, SEATED,
-  themeLook, CLASSIC_COLORS, MOODS, mergeBoxes, kindGeometryPlan, usableSpots,
+  themeLook, CLASSIC_COLORS, MOODS, mergeBoxes, overlapLayers, kindGeometryPlan, usableSpots,
 } from "../public/js/model.js";
 import { arcadeDef, brickWallDef, coffeeBarDef, huddleDef } from "../public/js/demo-design.js";
 
@@ -316,8 +316,13 @@ test("kindGeometryPlan: boxes → item-frame buckets by material, centred on the
   const wp = kindGeometryPlan(wall);
   assert.ok(wp.merged <= wall.boxes.length);
   const vol = (list) => list.reduce((s, q) => s + q.w * q.h * q.d, 0);
-  const inVol = wall.boxes.reduce((s, q) => s + (q.w * q.h * q.d) / 4096, 0);
-  assert.ok(Math.abs(vol(wp.matte) - inVol) < 1e-9);
+  assert.equal(vol(mergeBoxes(wall.boxes)), vol(wall.boxes));
+  // nested boxes grow a hair per layer so the later one wins the depth test (no flicker on shared faces)
+  const body = { x: 0, y: 8, z: 1, w: 48, h: 14, d: 14, color: "#7a4a2a" }, record = { x: 2, y: 10, z: 6, w: 2, h: 11, d: 9, color: "#e94d3d" };
+  assert.deepEqual(overlapLayers([body, record, { x: 0, y: 0, z: 0, w: 2, h: 8, d: 2, color: "#000000" }]), [0, 1, 0]);
+  const console3 = kindGeometryPlan({ kind: "c", w: 3, d: 1, boxes: [body, record] });
+  const [b0, r0] = console3.matte;
+  assert.ok(r0.cz + r0.d / 2 > b0.cz + b0.d / 2, "the record's front sits just proud of the cabinet front");
   // unit voxels in one colour collapse hard
   const cube = validateKindDef({ kind: "cube", label: "cube", footprint: { w: 1, d: 1 }, boxes: Array.from({ length: 64 }, (_, i) => ({ x: i % 4, y: Math.floor(i / 16), z: Math.floor(i / 4) % 4, w: 1, h: 1, d: 1, color: "#123456" })) });
   assert.equal(kindGeometryPlan(cube).merged, 1);

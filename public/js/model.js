@@ -598,14 +598,39 @@ export function kindGeometryPlan(def) {
   const fw = def.w, fd = def.d;
   const merged = mergeBoxes(def.boxes);
   const plan = { matte: [], glossy: [], glass: [], screen: [], emissive: [], input: def.boxes.length, merged: merged.length };
-  for (const b of merged) {
+  const layer = overlapLayers(merged);
+  merged.forEach((b, i) => {
     const mat = b.material ?? "matte";
     if (!BOX_MATERIALS.includes(mat)) throw new Error(`custom kind ${def.kind}: unknown box material ${JSON.stringify(mat)}`);
-    const out = { cx: (b.x + b.w / 2) / U - fw / 2, y0: b.y / U, cz: (b.z + b.d / 2) / U - fd / 2, w: b.w / U, h: b.h / U, d: b.d / U, color: b.color };
+    const e = layer[i] * OVERLAP_INFLATE;
+    // grown a hair (see overlapLayers), but never past the footprint or below the floor
+    const x0 = Math.max(-fw / 2, b.x / U - fw / 2 - e), x1 = Math.min(fw / 2, (b.x + b.w) / U - fw / 2 + e);
+    const z0 = Math.max(-fd / 2, b.z / U - fd / 2 - e), z1 = Math.min(fd / 2, (b.z + b.d) / U - fd / 2 + e);
+    const y0 = Math.max(0, b.y / U - e), y1 = (b.y + b.h) / U + e;
+    const out = { cx: (x0 + x1) / 2, y0, cz: (z0 + z1) / 2, w: x1 - x0, h: y1 - y0, d: z1 - z0, color: b.color };
     const bucket = mat === "screen" ? "screen" : b.emissive ? "emissive" : mat;
     plan[bucket].push(out);
-  }
+  });
   return plan;
+}
+
+/** How much a box grows (cells, each side) per box it sits inside: enough to win the depth test, too little to see. */
+const OVERLAP_INFLATE = 0.002;
+
+/**
+ * For each box, how many earlier boxes it is nested in (overlapping volume, counted through the chain). A box drawn
+ * inside another with a face on the same plane (records flush with a cabinet front) would z-fight and flicker; growing
+ * later boxes a hair per layer makes the later one show, as a designer stacking boxes expects.
+ */
+export function overlapLayers(boxes) {
+  const over = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h && a.z < b.z + b.d && b.z < a.z + a.d;
+  const layer = [];
+  boxes.forEach((b, i) => {
+    let l = 0;
+    for (let j = 0; j < i; j++) if (over(b, boxes[j])) l = Math.max(l, layer[j] + 1);
+    layer.push(l);
+  });
+  return layer;
 }
 
 /* ── time of day ────────────────────────────────────────────────────────────────────────────── */
@@ -613,7 +638,7 @@ export function kindGeometryPlan(def) {
 /** Light levels per time of day (three.js units): hemisphere, sun, fog, bloom, glow multipliers, lamp point lights, exposure. */
 export const TIMES_OF_DAY = Object.freeze({
   day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.28, threshold: 0.92, glow: 1.0, lamp: 0.95, point: 0, exposure: 1.0 },
-  night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.5, sun: 0.35, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 0.72, glow: 1.2, lamp: 2.4, point: 9, exposure: 1.05 },
+  night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.5, sun: 0.35, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 1.0, glow: 1.2, lamp: 2.4, point: 9, exposure: 1.05 },
 });
 
 /** Day or night from a local clock: night runs 19:00–07:00. */

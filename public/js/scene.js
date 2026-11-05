@@ -22,6 +22,7 @@ import * as T from "./textures.js";
 import { GARDEN_BORDER as BORDER, cornerPosts, cutaway, gardenBoxes, roomWalls, wallBoxes } from "./room.js";
 
 const WALK_SPEED = 1.7;
+const FILL_Y = 9;
 const POP_MS = 420;
 const FADE_MS = 900;
 
@@ -469,8 +470,9 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     // a soft warm "ceiling" fill at night so the room isn't a cave
     // a crowded floor (lots of desks) swallows light, so the fill grows with the furniture count
     const density = Math.min(1, S.items.filter((it) => kindOf(it.kind, S.custom)?.layer === "object").length / (S.grid.w * S.grid.d * 0.12));
-    const fill = new THREE.PointLight(pal.fill, th.point * (2.2 + 1.6 * density), Math.hypot(S.grid.w, S.grid.d), 1.2);
-    fill.position.set(S.grid.w / 2, 4.5, S.grid.d / 2);
+    // hung high (FILL_Y) so it lights the room evenly: lower, it burned whatever stood right under it into bloom
+    const fill = new THREE.PointLight(pal.fill, th.point * (2.2 + 1.6 * density) * 1.2, Math.hypot(S.grid.w, S.grid.d) + FILL_Y, 1.2);
+    fill.position.set(S.grid.w / 2, FILL_Y, S.grid.d / 2);
     fill.visible = th.point > 0;
     fill.userData.fill = true;
     scene.add(fill);
