@@ -13,14 +13,15 @@ import { footprint, kindOf } from "../shared/catalog.js";
 import { DEFAULT_THEME } from "../shared/theme.js";
 import {
   SEATED, idleAtDesk, wanderSalt, assignSpots, blockedCells, deskSeating, entryPoint, hashStr, idleSpots, kindGeometryPlan, layoutBatches, limbAngles, poseFor,
-  placedLights, route, seatOf, themeLook, TIMES_OF_DAY, usableSpots,
+  hueColors, itemPoint, placedLights, route, seatOf, themeLook, TIMES_OF_DAY, usableSpots,
 } from "./model.js";
-import { MODELS, SEAT_Y, WALL_H } from "./furniture.js";
+import { DESK_SCREEN, MODELS, SEAT_Y, WALL_H } from "./furniture.js";
 import { buildGeometry, buildMeshGeometry, vbox } from "./voxel.js";
 import { CROWN, applyLimbs, applyProps, awayMaterial, baseMaterial, blink, buildCharacter, characterMaterials } from "./character.js";
 import { POINT_LIGHTS_GL, setPointExempt, setZones, withZones } from "./zone-shader.js";
 import * as T from "./textures.js";
 import { backdrop, cloudX } from "./backdrop.js";
+import { screenKey, screenSpec, screenStyle } from "./screen.js";
 import { GARDEN_BORDER as BORDER, cornerPosts, cutaway, gardenBoxes, roomWalls, wallBoxes } from "./room.js";
 
 const WALK_SPEED = 1.7;
@@ -141,7 +142,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
 
   const S = {
     theme: "day", grid: null, items: [], agents: [], seating: new Map(), spots: [], blocked: null, entry: { x: 0, z: 0 },
-    room: null, clouds: [], walls: {}, furniture: new THREE.Group(), batches: new Map(), texts: new Map(), itemAnim: new Map(), leavingItems: new Map(),
+    room: null, clouds: [], screens: new Map(), walls: {}, furniture: new THREE.Group(), batches: new Map(), texts: new Map(), itemAnim: new Map(), leavingItems: new Map(),
     chars: new Map(), lampLights: [], glowMats: new Map(), selectedItem: null, ghost: null, hidden: new Set(), follow: null, drag: null,
     camAnim: null, insets: { left: 0, right: 0 }, clock: 0, last: performance.now(), size: { w: 1, h: 1 }, frameCbs: [], raf: 0, raycaster: new THREE.Raycaster(),
     custom: {}, look: themeLook(DEFAULT_THEME), palette: null, fade: null, kindColor: new Map(), assign: new Map(),
@@ -505,7 +506,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     const lamps = S.items.filter((it) => it.kind === "lamp" || it.kind === "tv").slice(0, 6);
     for (const it of lamps) {
       const f = footprint(it);
-      const pl = new THREE.PointLight(it.kind === "lamp" ? pal.lamp : "#8fb6ff", th.point * (it.kind === "lamp" ? 1 : 0.4), 7, 1.6);
+      const pl = new THREE.PointLight(it.kind === "lamp" ? pal.lamp : "#8fb6ff", th.point * (it.kind === "lamp" ? 1.2 : 0.4), it.kind === "lamp" ? 9 : 7, 1.6);
       pl.userData.lamp = it.kind === "lamp";
       pl.position.set(f.x + f.w / 2, it.kind === "lamp" ? 1.4 : 1.0, f.z + f.d / 2);
       pl.visible = th.point > 0;
@@ -516,7 +517,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     // a crowded floor (lots of desks) swallows light, so the fill grows with the furniture count
     const density = Math.min(1, S.items.filter((it) => kindOf(it.kind, S.custom)?.layer === "object").length / (S.grid.w * S.grid.d * 0.12));
     // hung high (FILL_Y) so it lights the room evenly: lower, it burned whatever stood right under it into bloom
-    const fill = new THREE.PointLight(pal.fill, th.point * (2.2 + 1.6 * density) * 1.2, Math.hypot(S.grid.w, S.grid.d) + FILL_Y, 1.2);
+    const fill = new THREE.PointLight(pal.fill, th.point * (2.2 + 1.6 * density) * 0.6, Math.hypot(S.grid.w, S.grid.d) + FILL_Y, 1.2);
     fill.position.set(S.grid.w / 2, FILL_Y, S.grid.d / 2);
     fill.visible = th.point > 0;
     fill.userData.fill = true;
@@ -680,6 +681,87 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     return true;
   }
 
+  /* ── desk screens: each sitter's own monitor (screen.js) ─────────────────────────────────────── */
+
+  function paintScreen(spec, cv) {
+    const g = cv.getContext("2d");
+    for (const o of spec.ops) {
+      if (o.op === "rect") { g.fillStyle = o.color; g.fillRect(o.x, o.y, o.w, o.h); continue; }
+      g.fillStyle = o.color;
+      g.font = `${o.bold ? "bold " : ""}${o.size}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      g.fillText(o.text, o.x, o.y);
+    }
+  }
+
+  const spillGeo = new THREE.PlaneGeometry(1.4, 1.0);
+  let spillMap = null;
+  /** A soft white radial glow, tinted per screen. */
+  function spillTex() {
+    if (spillMap) return spillMap;
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = 64;
+    const g = cv.getContext("2d");
+    const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, "rgba(255,255,255,0.9)");
+    grad.addColorStop(0.5, "rgba(255,255,255,0.35)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    spillMap = new THREE.CanvasTexture(cv);
+    return spillMap;
+  }
+
+  /** One screen plane per occupied desk, over the desk's own monitor glass; repainted only when what it shows changes. */
+  function syncScreens() {
+    const want = new Map();
+    for (const a of S.agents) {
+      const desk = S.seating.get(a.id);
+      if (desk) want.set(a.id, { a, desk });
+    }
+    for (const [id, sc] of S.screens) {
+      if (want.get(id)?.desk.id === sc.deskId && want.get(id)?.desk === sc.desk) continue;
+      scene.remove(sc.mesh); sc.mesh.geometry.dispose(); sc.tex.dispose(); sc.mesh.material.dispose();
+      scene.remove(sc.spill); sc.spill.material.dispose();
+      S.screens.delete(id);
+    }
+    for (const [id, { a, desk }] of want) {
+      const css = hueColors(a.hue ?? 0).css;
+      let sc = S.screens.get(id);
+      if (!sc) {
+        const cv = document.createElement("canvas");
+        const spec = screenSpec(a, css);
+        cv.width = spec.w; cv.height = spec.h;
+        const tex = new THREE.CanvasTexture(cv);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const mat = new THREE.MeshBasicMaterial({ map: tex });
+        mat.userData = { baseColor: new THREE.Color("#ffffff"), lamp: false, window: false };
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(DESK_SCREEN.w, DESK_SCREEN.h), mat);
+        const p = itemPoint(desk, DESK_SCREEN.x, DESK_SCREEN.z + 0.008, S.custom);
+        mesh.position.set(p.x, DESK_SCREEN.y + DESK_SCREEN.h / 2, p.z);
+        mesh.rotation.y = p.yaw;
+        scene.add(mesh);
+        // at night the screen's light spills over the desk top in front of it
+        const spill = new THREE.Mesh(spillGeo, new THREE.MeshBasicMaterial({ map: spillTex(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.55 }));
+        const q = itemPoint(desk, DESK_SCREEN.x, DESK_SCREEN.z + 0.45, S.custom);
+        spill.rotation.set(-Math.PI / 2, 0, p.yaw);
+        spill.position.set(q.x, 0.757, q.z);
+        scene.add(spill);
+        sc = { mesh, tex, cv, key: "", deskId: desk.id, desk, spill, lit: false };
+        S.screens.set(id, sc);
+        applyGlow(mat);
+      }
+      const key = screenKey(a, css);
+      if (key !== sc.key) {
+        sc.key = key;
+        paintScreen(screenSpec(a, css), sc.cv);
+        sc.tex.needsUpdate = true;
+        sc.spill.material.color.set(screenStyle(a.client, css).accent);
+        sc.lit = a.status === "working" || a.status === "waiting";
+      }
+      sc.spill.visible = sc.lit && S.theme === "night";
+    }
+  }
+
   /* ── state sync ────────────────────────────────────────────────────────────────────────────── */
 
   function setState(state) {
@@ -726,6 +808,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
       const desks = S.batches.get("desk");
       if (desks) writeBatch(desks, now);
     }
+    syncScreens();
     // agents
     const live = new Set();
     const initial = !S.agentsSeen;
@@ -771,6 +854,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     bloom.strength = th.bloom; bloom.threshold = th.threshold;
     renderer.toneMappingExposure = th.exposure;
     for (const m of S.glowMats.values()) applyGlow(m);
+    for (const sc of S.screens.values()) { applyGlow(sc.mesh.material); sc.spill.visible = sc.lit && theme === "night"; }
     applyLights();
     if (S.grid) updateLampLights();
   }

@@ -32,6 +32,12 @@ final class Bridge {
         return try JSONDecoder().decode(OfficeScene?.self, from: Data(json.utf8))
     }
 
+    /// screen.js's paint ops for one agent's desk monitor.
+    func screen(_ agentId: String) throws -> ScreenSpec {
+        let json = try call("screen", [agentId]).toString() ?? "null"
+        return try JSONDecoder().decode(ScreenSpec.self, from: Data(json.utf8))
+    }
+
     /// radio.js: the station after `id` (nil = off), or nil for off.
     func nextStation(after id: String?) throws -> RadioStation? {
         let json = try call("nextStation", [id ?? ""]).toString() ?? "null"

@@ -59,6 +59,10 @@ function books(y, seed) {
 
 /** kind → { base, accent, finish?, rail?, glow: {boxes, tex, color}, defaultColor, text?: {x, y, z, w, h, bg, fg, border} }
  *  finish/rail are white boxes tinted by the theme's desk wood / rail colours. */
+/** The desk monitor's screen in the desk's own frame (centre x, bottom y, z of the glass; facing the chair, +z):
+ *  the agent at that desk gets its own screen drawn here (screen.js). */
+export const DESK_SCREEN = Object.freeze({ x: 0, y: 0.9, z: -0.725, w: 0.92, h: 0.54 });
+
 export const MODELS = {
   desk: () => {
     const ch = chairBoxes(0.5, true, WHITE);
@@ -74,7 +78,7 @@ export const MODELS = {
       base: [
         vbox(0, 0.75, -0.74, 0.3, 0.025, 0.18, DARK),
         vbox(0, 0.775, -0.75, 0.08, 0.16, 0.05, DARK),
-        vbox(0, 0.88, -0.76, 0.88, 0.54, 0.06, DARK),
+        vbox(0, DESK_SCREEN.y - 0.04, -0.76, DESK_SCREEN.w + 0.08, DESK_SCREEN.h + 0.08, 0.06, DARK),
         vbox(0, 0.75, -0.3, 0.52, 0.03, 0.17, "#ebe7df"),
         vbox(0.4, 0.75, -0.3, 0.07, 0.03, 0.1, "#ebe7df"),
         vbox(-0.68, 0.75, -0.74, 0.16, 0.13, 0.16, POT),
@@ -85,7 +89,7 @@ export const MODELS = {
         ...ch.base,
       ],
       accent: ch.accent,
-      glow: { boxes: [vbox(0, 0.91, -0.725, 0.8, 0.46, 0.01, WHITE, front)], tex: "screen" },
+      glow: { boxes: [vbox(DESK_SCREEN.x, DESK_SCREEN.y, DESK_SCREEN.z, DESK_SCREEN.w, DESK_SCREEN.h, 0.01, WHITE, front)], tex: "screen" },
     };
   },
   chair: () => {

@@ -330,6 +330,7 @@
     }
     return out;
   }
+  var DESK_SCREEN = Object.freeze({ x: 0, y: 0.9, z: -0.725, w: 0.92, h: 0.54 });
   var MODELS = {
     desk: () => {
       const ch = chairBoxes(0.5, true, WHITE);
@@ -345,7 +346,7 @@
         base: [
           vbox(0, 0.75, -0.74, 0.3, 0.025, 0.18, DARK),
           vbox(0, 0.775, -0.75, 0.08, 0.16, 0.05, DARK),
-          vbox(0, 0.88, -0.76, 0.88, 0.54, 0.06, DARK),
+          vbox(0, DESK_SCREEN.y - 0.04, -0.76, DESK_SCREEN.w + 0.08, DESK_SCREEN.h + 0.08, 0.06, DARK),
           vbox(0, 0.75, -0.3, 0.52, 0.03, 0.17, "#ebe7df"),
           vbox(0.4, 0.75, -0.3, 0.07, 0.03, 0.1, "#ebe7df"),
           vbox(-0.68, 0.75, -0.74, 0.16, 0.13, 0.16, POT),
@@ -356,7 +357,7 @@
           ...ch.base
         ],
         accent: ch.accent,
-        glow: { boxes: [vbox(0, 0.91, -0.725, 0.8, 0.46, 0.01, WHITE, front)], tex: "screen" }
+        glow: { boxes: [vbox(DESK_SCREEN.x, DESK_SCREEN.y, DESK_SCREEN.z, DESK_SCREEN.w, DESK_SCREEN.h, 0.01, WHITE, front)], tex: "screen" }
       };
     },
     chair: () => {
@@ -975,6 +976,12 @@
     }
     return out;
   }
+  function itemPoint(item, lx, lz, custom) {
+    const f = footprint(item, custom);
+    const cx = f.x + f.w / 2, cz = f.z + f.d / 2;
+    const r = item.rot * D2R;
+    return { x: cx + lx * Math.cos(r) + lz * Math.sin(r), z: cz - lx * Math.sin(r) + lz * Math.cos(r), yaw: r };
+  }
   function idleSpots(items, custom) {
     const { seats, stations } = allSpots(items, custom);
     return [
@@ -1221,7 +1228,7 @@
   }
   var TIMES_OF_DAY = Object.freeze({
     day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.28, threshold: 0.92, glow: 1, lamp: 0.95, point: 0, neon: 3, exposure: 1 },
-    night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.5, sun: 0.35, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 1, glow: 1.2, lamp: 2.4, point: 9, neon: 8, exposure: 1.05 }
+    night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.32, sun: 0.22, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 1, glow: 1.2, lamp: 2.4, point: 9, neon: 8, exposure: 1.05 }
   });
   function clockTheme(date = /* @__PURE__ */ new Date()) {
     const h = date.getHours();
@@ -1853,6 +1860,87 @@
     };
   }
 
+  // public/js/screen.js
+  var SCREEN_W = 256;
+  var SCREEN_H = 150;
+  var CHAR = 0.6;
+  var STYLES2 = [
+    { match: /claude/i, bg: "#1f1b16", bar: "#2b241d", fg: "#eee6da", accent: "#d97757", dim: "#8a7d6c", prompt: "\u273B" },
+    { match: /codex|openai/i, bg: "#0b0f0c", bar: "#141c16", fg: "#d7f5df", accent: "#4ade80", dim: "#5e7c66", prompt: "\u203A" },
+    { match: /cursor/i, bg: "#1e1e24", bar: "#26262e", fg: "#e4e4ee", accent: "#8b9cff", dim: "#6d6d80", prompt: "\u2318", tree: true },
+    { match: /gemini/i, bg: "#0f1420", bar: "#172033", fg: "#dbe6ff", accent: "#8ab4f8", dim: "#5f6f8f", prompt: "\u2726" },
+    { match: /paw/i, bg: "#17151f", bar: "#211d2c", fg: "#ece6ff", accent: "#c084fc", dim: "#77708c", prompt: "\u{1F43E}" }
+  ];
+  var DEFAULT_STYLE = { bg: "#1b2230", bar: "#232c3d", fg: "#e6ebf3", accent: null, dim: "#6c7891", prompt: "$" };
+  function screenStyle(client, hueCss) {
+    const s = STYLES2.find((x) => x.match.test(client ?? "")) ?? DEFAULT_STYLE;
+    return { ...s, accent: s.accent ?? hueCss };
+  }
+  function wrap(text, cols, max) {
+    const words = text.split(/\s+/).filter(Boolean);
+    const lines = [];
+    let cur = "";
+    for (const w of words) {
+      const next = cur ? `${cur} ${w}` : w;
+      if (next.length <= cols) {
+        cur = next;
+        continue;
+      }
+      if (cur) lines.push(cur);
+      cur = w.length > cols ? w.slice(0, cols - 1) + "\u2026" : w;
+      if (lines.length === max) break;
+    }
+    if (cur && lines.length < max) lines.push(cur);
+    if (lines.length === max && words.join(" ").length > lines.join(" ").length) lines[max - 1] = lines[max - 1].slice(0, cols - 1) + "\u2026";
+    return lines;
+  }
+  function screenSpec(agent, hueCss) {
+    const W = SCREEN_W, H = SCREEN_H, ops = [];
+    const rect = (x, y2, w, h, color2) => ops.push({ op: "rect", x, y: y2, w, h, color: color2 });
+    const text = (x, y2, size2, color2, t, bold = false) => ops.push({ op: "text", x, y: y2, size: size2, color: color2, text: t, bold });
+    const st = screenStyle(agent.client, hueCss);
+    const seed = hashStr(agent.id);
+    if (agent.status === "away") {
+      rect(0, 0, W, H, "#07080a");
+      return { w: W, h: H, ops };
+    }
+    if (agent.status === "idle") {
+      rect(0, 0, W, H, "#0d0f14");
+      text(30 + seed % 150, 50 + (seed >> 8) % 70, 26, st.dim, st.prompt);
+      return { w: W, h: H, ops };
+    }
+    rect(0, 0, W, H, st.bg);
+    rect(0, 0, W, 20, st.bar);
+    for (const [i, c] of ["#ff5f57", "#febc2e", "#28c840"].entries()) rect(8 + i * 12, 7, 7, 7, c);
+    text(50, 15, 12, st.dim, agent.client ?? "agent");
+    let x0 = 10;
+    if (st.tree) {
+      rect(0, 18, 46, H - 18, st.bar);
+      for (let i = 0; i < 7; i++) rect(8 + (i % 3 ? 6 : 0), 30 + i * 15, 20 + (seed >> i) % 14, 5, st.dim);
+      x0 = 54;
+    }
+    const size = 19, cols = Math.floor((W - x0 - 8) / (size * CHAR));
+    const waiting = agent.status === "waiting";
+    const what = (agent.activity ?? "").trim() || (waiting ? "needs input" : "working");
+    const lines = wrap(what, cols - 2, 3);
+    let y = 44;
+    for (const [i, l] of lines.entries()) {
+      if (i === 0) text(x0, y, size, waiting ? "#f2b33d" : st.accent, waiting ? "?" : st.prompt, true);
+      text(x0 + size * CHAR * 2, y, size, st.fg, l, i === 0);
+      y += size + 4;
+    }
+    if (waiting) {
+      rect(x0, y + 2, Math.min(W - x0 - 10, 180), 26, "#f2b33d");
+      text(x0 + 8, y + 21, 16, "#3a2a10", "waiting for you", true);
+      return { w: W, h: H, ops };
+    }
+    y += 2;
+    for (let i = 0; y < H - 14 && i < 6; i++, y += 11) rect(x0, y, 30 + (seed >> i * 3) % (W - x0 - 60), 5, i % 3 === 2 ? st.accent : st.dim);
+    rect(x0, Math.min(y, H - 12), 7, 9, st.accent);
+    return { w: W, h: H, ops };
+  }
+  var screenKey = (agent, hueCss) => `${agent.status}|${agent.activity ?? ""}|${agent.client ?? ""}|${hueCss}`;
+
   // public/js/radio.js
   var STATIONS = Object.freeze([
     { id: "fluid", name: "SomaFM Fluid", url: "https://ice6.somafm.com/fluid-128-mp3" },
@@ -2088,6 +2176,26 @@
     }
     return out;
   }
+  function deskScreens() {
+    const custom = state.customKinds ?? {};
+    const seating = deskSeating(state.agents, state.items);
+    return state.agents.filter((a) => seating.has(a.id)).map((a) => {
+      const desk = seating.get(a.id), css = hueColors(a.hue ?? 0).css;
+      const p = itemPoint(desk, DESK_SCREEN.x, DESK_SCREEN.z + 8e-3, custom), q = itemPoint(desk, DESK_SCREEN.x, DESK_SCREEN.z + 0.45, custom);
+      return {
+        agent: a.id,
+        key: screenKey(a, css),
+        x: p.x,
+        y: DESK_SCREEN.y + DESK_SCREEN.h / 2,
+        z: p.z,
+        yaw: p.yaw,
+        w: DESK_SCREEN.w,
+        h: DESK_SCREEN.h,
+        // the light it spills on the desk top at night
+        spill: { x: q.x, z: q.z, color: screenStyle(a.client, css).accent, lit: a.status === "working" || a.status === "waiting" }
+      };
+    });
+  }
   function timeOfDay(name) {
     if (!TIMES_OF_DAY[name]) throw new Error(`unknown time of day ${JSON.stringify(name)}`);
     return { name, ...TIMES_OF_DAY[name] };
@@ -2152,6 +2260,12 @@
       const next = nextStation(id || null);
       return JSON.stringify(STATIONS.find((s) => s.id === next) ?? null);
     },
+    /** screen.js's paint ops for one agent's desk monitor, as JSON {w, h, ops}. */
+    screen(agentId) {
+      const a = state.agents.find((x) => x.id === agentId);
+      if (!a) throw new Error(`no agent ${agentId}`);
+      return JSON.stringify(screenSpec(a, hueColors(a.hue ?? 0).css));
+    },
     /** The sound cues frames produced since the last call that pass sound-plan.js's rate limits, as JSON. */
     cues(now) {
       const out = cues.filter((c) => gate(c, now));
@@ -2191,6 +2305,7 @@
           rig: characterRig(a),
           target: t.get(a.id)
         })),
+        screens: deskScreens(),
         chat: state.chat.slice(-40).map((m) => ({ from: nameOf(m.from), to: m.to ? nameOf(m.to) : null, text: m.text, ts: m.ts }))
       });
     }

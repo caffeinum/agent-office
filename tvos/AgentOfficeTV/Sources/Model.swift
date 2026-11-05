@@ -47,6 +47,12 @@ struct OfficeScene: Decodable, Equatable {
     let kinds: [String: Kind]
     let items: [Item]
     let agents: [Agent]
+    /// Each sitter's own monitor over its desk's screen glass; `key` changes when what it shows does.
+    struct Screen: Decodable, Equatable {
+        struct Spill: Decodable, Equatable { let x, z: Double; let color: String; let lit: Bool }
+        let agent: String; let key: String; let x, y, z, yaw, w, h: Double; let spill: Spill
+    }
+    let screens: [Screen]
     let chat: [Chat]
 }
 

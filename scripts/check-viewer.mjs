@@ -12,6 +12,7 @@ import {
   wallOf, cullLabels, labelPriority, chatWith, roomChat, lastLineOf, speakerName, activeSay, CHAT_KEEP, SAY_MS, SEATED,
   themeLook, CLASSIC_COLORS, MOODS, mergeBoxes, overlapLayers, kindGeometryPlan, usableSpots, placedLights, TIMES_OF_DAY,
 } from "../public/js/model.js";
+import { screenSpec, screenStyle } from "../public/js/screen.js";
 import { arcadeDef, brickWallDef, coffeeBarDef, huddleDef } from "../public/js/demo-design.js";
 
 let passed = 0;
@@ -94,6 +95,17 @@ test("idleAtDesk: an idle agent with a desk sits there in most wander slots and 
   assert.ok(moves < 30, `${moves} desk/lounge switches an hour`);
   assert.equal(idleAtDesk(agent("a", { status: "idle" }), false, 0), false);
   assert.equal(idleAtDesk(agent("a", { status: "working" }), true, 0), false);
+});
+
+test("screenSpec: the activity as a client-styled terminal, amber while waiting, dark while away", () => {
+  const texts = (spec) => spec.ops.filter((o) => o.op === "text").map((o) => o.text).join(" ");
+  const work = screenSpec({ id: "a", status: "working", activity: "porting the CLI to bun with a very long tail of words", client: "claude-code" }, "#123456");
+  assert.match(texts(work), /porting the CLI/);
+  assert.ok(work.ops.some((o) => o.color === "#d97757"), "claude-code orange accent");
+  assert.equal(screenStyle("someclient", "#123456").accent, "#123456");
+  assert.match(texts(screenSpec({ id: "a", status: "waiting", activity: "review", client: "codex" }, "#123456")), /waiting for you/);
+  const away = screenSpec({ id: "a", status: "away", client: "codex" }, "#123456");
+  assert.deepEqual(away.ops.map((o) => o.op), ["rect"]);
 });
 
 test("limbAngles: seated poses sit, walking swings, hand up raises the right arm", () => {

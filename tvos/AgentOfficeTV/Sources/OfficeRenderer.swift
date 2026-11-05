@@ -137,6 +137,7 @@ final class OfficeRenderer: NSObject {
         if furnished { buildFurniture(s) }
         if furnished || last!.time != s.time { applyTime(s) }
         syncAgents(s)
+        syncScreens(s)
         if follow.map({ id in !s.agents.contains { $0.id == id } }) == true { follow = nil }
         if touring, let id = newsworthy(s) {
             follow = id
@@ -323,6 +324,50 @@ final class OfficeRenderer: NSObject {
         return node
     }
 
+    // MARK: desk screens
+
+    private var screens: [String: (node: SCNNode, key: String, spill: SCNNode, lit: Bool)] = [:]
+
+    /// One plane per sitter over its desk's monitor glass, painted from screen.js only when its key changes.
+    private func syncScreens(_ s: OfficeScene) {
+        let want = Dictionary(uniqueKeysWithValues: s.screens.map { ($0.agent, $0) })
+        for (id, sc) in screens {
+            guard let w = want[id], sc.node.simdPosition == SIMD3<Float>(Float(w.x), Float(w.y), Float(w.z)) else {
+                sc.node.removeFromParentNode()
+                sc.spill.removeFromParentNode()
+                screens[id] = nil
+                continue
+            }
+        }
+        for sc in s.screens {
+            var entry = screens[sc.agent] ?? {
+                let n = SCNNode(geometry: SCNPlane(width: sc.w, height: sc.h))
+                n.simdPosition = SIMD3(Float(sc.x), Float(sc.y), Float(sc.z))
+                n.eulerAngles.y = Float(sc.yaw)
+                n.castsShadow = false
+                furniture.parent?.addChildNode(n)
+                let spill = pool(color: cssColor(sc.spill.color), strength: Self.spillScale, radius: 0.6, at: SCNVector3(sc.spill.x, 0.757, sc.spill.z))
+                spill.isHidden = true
+                furniture.parent?.addChildNode(spill)
+                return (n, "", spill, false)
+            }()
+            if entry.key != sc.key {
+                do {
+                    let m = voxel?.glow(map: ScreenPainter.image(try bridge!.screen(sc.agent)), tint: .white) ?? SCNMaterial()
+                    m.diffuse.intensity = last?.time.glow ?? s.time.glow
+                    entry.node.geometry?.firstMaterial = m
+                } catch {
+                    preconditionFailure("screen for \(sc.agent): \(error)")
+                }
+                entry.key = sc.key
+                entry.spill.geometry?.firstMaterial?.multiply.contents = cssColor(sc.spill.color)
+                entry.lit = sc.spill.lit
+            }
+            entry.spill.isHidden = !(entry.lit && (last?.time.night ?? s.time.night))
+            screens[sc.agent] = entry
+        }
+    }
+
     // MARK: time of day
 
     /// scene.js setTheme/applyLights/applyGlow/updateLampLights for SceneKit: sun, hemisphere (as ambient), fog, sky,
@@ -340,6 +385,10 @@ final class OfficeRenderer: NSObject {
             cityLights?.isHidden = !t.night
             scene.background.contents = try voxel.texture("sky", t.name)
             let day = try voxel.texture("window"), night = try voxel.texture("nightWindow", s.look.nightWindow ?? "stars")
+            for sc in screens.values {
+                sc.node.geometry?.firstMaterial?.diffuse.intensity = t.glow
+                sc.spill.isHidden = !(sc.lit && t.night)
+            }
             for g in glows {
                 g.mat.diffuse.intensity = g.lamp ? t.lamp : t.glow
                 if g.window { g.mat.diffuse.contents = t.night ? night : day; g.mat.diffuse.intensity = t.night ? 0.95 : 1.05 }
@@ -352,7 +401,7 @@ final class OfficeRenderer: NSObject {
         // lamp and tv light as a glowing pool on the floor: real omni lights cost the TV half its frame rate up close
         for it in s.items.filter({ $0.kind == "lamp" || $0.kind == "tv" }).prefix(Self.poolScale > 0 ? 6 : 0) {
             let lamp = it.kind == "lamp"
-            lampLights.addChildNode(pool(color: lamp ? cssColor(mood.lamp) : cssColor("#8fb6ff"), strength: (lamp ? 1 : 0.4) * Self.poolScale, radius: lamp ? 3.2 : 2.2,
+            lampLights.addChildNode(pool(color: lamp ? cssColor(mood.lamp) : cssColor("#8fb6ff"), strength: (lamp ? 1 : 0.4) * Self.poolScale, radius: lamp ? 4 : 2.2,
                                          at: SCNVector3(it.x, 0.015, it.z)))
         }
         let objects = s.items.filter { !["rug", "window", "poster", "whiteboard", "sign"].contains($0.kind) }.count
@@ -375,7 +424,8 @@ final class OfficeRenderer: NSObject {
         return n
     }
     // three's physical point-light falloff and SceneKit's linear fade differ; this scale matches the web by eye
-    private static let poolScale = Double(ProcessInfo.processInfo.environment["AO_POOL"] ?? "0.8") ?? 0.8
+    private static let poolScale = Double(ProcessInfo.processInfo.environment["AO_POOL"] ?? "1.1") ?? 1.1
+    private static let spillScale = 0.7
 
     /// A soft additive disc of light on the floor.
     private func pool(color: UIColor, strength: Double, radius: Double, at p: SCNVector3) -> SCNNode {
@@ -405,7 +455,7 @@ final class OfficeRenderer: NSObject {
             ctx.cgContext.drawRadialGradient(g, startCenter: CGPoint(x: 64, y: 64), startRadius: 0, endCenter: CGPoint(x: 64, y: 64), endRadius: 64, options: [])
         }
     }()
-    private static let fillScale = Double(ProcessInfo.processInfo.environment["AO_FILL"] ?? "30") ?? 30
+    private static let fillScale = Double(ProcessInfo.processInfo.environment["AO_FILL"] ?? "15") ?? 15
 
     private func mix(_ a: UIColor, _ b: UIColor) -> UIColor {
         var (ar, ag, ab, aa, br, bg, bb, ba): (CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0, 0, 0, 0, 0)

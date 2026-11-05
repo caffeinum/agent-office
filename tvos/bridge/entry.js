@@ -3,7 +3,7 @@
 // it the office WebSocket frames and draws what scene() returns.
 import { MODELS, SEAT_Y, WALL_H } from "../../public/js/furniture.js";
 import {
-  applyFrame, assignSpots, deskSeating, entryPoint, hashStr, idleSpots, kindGeometryPlan, layoutBatches, poseFor, seatOf,
+  applyFrame, assignSpots, deskSeating, entryPoint, hashStr, idleSpots, itemPoint, kindGeometryPlan, layoutBatches, poseFor, seatOf,
   usableSpots, wanderSalt, limbAngles, route, cullLabels, labelPriority,
 } from "../../public/js/model.js";
 import { blockedCells } from "../../public/shared/kinds.js";
@@ -14,6 +14,8 @@ import { floorTexture, grainTexture, grassTexture, nightWindowTexture, plinthTex
 import { TIMES_OF_DAY, clockTheme, hueColors, themeLook } from "../../public/js/model.js";
 import { buildGeometry } from "../../public/js/voxel.js";
 import { installDocument } from "./pixel-canvas.js";
+import { screenKey, screenSpec, screenStyle } from "../../public/js/screen.js";
+import { DESK_SCREEN } from "../../public/js/furniture.js";
 import { STATIONS, nextStation } from "../../public/js/radio.js";
 import { CLOUD_BAND, CLOUD_SPEED, backdrop } from "../../public/js/backdrop.js";
 import { cueGate, soundCues } from "../../public/js/sound-plan.js";
@@ -109,6 +111,21 @@ function targets(now) {
   return out;
 }
 
+/** Each sitter's monitor: where it hangs (over its desk's own screen glass) and what it shows (key changes = repaint). */
+function deskScreens() {
+  const custom = state.customKinds ?? {};
+  const seating = deskSeating(state.agents, state.items);
+  return state.agents.filter((a) => seating.has(a.id)).map((a) => {
+    const desk = seating.get(a.id), css = hueColors(a.hue ?? 0).css;
+    const p = itemPoint(desk, DESK_SCREEN.x, DESK_SCREEN.z + 0.008, custom), q = itemPoint(desk, DESK_SCREEN.x, DESK_SCREEN.z + 0.45, custom);
+    return {
+      agent: a.id, key: screenKey(a, css), x: p.x, y: DESK_SCREEN.y + DESK_SCREEN.h / 2, z: p.z, yaw: p.yaw, w: DESK_SCREEN.w, h: DESK_SCREEN.h,
+      // the light it spills on the desk top at night
+      spill: { x: q.x, z: q.z, color: screenStyle(a.client, css).accent, lit: a.status === "working" || a.status === "waiting" },
+    };
+  });
+}
+
 function timeOfDay(name) {
   if (!TIMES_OF_DAY[name]) throw new Error(`unknown time of day ${JSON.stringify(name)}`);
   return { name, ...TIMES_OF_DAY[name] };
@@ -177,6 +194,12 @@ globalThis.AO = {
     const next = nextStation(id || null);
     return JSON.stringify(STATIONS.find((s) => s.id === next) ?? null);
   },
+  /** screen.js's paint ops for one agent's desk monitor, as JSON {w, h, ops}. */
+  screen(agentId) {
+    const a = state.agents.find((x) => x.id === agentId);
+    if (!a) throw new Error(`no agent ${agentId}`);
+    return JSON.stringify(screenSpec(a, hueColors(a.hue ?? 0).css));
+  },
   /** The sound cues frames produced since the last call that pass sound-plan.js's rate limits, as JSON. */
   cues(now) {
     const out = cues.filter((c) => gate(c, now));
@@ -208,6 +231,7 @@ globalThis.AO = {
         css: hueColors(a.hue ?? 0).css, phase: (hashStr(a.id) % 1000) / 100, says: a.says && now - a.says.ts < 9000 ? a.says.text : null,
         rig: characterRig(a), target: t.get(a.id),
       })),
+      screens: deskScreens(),
       chat: state.chat.slice(-40).map((m) => ({ from: nameOf(m.from), to: m.to ? nameOf(m.to) : null, text: m.text, ts: m.ts })),
     });
   },
