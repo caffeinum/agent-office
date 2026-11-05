@@ -4,6 +4,12 @@ import Foundation
 /// the main thread answers every 0.5 s, and when it hasn't for 2 s it prints the last mark (once per hang), which
 /// `devicectl device process launch --console` shows.
 enum Watchdog {
+    /// stdout to a pipe is block-buffered; flush so the console sees each line as it happens
+    private static func say(_ line: String) {
+        print(line)
+        fflush(stdout)
+    }
+
     private static let lock = NSLock()
     private static var mark = "start"
     private static var beat = Date()
@@ -13,6 +19,7 @@ enum Watchdog {
     }
 
     static func start() {
+        say("AO_HANG watchdog on")
         Thread.detachNewThread {
             var reported = false
             while true {
@@ -22,10 +29,10 @@ enum Watchdog {
                 let stale = Date().timeIntervalSince(beat), where_ = mark
                 lock.unlock()
                 if stale > 2, !reported {
-                    print("AO_HANG main thread stuck \(String(format: "%.1f", stale))s at \(where_)")
+                    say("AO_HANG main thread stuck \(String(format: "%.1f", stale))s at \(where_)")
                     reported = true
                 } else if stale < 1, reported {
-                    print("AO_HANG recovered")
+                    say("AO_HANG recovered")
                     reported = false
                 }
             }
