@@ -34,6 +34,7 @@ final class OfficeRenderer: NSObject {
     private var azimuthGoal: Float = OfficeRenderer.homeAzimuth
     private var zoomGoal: Float = 1
     private var liftWork: DispatchWorkItem?
+    private var lastWantDist: Float = 1
     private var camTarget = SCNVector3Zero
     private var camDist: Float = 30
     private(set) var follow: String? { didSet { if follow != oldValue { onFollow?(follow); refreshPills() } } }
@@ -357,7 +358,9 @@ final class OfficeRenderer: NSObject {
         }
         let k = min(1, dt * 4)
         camTarget = SCNVector3(camTarget.x + (wantTarget.x - camTarget.x) * k, camTarget.y + (wantTarget.y - camTarget.y) * k, camTarget.z + (wantTarget.z - camTarget.z) * k)
-        camDist += (wantDist - camDist) * k
+        // a finger on the pad drives the distance directly; transitions (home, switching agents) ease
+        camDist = touch != nil ? camDist * (wantDist / max(0.001, lastWantDist)) : camDist + (wantDist - camDist) * k
+        lastWantDist = wantDist
         let dir = SCNVector3(sin(polar) * sin(azimuth), cos(polar), sin(polar) * cos(azimuth))
         camera.position = SCNVector3(camTarget.x + dir.x * camDist, camTarget.y + dir.y * camDist, camTarget.z + dir.z * camDist)
         // world up, every frame: plain look(at:) keeps the node's current up, so roll would creep in while orbiting
@@ -485,9 +488,10 @@ final class OfficeRenderer: NSObject {
     private func listen(_ c: GCController) {
         guard let pad = c.microGamepad else { return }
         pad.reportsAbsoluteDpadValues = true
-        // The clickpad as a plain 2D touch: moving the finger left/right turns the camera by how far it moved, up/down
-        // zooms, both at once. The pad snaps to (0, 0) in its centre dead zone as well as on lift, so a lift only
-        // counts after 0.15 s of zeros, and the jump across the dead zone is skipped.
+        // The clickpad as a trackpad: only finger movement counts, applied straight away (no easing, so no lag):
+        // left/right turns, up/down zooms, both at once. The pad reports (0, 0) on lift and in its centre dead zone,
+        // and while lifting one axis can snap to 0 before the other: samples with a 0 axis are skipped, a lift only
+        // counts after 0.15 s of zeros, and a jump too big for one sample re-anchors instead of moving the camera.
         pad.dpad.valueChangedHandler = { [weak self] _, x, y in
             guard let self else { return }
             if x == 0 && y == 0 {
@@ -500,16 +504,18 @@ final class OfficeRenderer: NSObject {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
                 return
             }
-            let crossedDeadZone = self.liftWork != nil
+            if x == 0 || y == 0 { return }
             self.liftWork?.cancel()
             self.liftWork = nil
             self.noteInput()
-            Watchdog.at("touch")
-            defer { self.touch = SIMD2(x, y); Watchdog.at("idle") }
-            guard let t = self.touch, !crossedDeadZone else { return }
-            let dx = x - t.x, dy = y - t.y
-            self.azimuthGoal -= dx * 2.2
-            self.zoomGoal = min(2.2, max(0.25, self.zoomGoal * exp(-dy * 1.1)))
+            let now = SIMD2<Float>(x, y)
+            defer { self.touch = now }
+            guard let t = self.touch, simd_length(now - t) < 0.3 else { return }
+            let d = now - t
+            self.azimuth -= d.x * 2.2
+            self.zoom = min(2.2, max(0.25, self.zoom * exp(-d.y * 1.1)))
+            self.azimuthGoal = self.azimuth
+            self.zoomGoal = self.zoom
         }
     }
 }
