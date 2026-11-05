@@ -255,6 +255,11 @@ const legacySender = (from: string): Sender => (from === "office" ? "office" : f
 
 const publicAgent = ({ tokenHash: _t, lastRead: _r, sessions: _s, askedName: _n, mcp: _m, inviteId: _i, grantId: _g, ...a }: AgentRecord): Agent => a;
 
+/** One identity, one body: the tripcode if it has one, else the asked name + client. */
+function lookSeedOf(trip: string | null, askedName: string, client: string | undefined): string {
+  return trip ?? `${askedName.toLowerCase()}|${client ?? ""}`;
+}
+
 function hueOf(name: string): number {
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
@@ -357,11 +362,15 @@ export class Office extends DurableObject<Env> implements ToolHost {
     await this.migrateKeys(this.meta);
     for (const [, it] of await ctx.storage.list<Item>({ prefix: "item:" })) this.items.set(it.id, it);
     for (const [, a] of await ctx.storage.list<AgentRecord>({ prefix: "agent:" })) {
+      a.lookSeed ??= lookSeedOf(a.tripcode ?? null, a.askedName ?? a.name, a.client); // characters saved before lookSeed
       this.agents.set(a.id, a);
       this.byToken.set(a.tokenHash, a.id);
       for (const s of a.sessions) this.sessions.set(s, a.id);
     }
-    for (const [, d] of await ctx.storage.list<DepartedRecord>({ prefix: "left:" })) this.departed.set(d.id, d);
+    for (const [, d] of await ctx.storage.list<DepartedRecord>({ prefix: "left:" })) {
+      d.lookSeed ??= lookSeedOf(d.tripcode ?? null, d.askedName ?? d.name, d.client);
+      this.departed.set(d.id, d);
+    }
     this.chat = ((await ctx.storage.get<ChatMsg[]>("chat")) ?? []).map((m) => (m.sender ? m : { ...m, sender: legacySender(m.from) }));
     for (const [k, at] of await ctx.storage.list<number>({ prefix: "mcps:" })) this.mcpSessions.set(k.slice(5), at);
     this.alarmAt = await ctx.storage.getAlarm();
@@ -1372,7 +1381,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     a.name = this.uniqueName(trip ? `${baseName} !${trip}` : baseName, a.id);
     // hue from the name it asked for (not "name 2") and the body from the same identity: one agent, one look
     a.hue = args.hue ?? hueOf(baseName);
-    a.lookSeed = trip ?? `${baseName.toLowerCase()}|${args.client ?? ""}`;
+    a.lookSeed = lookSeedOf(trip, baseName, args.client);
     if (args.emoji) a.emoji = args.emoji;
     if (args.client) a.client = args.client;
     else delete a.client;
