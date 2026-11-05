@@ -579,7 +579,8 @@ export function hueColors(hue) {
 /** Greedy-merge boxes that share a full face and look the same (same colour, material, emissive). */
 export function mergeBoxes(boxes) {
   let list = boxes.map((b) => ({ ...b }));
-  const same = (a, b) => a.color.toLowerCase() === b.color.toLowerCase() && (a.material ?? "matte") === (b.material ?? "matte") && !!a.emissive === !!b.emissive;
+  // wedges never merge: two half-slopes side by side aren't one wedge
+  const same = (a, b) => !a.slope && !b.slope && a.color.toLowerCase() === b.color.toLowerCase() && (a.material ?? "matte") === (b.material ?? "matte") && !!a.emissive === !!b.emissive;
   let changed = true;
   while (changed) {
     changed = false;
@@ -602,15 +603,15 @@ export function mergeBoxes(boxes) {
  * A custom kind's boxes (normalised by kinds.js validateKindDef: 16 units per cell, min corner, origin at the
  * footprint's min corner) →
  * geometry buckets in the item frame used by built-ins (1 unit = 1 cell, origin at the footprint centre,
- * y up): {matte, glossy, glass, screen, emissive}, each a list of {cx, y0, cz, w, h, d, color}.
- * Emissive boxes glow at night whatever their material; screen boxes show the office logo.
+ * y up): {matte, glossy, flat, glass, screen, emissive}, each a list of {cx, y0, cz, w, h, d, color, slope?, lowFrac?}
+ * (slope/lowFrac: a wedge, see shape.js). Emissive boxes glow at night whatever their material; screen boxes show the office logo.
  */
 export function kindGeometryPlan(def) {
   if (!def || !Number.isInteger(def.w) || !Number.isInteger(def.d) || !Array.isArray(def.boxes)) throw new Error(`custom kind ${JSON.stringify(def?.kind)} has no w/d/boxes`);
   const U = UNITS;
   const fw = def.w, fd = def.d;
   const merged = mergeBoxes(def.boxes);
-  const plan = { matte: [], glossy: [], glass: [], screen: [], emissive: [], input: def.boxes.length, merged: merged.length };
+  const plan = { matte: [], glossy: [], flat: [], glass: [], screen: [], emissive: [], input: def.boxes.length, merged: merged.length };
   const layer = overlapLayers(merged);
   merged.forEach((b, i) => {
     const mat = b.material ?? "matte";
@@ -621,10 +622,37 @@ export function kindGeometryPlan(def) {
     const z0 = Math.max(-fd / 2, b.z / U - fd / 2 - e), z1 = Math.min(fd / 2, (b.z + b.d) / U - fd / 2 + e);
     const y0 = Math.max(0, b.y / U - e), y1 = (b.y + b.h) / U + e;
     const out = { cx: (x0 + x1) / 2, y0, cz: (z0 + z1) / 2, w: x1 - x0, h: y1 - y0, d: z1 - z0, color: b.color };
+    if (b.slope) Object.assign(out, { slope: b.slope, lowFrac: b.low / b.h });
     const bucket = mat === "screen" ? "screen" : b.emissive ? "emissive" : mat;
     plan[bucket].push(out);
   });
   return plan;
+}
+
+/**
+ * Every custom kind's lights placed in the world (cells; y up), in item order: {id, item, x, y, z, color, intensity, range}.
+ * A light's local position turns with the item like its seats and stations do.
+ */
+export function placedLights(items, custom) {
+  const out = [];
+  for (const it of items) {
+    const kind = custom?.[it.kind];
+    if (!kind) continue;
+    if (!Array.isArray(kind.lights)) throw new Error(`custom kind ${it.kind} has no lights list`);
+    if (!kind.lights.length) continue;
+    const f = footprint(it, custom);
+    const cx = f.x + f.w / 2, cz = f.z + f.d / 2;
+    const r = (it.rot * Math.PI) / 180;
+    kind.lights.forEach((l, i) => {
+      const ox = l.x / UNITS - kind.w / 2, oz = l.z / UNITS - kind.d / 2;
+      out.push({
+        id: `${it.id}:l${i}`, item: it.id,
+        x: cx + ox * Math.cos(r) + oz * Math.sin(r), y: l.y / UNITS, z: cz - ox * Math.sin(r) + oz * Math.cos(r),
+        color: l.color, intensity: l.intensity, range: l.range,
+      });
+    });
+  }
+  return out;
 }
 
 /** How much a box grows (cells, each side) per box it sits inside: enough to win the depth test, too little to see. */
@@ -650,8 +678,8 @@ export function overlapLayers(boxes) {
 
 /** Light levels per time of day (three.js units): hemisphere, sun, fog, bloom, glow multipliers, lamp point lights, exposure. */
 export const TIMES_OF_DAY = Object.freeze({
-  day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.28, threshold: 0.92, glow: 1.0, lamp: 0.95, point: 0, exposure: 1.0 },
-  night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.5, sun: 0.35, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 1.0, glow: 1.2, lamp: 2.4, point: 9, exposure: 1.05 },
+  day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.28, threshold: 0.92, glow: 1.0, lamp: 0.95, point: 0, neon: 3, exposure: 1.0 },
+  night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.5, sun: 0.35, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 1.0, glow: 1.2, lamp: 2.4, point: 9, neon: 8, exposure: 1.05 },
 });
 
 /** Day or night from a local clock: night runs 19:00–07:00. */
@@ -713,5 +741,6 @@ export function themeLook(theme) {
     screenBg: classic ? "#18233a" : ink,
     logo: t.logo,
     logoOnSigns: t.logoOnSigns,
+    zones: t.zones,
   };
 }

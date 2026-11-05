@@ -49,13 +49,13 @@ function kindParts(kind, custom) {
   const def = custom[kind];
   if (!def) throw new Error(`no model for kind "${kind}"`);
   const plan = kindGeometryPlan(def);
-  const toBox = (b, unitUV = false) => ({ at: [b.cx, b.y0, b.cz], size: [b.w, b.h, b.d], color: b.color, faces: null, unitUV });
+  const toBox = (b, unitUV = false) => ({ at: [b.cx, b.y0, b.cz], size: [b.w, b.h, b.d], color: b.color, faces: null, unitUV, ...(b.slope ? { slope: b.slope, lowFrac: b.lowFrac } : {}) });
   return {
     defaultColor: null,
     glowColor: null,
     glowLamp: false,
     parts: [
-      { role: "base", boxes: [...plan.matte, ...plan.glossy].map((b) => toBox(b)) },
+      { role: "base", boxes: [...plan.matte, ...plan.glossy, ...plan.flat].map((b) => toBox(b)) },
       { role: "glass", boxes: plan.glass.map((b) => toBox(b)) },
       { role: "glow", boxes: plan.screen.map((b) => toBox(b, true)), map: "screen" },
       { role: "glow", boxes: plan.emissive.map((b) => toBox(b)), map: null },

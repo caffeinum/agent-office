@@ -17,7 +17,12 @@ export const FOOTPRINT_MAX = 8;
 export const SEATS_MAX = 16;
 export const STATIONS_MAX = 16;
 export const LABEL_MAX = 40;
-export const BOX_MATERIALS = Object.freeze(["matte", "glossy", "glass", "screen"]);
+export const BOX_MATERIALS = Object.freeze(["matte", "glossy", "glass", "screen", "flat"]);
+/** Which way a wedge box's top slopes down (its low edge), in local model space. */
+export const SLOPES = Object.freeze(["+x", "-x", "+z", "-z"]);
+export const LIGHTS_MAX = 4;
+export const LIGHT_INTENSITY_MAX = 4;
+export const LIGHT_RANGE_MAX = 8;
 export const ACTIVITIES = Object.freeze(["coffee", "snack", "read", "play", "water-plants", "whiteboard", "chat", "think", "watch"]);
 /** Seconds an agent spends at a station when the station doesn't say. */
 export const ACTIVITY_DURATION = Object.freeze({ coffee: 25, snack: 20, read: 60, play: 45, "water-plants": 15, whiteboard: 40, chat: 45, think: 30, watch: 50 });
@@ -75,8 +80,8 @@ export function validateStation(s, w, d, where = "station") {
 }
 
 function validateBox(b, w, d, where) {
-  if (!isObj(b)) fail(`${where} must be {x, y, z, w, h, d, color, emissive?, material?}`);
-  onlyKeys(b, ["x", "y", "z", "w", "h", "d", "color", "emissive", "material"], where);
+  if (!isObj(b)) fail(`${where} must be {x, y, z, w, h, d, color, emissive?, material?, slope?, low?}`);
+  onlyKeys(b, ["x", "y", "z", "w", "h", "d", "color", "emissive", "material", "slope", "low"], where);
   const box = {
     x: int(b.x, 0, w * UNITS - 1, `${where}.x`),
     y: int(b.y, 0, HEIGHT_MAX - 1, `${where}.y`),
@@ -99,17 +104,37 @@ function validateBox(b, w, d, where) {
     if (!BOX_MATERIALS.includes(b.material)) fail(`${where}.material must be one of ${BOX_MATERIALS.join(", ")}, got ${JSON.stringify(b.material)}`);
     if (b.material !== "matte") box.material = b.material;
   }
+  if (b.slope !== undefined) {
+    if (!SLOPES.includes(b.slope)) fail(`${where}.slope must be one of ${SLOPES.join(", ")} (the side the top slopes down to), got ${JSON.stringify(b.slope)}`);
+    box.slope = b.slope;
+    box.low = int(b.low ?? 0, 0, box.h - 1, `${where}.low`);
+  } else if (b.low !== undefined) fail(`${where}.low only applies to a wedge: set slope too`);
   return box;
+}
+
+/** Validates one light {x, y, z, color, intensity?, range?}: a coloured point light in local units. */
+export function validateLight(l, w, d, where = "light") {
+  if (!isObj(l)) fail(`${where} must be {x, y, z, color, intensity?, range?}`);
+  onlyKeys(l, ["x", "y", "z", "color", "intensity", "range"], where);
+  if (typeof l.color !== "string" || !COLOR_RE.test(l.color)) fail(`${where}.color must be #rrggbb, got ${JSON.stringify(l.color)}`);
+  return {
+    x: num(l.x, -UNITS, w * UNITS + UNITS, `${where}.x`),
+    y: num(l.y, 0, HEIGHT_MAX + UNITS, `${where}.y`),
+    z: num(l.z, -UNITS, d * UNITS + UNITS, `${where}.z`),
+    color: l.color.toLowerCase(),
+    intensity: num(l.intensity ?? 1, 0.1, LIGHT_INTENSITY_MAX, `${where}.intensity`),
+    range: num(l.range ?? 4, 1, LIGHT_RANGE_MAX, `${where}.range`),
+  };
 }
 
 /**
  * Validates a custom kind definition strictly and returns the normalised kind:
- * {kind, label, w, d, layer, boxes, seats, stations, textable, screen, custom: true}.
- * Input: {kind, label, footprint: {w, d}, boxes, layer?, seats?, stations?, textable?, screen?}.
+ * {kind, label, w, d, layer, boxes, seats, stations, lights, textable, screen, custom: true}.
+ * Input: {kind, label, footprint: {w, d}, boxes, layer?, seats?, stations?, lights?, textable?, screen?}.
  */
 export function validateKindDef(def) {
   if (!isObj(def)) fail("kind definition is not an object");
-  onlyKeys(def, ["kind", "label", "footprint", "layer", "boxes", "seats", "stations", "textable", "screen"], "kind definition");
+  onlyKeys(def, ["kind", "label", "footprint", "layer", "boxes", "seats", "stations", "lights", "textable", "screen"], "kind definition");
   if (typeof def.kind !== "string" || !KIND_SLUG_RE.test(def.kind)) fail(`kind must be a slug: lowercase a-z0-9-, starts with a letter, 2-30 chars; got ${JSON.stringify(def.kind)}`);
   if (Object.hasOwn(KINDS, def.kind)) fail(`"${def.kind}" is a built-in kind and can't be redefined — pick another name (built-ins: ${KIND_NAMES.join(", ")})`);
   if (typeof def.label !== "string" || !def.label.trim() || def.label.length > LABEL_MAX) fail(`label must be a non-empty string ≤${LABEL_MAX} chars`);
@@ -127,6 +152,8 @@ export function validateKindDef(def) {
   const stations = def.stations ?? [];
   if (!Array.isArray(seats) || seats.length > SEATS_MAX) fail(`seats must be an array of ≤${SEATS_MAX}`);
   if (!Array.isArray(stations) || stations.length > STATIONS_MAX) fail(`stations must be an array of ≤${STATIONS_MAX}`);
+  const lights = def.lights ?? [];
+  if (!Array.isArray(lights) || lights.length > LIGHTS_MAX) fail(`lights must be an array of ≤${LIGHTS_MAX}`);
   for (const key of ["textable", "screen"]) if (def[key] !== undefined && typeof def[key] !== "boolean") fail(`${key} must be true or false`);
   return {
     kind: def.kind,
@@ -137,6 +164,7 @@ export function validateKindDef(def) {
     boxes,
     seats: seats.map((s, i) => validateSeat(s, w, d, `seats[${i}]`)),
     stations: stations.map((s, i) => validateStation(s, w, d, `stations[${i}]`)),
+    lights: lights.map((l, i) => validateLight(l, w, d, `lights[${i}]`)),
     textable: def.textable === true,
     screen: def.screen === true,
     custom: true,
@@ -166,6 +194,7 @@ export function summarizeKind(k) {
   if (k.seat) out.seat = true;
   if (k.seats?.length) out.seats = k.seats;
   if (k.stations?.length) out.stations = k.stations;
+  if (k.lights?.length) out.lights = k.lights;
   return out;
 }
 

@@ -13,16 +13,19 @@ import { footprint, kindOf } from "../shared/catalog.js";
 import { DEFAULT_THEME } from "../shared/theme.js";
 import {
   SEATED, idleAtDesk, wanderSalt, assignSpots, blockedCells, deskSeating, entryPoint, hashStr, idleSpots, kindGeometryPlan, layoutBatches, limbAngles, poseFor,
-  route, seatOf, themeLook, TIMES_OF_DAY, usableSpots,
+  placedLights, route, seatOf, themeLook, TIMES_OF_DAY, usableSpots,
 } from "./model.js";
 import { MODELS, SEAT_Y, WALL_H } from "./furniture.js";
 import { buildGeometry, vbox } from "./voxel.js";
-import { CROWN, applyLimbs, applyProps, awayMaterial, baseMaterial, blink, buildCharacter } from "./character.js";
+import { CROWN, applyLimbs, applyProps, awayMaterial, baseMaterial, blink, buildCharacter, characterMaterials } from "./character.js";
+import { POINT_LIGHTS_GL, setPointExempt, setZones, withZones } from "./zone-shader.js";
 import * as T from "./textures.js";
 import { GARDEN_BORDER as BORDER, cornerPosts, cutaway, gardenBoxes, roomWalls, wallBoxes } from "./room.js";
 
 const WALK_SPEED = 1.7;
 const FILL_Y = 9;
+/** Kind lights drawn at once: each point light costs every lit pixel, so a neon-heavy office keeps the first ones. */
+const KIND_LIGHTS_MAX = 12;
 const POP_MS = 420;
 const FADE_MS = 900;
 
@@ -113,6 +116,8 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     rail: new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.grain, roughness: 0.6, metalness: 0.05 }),
     glossy: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.28, metalness: 0.15 }),
     glass: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.38, depthWrite: false }),
+    // lowpoly: no grain, one normal per face
+    flat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0, flatShading: true }),
     emissive: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: true }),
     // room surfaces (persist across room rebuilds so a theme fade survives a grid change)
     floor: fadeMaterial({ map: floorTex("wood"), roughness: 0.78 }),
@@ -122,8 +127,11 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     trim: new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.grain, roughness: 0.8 }),
   };
   mats.emissive.userData = { baseColor: new THREE.Color("#ffffff"), lamp: false, window: false };
+  for (const [key, m] of Object.entries(mats)) if (m.isMeshStandardMaterial) withZones(m);
   const charBase = baseMaterial(tex.grain);
   const charAway = awayMaterial(tex.grain);
+  const zoneCharacters = () => { for (const m of characterMaterials()) withZones(m); };
+  zoneCharacters();
 
   const S = {
     theme: "day", grid: null, items: [], agents: [], seating: new Map(), spots: [], blocked: null, entry: { x: 0, z: 0 },
@@ -178,10 +186,11 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     const def = S.custom[kind];
     if (!def) throw new Error(`no model for kind "${kind}" (not built in, not defined in this office)`);
     const plan = kindGeometryPlan(def);
-    const boxes = (list, extra = {}) => list.map((b) => vbox(b.cx, b.y0, b.cz, b.w, b.h, b.d, b.color, extra));
+    const boxes = (list, extra = {}) => list.map((b) => vbox(b.cx, b.y0, b.cz, b.w, b.h, b.d, b.color, b.slope ? { ...extra, slope: b.slope, lowFrac: b.lowFrac } : extra));
     const parts = [];
     if (plan.matte.length) parts.push({ role: "base", geo: buildGeometry(boxes(plan.matte)), mat: mats.base });
     if (plan.glossy.length) parts.push({ role: "base", geo: buildGeometry(boxes(plan.glossy)), mat: mats.glossy });
+    if (plan.flat.length) parts.push({ role: "base", geo: buildGeometry(boxes(plan.flat), { ao: false }), mat: mats.flat });
     if (plan.glass.length) parts.push({ role: "glass", geo: buildGeometry(boxes(plan.glass), { ao: false }), mat: mats.glass });
     if (plan.emissive.length) {
       S.glowMats.set("@emissive", mats.emissive);
@@ -477,12 +486,26 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     fill.userData.fill = true;
     scene.add(fill);
     S.lampLights.push(fill);
+    // custom kinds' coloured lights: neon spill, on day and night, and not dimmed by theme zones
+    for (const l of placedLights(S.items, S.custom).slice(0, KIND_LIGHTS_MAX)) {
+      const pl = new THREE.PointLight(l.color, l.intensity * th.neon, l.range, 1.6);
+      pl.position.set(l.x, l.y, l.z);
+      pl.userData.kindLight = true;
+      scene.add(pl);
+      S.lampLights.push(pl);
+    }
+    // three numbers point lights in scene order, skipping hidden ones; the shader's exemption flags follow that order
+    const pointOrder = [];
+    scene.traverseVisible((o) => { if (o.isPointLight) pointOrder.push(!!o.userData.kindLight); });
+    if (pointOrder.length > POINT_LIGHTS_GL) throw new Error(`${pointOrder.length} point lights, the zone shader holds ${POINT_LIGHTS_GL}`);
+    setPointExempt(pointOrder);
   }
 
   /* ── characters ────────────────────────────────────────────────────────────────────────────── */
 
   function addChar(agent, now, initial) {
     const obj = buildCharacter(agent, tex.grain);
+    zoneCharacters();
     const blob = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), mats.blob);
     blob.rotation.x = -Math.PI / 2;
     blob.position.y = 0.012;
@@ -734,7 +757,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     hemi.color.copy(night ? p.nightSky : p.sky);
     hemi.groundColor.copy(night ? tmpC.set(th.hemiGround) : p.ground);
     sun.color.copy(night ? tmpC.set(th.sunColor) : p.sun);
-    for (const l of S.lampLights) l.color.copy(l.userData.fill ? p.fill : l.userData.lamp ? p.lamp : l.color);
+    for (const l of S.lampLights) if (!l.userData.kindLight) l.color.copy(l.userData.fill ? p.fill : l.userData.lamp ? p.lamp : l.color);
   }
 
   /* ── office theme: palette + materials, crossfaded ─────────────────────────────────────────── */
@@ -778,6 +801,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
   function applyLook(look, animate) {
     const to = paletteFor(look);
     S.look = look;
+    setZones(look.zones);
     for (const key of FADE_SURFACES) {
       const u = mats[key].userData.xfade;
       if (S.fade) { mats[key].map = u.uMix.value > 0.5 ? u.map2.value : mats[key].map; u.uMix.value = 0; }

@@ -437,3 +437,65 @@ describe("migration", () => {
     expect(err).toMatch(/schema 3, this build understands up to 2/);
   });
 });
+
+describe("lowpoly neon: wedges, flat boxes, kind lights, dimmed zones", () => {
+  const neon = {
+    kind: "neon-booth",
+    label: "Neon booth",
+    footprint: { w: 2, d: 1 },
+    boxes: [
+      { x: 0, y: 0, z: 0, w: 32, h: 12, d: 16, color: "#1b1d3c", material: "flat" },
+      { x: 0, y: 12, z: 0, w: 32, h: 6, d: 16, color: "#ff2f92", material: "flat", slope: "+z", low: 1 },
+    ],
+    lights: [{ x: 16, y: 24, z: 24, color: "#ff2f92", intensity: 2 }],
+  };
+
+  it("define_kind keeps wedges and lights and sends them to viewers; the summary counts the lights", async () => {
+    const o = await createOffice();
+    const a = await join(o, "Neon");
+    const t = { token: a.agentToken };
+    const viewer = await openWs(o, o.viewKey);
+    await viewer.next((f) => f.type === "snapshot");
+    const def = await call(o, "define_kind", neon, t);
+    expect(def.status).toBe(200);
+    expect(def.body.kind.lights).toEqual([{ x: 16, y: 24, z: 24, color: "#ff2f92", intensity: 2, range: 4 }]);
+    const kf = await viewer.next((f) => f.type === "kind");
+    expect(kf.kind.boxes[1]).toMatchObject({ slope: "+z", low: 1, material: "flat" });
+    expect(kf.kind.lights).toHaveLength(1);
+    const bad = await call(o, "define_kind", { ...neon, lights: [{ x: 0, y: 0, z: 0, color: "#ffffff", range: 20 }] }, t);
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toMatch(/lights\.0\.range/);
+    viewer.ws.close();
+  });
+
+  it("theme zones go through theme_set, reach viewers and show in the design summary", async () => {
+    const o = await createOffice();
+    const a = await join(o, "Lights");
+    const t = { token: a.agentToken };
+    const viewer = await openWs(o, o.viewKey);
+    await viewer.next((f) => f.type === "snapshot");
+    const zone = { x: 0, z: 6, w: 6, d: 10, tint: "#6a4cff", dim: 0.8 };
+    const set = await call(o, "theme_set", { theme: { zones: [zone] } }, t);
+    expect(set.status).toBe(200);
+    expect(set.body.theme.zones).toEqual([zone]);
+    expect((await viewer.next((f) => f.type === "theme")).theme.zones).toEqual([zone]);
+    expect((await call(o, "look", {}, t)).body.design.theme).toMatch(/dimmed zones 0,6 6×10/);
+    expect((await call(o, "theme_set", { theme: { zones: [{ ...zone, dim: 2 }] } }, t)).status).toBe(400);
+    expect((await call(o, "theme_set", { theme: { zones: [] } }, t)).body.theme.zones).toEqual([]);
+    viewer.ws.close();
+  });
+
+  it("kinds stored before lights existed load with none", async () => {
+    const o = await createOffice();
+    const a = await join(o, "Old Kinds");
+    await call(o, "define_kind", { ...neon, lights: undefined }, { token: a.agentToken });
+    const lights = await runInDurableObject(stubOf(o.id), async (inst: Office, state) => {
+      const stored = (await state.storage.get("kind:neon-booth")) as any;
+      const { lights: _l, ...old } = stored;
+      await state.storage.put("kind:neon-booth", old);
+      await (inst as any).load();
+      return (inst as any).customKinds["neon-booth"].lights;
+    });
+    expect(lights).toEqual([]);
+  });
+});

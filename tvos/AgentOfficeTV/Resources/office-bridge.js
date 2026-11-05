@@ -80,6 +80,31 @@
   var RepeatWrapping = 1e3;
   var SRGBColorSpace = "srgb";
 
+  // public/js/shape.js
+  var LOW_SIDE = { "+x": (c) => c[0] === 1, "-x": (c) => c[0] === 0, "+z": (c) => c[2] === 1, "-z": (c) => c[2] === 0 };
+  function cornerPoint(b, corner) {
+    const [cx, y0, cz] = b.at, [w, h, d] = b.size;
+    let top = corner[1] * h;
+    if (b.slope) {
+      const low = LOW_SIDE[b.slope];
+      if (!low) throw new Error(`unknown slope ${JSON.stringify(b.slope)}`);
+      if (corner[1] === 1 && low(corner)) top = h * (b.lowFrac ?? 0);
+    }
+    return [cx - w / 2 + corner[0] * w, y0 + top, cz - d / 2 + corner[2] * d];
+  }
+  function quadNormal(a, b, c, d) {
+    const poly = [a, b, d, c];
+    const n = [0, 0, 0];
+    for (let i = 0; i < 4; i++) {
+      const p = poly[i], q = poly[(i + 1) % 4];
+      n[0] += (p[1] - q[1]) * (p[2] + q[2]);
+      n[1] += (p[2] - q[2]) * (p[0] + q[0]);
+      n[2] += (p[0] - q[0]) * (p[1] + q[1]);
+    }
+    const len = Math.hypot(n[0], n[1], n[2]);
+    return len < 1e-9 ? [0, 0, 0] : [n[0] / len, n[1] / len, n[2] / len];
+  }
+
   // public/js/voxel.js
   var FACES = [
     { n: [1, 0, 0], corners: [[1, 0, 1], [1, 0, 0], [1, 1, 1], [1, 1, 0]], uv: [2, 1], flipU: true },
@@ -117,16 +142,17 @@
     const c = new Color();
     let v = 0;
     for (const [bi, b] of boxes.entries()) {
-      const [cx, y0, cz] = b.at, [w, h, d] = b.size;
-      const min = [cx - w / 2, y0, cz - d / 2], size = [w, h, d];
       c.set(b.color);
       const faces = b.faces ?? [0, 1, 2, 3, 4, 5];
       for (const fi of faces) {
         const F = FACES[fi];
-        for (const corner of F.corners) {
-          const p = [min[0] + corner[0] * size[0], min[1] + corner[1] * size[1], min[2] + corner[2] * size[2]];
+        const pts = F.corners.map((corner) => cornerPoint(b, corner));
+        const n = b.slope ? quadNormal(...pts) : F.n;
+        if (b.slope && n[0] === 0 && n[1] === 0 && n[2] === 0) continue;
+        for (const [ci, corner] of F.corners.entries()) {
+          const p = pts[ci];
           pos.push(p[0], p[1], p[2]);
-          nor.push(...F.n);
+          nor.push(...n);
           let k2 = 1;
           if (ao) {
             if (p[1] <= floorY + 0.015) k2 *= 0.62;
@@ -460,6 +486,9 @@
   var NIGHT_WINDOWS = Object.freeze(["city", "stars", "aurora", "rain"]);
   var ACCENTS_MAX = 4;
   var ASSET_ID_RE = /^a[0-9a-f]{23}$/;
+  var ZONES_MAX = 8;
+  var ZONE_DIM_MAX = 0.95;
+  var ZONE_CELLS_MAX = 64;
   var COLOR_RE = /^#[0-9a-fA-F]{6}$/;
   var DEFAULT_THEME = deepFreeze({
     floor: { material: "wood", color: "#d9b086" },
@@ -469,7 +498,8 @@
     lighting: "warm",
     nightWindow: "city",
     logo: null,
-    logoOnSigns: false
+    logoOnSigns: false,
+    zones: []
   });
   var ThemeError = class extends Error {
     constructor(message) {
@@ -499,6 +529,23 @@
     if (!list2.includes(v)) fail2(`${where} must be one of ${list2.join(", ")}, got ${JSON.stringify(v)}`);
     return v;
   }
+  function cellInt(v, min, max, where) {
+    if (!Number.isInteger(v) || v < min || v > max) fail2(`${where} must be an integer ${min}..${max}, got ${JSON.stringify(v)}`);
+    return v;
+  }
+  function validateZone(z, where) {
+    if (!isObj(z)) fail2(`${where} must be {x, z, w, d, tint, dim}`);
+    onlyKeys(z, ["x", "z", "w", "d", "tint", "dim"], where);
+    if (typeof z.dim !== "number" || !Number.isFinite(z.dim) || z.dim < 0 || z.dim > ZONE_DIM_MAX) fail2(`${where}.dim must be a number 0..${ZONE_DIM_MAX}, got ${JSON.stringify(z.dim)}`);
+    return {
+      x: cellInt(z.x, 0, ZONE_CELLS_MAX - 1, `${where}.x`),
+      z: cellInt(z.z, 0, ZONE_CELLS_MAX - 1, `${where}.z`),
+      w: cellInt(z.w, 1, ZONE_CELLS_MAX, `${where}.w`),
+      d: cellInt(z.d, 1, ZONE_CELLS_MAX, `${where}.d`),
+      tint: color(z.tint, `${where}.tint`),
+      dim: z.dim
+    };
+  }
   function validateTheme(t) {
     if (!isObj(t)) fail2("theme is not an object");
     onlyKeys(t, Object.keys(DEFAULT_THEME), "theme");
@@ -522,6 +569,7 @@
     if (!Array.isArray(t.accents) || t.accents.length < 1 || t.accents.length > ACCENTS_MAX) fail2(`theme.accents must be 1-${ACCENTS_MAX} colours`);
     if (t.logo !== null && (typeof t.logo !== "string" || !ASSET_ID_RE.test(t.logo))) fail2(`theme.logo must be null or an asset id from office_upload, got ${JSON.stringify(t.logo)}`);
     if (typeof t.logoOnSigns !== "boolean") fail2("theme.logoOnSigns must be true or false");
+    if (!Array.isArray(t.zones) || t.zones.length > ZONES_MAX) fail2(`theme.zones must be an array of \u2264${ZONES_MAX} {x, z, w, d, tint, dim}`);
     return {
       floor: { material: oneOf(t.floor.material, FLOOR_MATERIALS, "theme.floor.material"), color: color(t.floor.color, "theme.floor.color") },
       walls: { color: color(t.walls.color, "theme.walls.color"), trim: color(t.walls.trim, "theme.walls.trim"), accent },
@@ -530,7 +578,8 @@
       lighting: oneOf(t.lighting, LIGHTING, "theme.lighting"),
       nightWindow: oneOf(t.nightWindow, NIGHT_WINDOWS, "theme.nightWindow"),
       logo: t.logo,
-      logoOnSigns: t.logoOnSigns
+      logoOnSigns: t.logoOnSigns,
+      zones: t.zones.map((z, i) => validateZone(z, `theme.zones[${i}]`))
     };
   }
   function hexToRgb(hex) {
@@ -581,7 +630,8 @@
 
   // public/shared/kinds.js
   var UNITS = 16;
-  var BOX_MATERIALS = Object.freeze(["matte", "glossy", "glass", "screen"]);
+  var BOX_MATERIALS = Object.freeze(["matte", "glossy", "glass", "screen", "flat"]);
+  var SLOPES = Object.freeze(["+x", "-x", "+z", "-z"]);
   var ACTIVITIES = Object.freeze(["coffee", "snack", "read", "play", "water-plants", "whiteboard", "chat", "think", "watch"]);
   var ACTIVITY_DURATION = Object.freeze({ coffee: 25, snack: 20, read: 60, play: 45, "water-plants": 15, whiteboard: 40, chat: 45, think: 30, watch: 50 });
   var CUSTOM_LAYERS = Object.freeze(["object", "floor", "wall"]);
@@ -1089,7 +1139,7 @@
   }
   function mergeBoxes(boxes) {
     let list2 = boxes.map((b) => ({ ...b }));
-    const same = (a, b) => a.color.toLowerCase() === b.color.toLowerCase() && (a.material ?? "matte") === (b.material ?? "matte") && !!a.emissive === !!b.emissive;
+    const same = (a, b) => !a.slope && !b.slope && a.color.toLowerCase() === b.color.toLowerCase() && (a.material ?? "matte") === (b.material ?? "matte") && !!a.emissive === !!b.emissive;
     let changed = true;
     while (changed) {
       changed = false;
@@ -1117,7 +1167,7 @@
     const U = UNITS;
     const fw = def.w, fd = def.d;
     const merged = mergeBoxes(def.boxes);
-    const plan = { matte: [], glossy: [], glass: [], screen: [], emissive: [], input: def.boxes.length, merged: merged.length };
+    const plan = { matte: [], glossy: [], flat: [], glass: [], screen: [], emissive: [], input: def.boxes.length, merged: merged.length };
     const layer = overlapLayers(merged);
     merged.forEach((b, i) => {
       const mat = b.material ?? "matte";
@@ -1127,6 +1177,7 @@
       const z0 = Math.max(-fd / 2, b.z / U - fd / 2 - e), z1 = Math.min(fd / 2, (b.z + b.d) / U - fd / 2 + e);
       const y0 = Math.max(0, b.y / U - e), y1 = (b.y + b.h) / U + e;
       const out = { cx: (x0 + x1) / 2, y0, cz: (z0 + z1) / 2, w: x1 - x0, h: y1 - y0, d: z1 - z0, color: b.color };
+      if (b.slope) Object.assign(out, { slope: b.slope, lowFrac: b.low / b.h });
       const bucket = mat === "screen" ? "screen" : b.emissive ? "emissive" : mat;
       plan[bucket].push(out);
     });
@@ -1144,8 +1195,8 @@
     return layer;
   }
   var TIMES_OF_DAY = Object.freeze({
-    day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.28, threshold: 0.92, glow: 1, lamp: 0.95, point: 0, exposure: 1 },
-    night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.5, sun: 0.35, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 1, glow: 1.2, lamp: 2.4, point: 9, exposure: 1.05 }
+    day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.28, threshold: 0.92, glow: 1, lamp: 0.95, point: 0, neon: 3, exposure: 1 },
+    night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.5, sun: 0.35, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 1, glow: 1.2, lamp: 2.4, point: 9, neon: 8, exposure: 1.05 }
   });
   function clockTheme(date = /* @__PURE__ */ new Date()) {
     const h = date.getHours();
@@ -1190,7 +1241,8 @@
       signFg: classic ? "#f6f1e3" : mixHex("#ffffff", a(1), 0.12),
       screenBg: classic ? "#18233a" : ink,
       logo: t.logo,
-      logoOnSigns: t.logoOnSigns
+      logoOnSigns: t.logoOnSigns,
+      zones: t.zones
     };
   }
 
@@ -1814,13 +1866,13 @@
     const def = custom[kind];
     if (!def) throw new Error(`no model for kind "${kind}"`);
     const plan = kindGeometryPlan(def);
-    const toBox = (b, unitUV = false) => ({ at: [b.cx, b.y0, b.cz], size: [b.w, b.h, b.d], color: b.color, faces: null, unitUV });
+    const toBox = (b, unitUV = false) => ({ at: [b.cx, b.y0, b.cz], size: [b.w, b.h, b.d], color: b.color, faces: null, unitUV, ...b.slope ? { slope: b.slope, lowFrac: b.lowFrac } : {} });
     return {
       defaultColor: null,
       glowColor: null,
       glowLamp: false,
       parts: [
-        { role: "base", boxes: [...plan.matte, ...plan.glossy].map((b) => toBox(b)) },
+        { role: "base", boxes: [...plan.matte, ...plan.glossy, ...plan.flat].map((b) => toBox(b)) },
         { role: "glass", boxes: plan.glass.map((b) => toBox(b)) },
         { role: "glow", boxes: plan.screen.map((b) => toBox(b, true)), map: "screen" },
         { role: "glow", boxes: plan.emissive.map((b) => toBox(b)), map: null }

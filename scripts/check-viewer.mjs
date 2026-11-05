@@ -3,12 +3,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { KINDS, KIND_NAMES, GRID, defaultLayout, applyOp, seatOf, footprint } from "../public/shared/catalog.js";
-import { DEFAULT_THEME, brandTheme, mergeTheme } from "../public/shared/theme.js";
-import { ACTIVITIES, validateKindDef } from "../public/shared/kinds.js";
+import { DEFAULT_THEME, ZONES_MAX, brandTheme, describeTheme, mergeTheme, validateTheme } from "../public/shared/theme.js";
+import { ACTIVITIES, LIGHTS_MAX, summarizeKind, validateKindDef } from "../public/shared/kinds.js";
+import { cornerPoint, quadNormal } from "../public/js/shape.js";
+import { POINT_LIGHTS_GL, ZONES_GL, zonedLightsChunk } from "../public/js/zone-glsl.js";
 import {
   applyFrame, poseFor, lingering, idleAtDesk, LOUNGE_ONE_IN, DESK_LINGER_MS, limbAngles, deskSeating, idleSpots, pickSpot, assignSpots, blockedCells, route, entryPoint, layoutBatches,
   wallOf, cullLabels, labelPriority, chatWith, roomChat, lastLineOf, speakerName, activeSay, CHAT_KEEP, SAY_MS, SEATED,
-  themeLook, CLASSIC_COLORS, MOODS, mergeBoxes, overlapLayers, kindGeometryPlan, usableSpots,
+  themeLook, CLASSIC_COLORS, MOODS, mergeBoxes, overlapLayers, kindGeometryPlan, usableSpots, placedLights, TIMES_OF_DAY,
 } from "../public/js/model.js";
 import { arcadeDef, brickWallDef, coffeeBarDef, huddleDef } from "../public/js/demo-design.js";
 
@@ -416,6 +418,130 @@ test("limbAngles: every activity has its own finite, distinct animation", () => 
   assert.equal(sigs.size, poses.length, "no two activities share a pose");
   assert.equal(limbAngles("play", 1).seated, false);
   assert.ok(limbAngles("whiteboard", 1).armR < -1.8, "writing on the board raises the right arm");
+});
+
+
+/* ── lowpoly: wedges, flat material, kind lights, dimmed zones ─────────────────────────────── */
+
+const neonDef = (over = {}) => ({
+  kind: "neon-thing", label: "Neon thing", footprint: { w: 2, d: 1 },
+  boxes: [
+    { x: 0, y: 0, z: 0, w: 32, h: 8, d: 16, color: "#1B1D3C", material: "flat" },
+    { x: 0, y: 8, z: 0, w: 16, h: 8, d: 16, color: "#ffffff", material: "flat", slope: "+x", low: 2 },
+    { x: 16, y: 8, z: 0, w: 16, h: 8, d: 16, color: "#ffffff", material: "flat", slope: "+x" },
+    { x: 0, y: 16, z: 15, w: 32, h: 1, d: 1, color: "#ff2f92", emissive: true },
+  ],
+  lights: [{ x: 16, y: 20, z: 24, color: "#FF2F92", intensity: 2, range: 3 }, { x: 0, y: 10, z: 8, color: "#19e3d6" }],
+  ...over,
+});
+
+test("validateKindDef: wedges, flat boxes and lights normalise; bad ones fail with the field named", () => {
+  const k = validateKindDef(neonDef());
+  assert.equal(k.boxes[0].material, "flat");
+  assert.deepEqual([k.boxes[1].slope, k.boxes[1].low, k.boxes[2].low], ["+x", 2, 0]);
+  assert.equal(k.boxes[0].slope, undefined);
+  assert.deepEqual(k.lights[0], { x: 16, y: 20, z: 24, color: "#ff2f92", intensity: 2, range: 3 });
+  assert.deepEqual(k.lights[1], { x: 0, y: 10, z: 8, color: "#19e3d6", intensity: 1, range: 4 }, "intensity and range default");
+  assert.deepEqual(validateKindDef(neonDef({ lights: undefined })).lights, [], "no lights = an empty list");
+  assert.equal(summarizeKind(k).lights.length, 2);
+  const bad = (over, re) => assert.throws(() => validateKindDef(neonDef(over)), re);
+  bad({ boxes: [{ x: 0, y: 0, z: 0, w: 8, h: 8, d: 8, color: "#ffffff", slope: "up" }] }, /boxes\[0\]\.slope must be one of/);
+  bad({ boxes: [{ x: 0, y: 0, z: 0, w: 8, h: 8, d: 8, color: "#ffffff", slope: "-z", low: 8 }] }, /boxes\[0\]\.low must be an integer 0\.\.7/);
+  bad({ boxes: [{ x: 0, y: 0, z: 0, w: 8, h: 8, d: 8, color: "#ffffff", low: 2 }] }, /low only applies to a wedge/);
+  bad({ boxes: [{ x: 0, y: 0, z: 0, w: 8, h: 8, d: 8, color: "#ffffff", material: "chrome" }] }, /material must be one of/);
+  bad({ lights: [{ x: 0, y: 0, z: 0 }] }, /lights\[0\]\.color must be #rrggbb/);
+  bad({ lights: [{ x: 0, y: 0, z: 0, color: "#ffffff", range: 9 }] }, /lights\[0\]\.range must be a number 1\.\.8/);
+  bad({ lights: [{ x: 99, y: 0, z: 0, color: "#ffffff" }] }, /lights\[0\]\.x must be a number/);
+  bad({ lights: [{ x: 0, y: 0, z: 0, color: "#ffffff", glow: 1 }] }, /unknown field "glow"/);
+  bad({ lights: Array.from({ length: LIGHTS_MAX + 1 }, () => ({ x: 0, y: 0, z: 0, color: "#ffffff" })) }, /lights must be an array of ≤4/);
+});
+
+test("kindGeometryPlan: flat boxes get their own bucket, wedges keep their slope and never merge", () => {
+  const k = validateKindDef(neonDef());
+  const plan = kindGeometryPlan(k);
+  assert.equal(plan.flat.length, 3, "two side-by-side wedges stay two boxes, the plain flat box stays one");
+  assert.equal(plan.matte.length + plan.glossy.length, 0);
+  assert.equal(plan.emissive.length, 1);
+  const wedges = plan.flat.filter((b) => b.slope);
+  assert.equal(wedges.length, 2);
+  assert.deepEqual(wedges.map((b) => b.lowFrac).sort(), [0, 0.25]);
+  const twins = mergeBoxes([{ x: 0, y: 0, z: 0, w: 4, h: 4, d: 4, color: "#ffffff", slope: "+x", low: 0 }, { x: 4, y: 0, z: 0, w: 4, h: 4, d: 4, color: "#ffffff", slope: "+x", low: 0 }]);
+  assert.equal(twins.length, 2);
+});
+
+test("shape: a wedge lowers its top on the slope side and keeps every face normal outward and unit-length", () => {
+  const FACE_CORNERS = [
+    [[1, 0, 1], [1, 0, 0], [1, 1, 1], [1, 1, 0]], [[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1]], [[0, 1, 1], [1, 1, 1], [0, 1, 0], [1, 1, 0]],
+    [[0, 0, 0], [1, 0, 0], [0, 0, 1], [1, 0, 1]], [[0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]], [[1, 0, 0], [0, 0, 0], [1, 1, 0], [0, 1, 0]],
+  ];
+  const AXIS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  const cube = { at: [0, 0, 0], size: [2, 2, 2] };
+  FACE_CORNERS.forEach((cs, i) => assert.deepEqual(quadNormal(...cs.map((c) => cornerPoint(cube, c))).map((v) => Math.round(v) || 0), AXIS[i], `face ${i} of a plain box`));
+  const wedge = { at: [0, 1, 0], size: [2, 2, 2], slope: "+z", lowFrac: 0 };
+  assert.deepEqual(cornerPoint(wedge, [0, 1, 1]), [-1, 1, 1], "the +z top edge drops to the bottom");
+  assert.deepEqual(cornerPoint(wedge, [0, 1, 0]), [-1, 3, -1], "the -z top edge keeps the full height");
+  const top = quadNormal(...FACE_CORNERS[2].map((c) => cornerPoint(wedge, c)));
+  assert.ok(top[1] > 0.7 && top[2] > 0.7 && Math.abs(Math.hypot(...top) - 1) < 1e-9, `the slope faces up and towards +z: ${top}`);
+  assert.deepEqual(quadNormal(...FACE_CORNERS[4].map((c) => cornerPoint(wedge, c))), [0, 0, 0], "a sharp edge leaves no front face");
+  const side = quadNormal(...FACE_CORNERS[0].map((c) => cornerPoint(wedge, c)));
+  assert.deepEqual(side.map((v) => Math.round(v) || 0), [1, 0, 0], "the trimmed side still faces +x");
+  for (const slope of ["+x", "-x", "-z"]) {
+    const n = quadNormal(...FACE_CORNERS[2].map((c) => cornerPoint({ ...wedge, slope }, c)));
+    assert.ok(n[1] > 0.7, `${slope} slope faces up`);
+  }
+  assert.throws(() => cornerPoint({ ...wedge, slope: "up" }, [0, 1, 0]), /unknown slope/);
+});
+
+test("placedLights: lights turn with the item, in cells, item order", () => {
+  const k = validateKindDef(neonDef());
+  const custom = { [k.kind]: k };
+  const at0 = placedLights([{ id: "n-1", kind: k.kind, x: 4, z: 6, rot: 0 }], custom);
+  assert.deepEqual(at0.map((l) => [l.id, l.x, l.y, l.z]), [["n-1:l0", 5, 1.25, 7.5], ["n-1:l1", 4, 0.625, 6.5]]);
+  assert.deepEqual([at0[0].color, at0[0].intensity, at0[0].range], ["#ff2f92", 2, 3]);
+  const at90 = placedLights([{ id: "n-2", kind: k.kind, x: 4, z: 6, rot: 90 }], custom);
+  // rot 90 swaps the 2×1 footprint to 1×2 (centre 4.5, 7); the front (+z) now faces +x
+  assert.ok(Math.abs(at90[0].x - 5.5) < 1e-9 && Math.abs(at90[0].z - 7) < 1e-9, JSON.stringify(at90[0]));
+  assert.deepEqual(placedLights([{ id: "d", kind: "desk", x: 0, z: 0, rot: 0 }], custom), [], "built-ins carry no lights");
+  assert.throws(() => placedLights([{ id: "x", kind: "old", x: 0, z: 0, rot: 0 }], { old: { ...k, kind: "old", lights: undefined } }), /has no lights list/);
+  assert.ok(TIMES_OF_DAY.day.neon > 0 && TIMES_OF_DAY.night.neon > TIMES_OF_DAY.day.neon, "kind lights shine by day too, brighter at night");
+});
+
+test("theme zones: validated, merged as a whole list, kept by brand themes, passed to the look", () => {
+  assert.deepEqual(DEFAULT_THEME.zones, []);
+  const zone = { x: 0, z: 6, w: 6, d: 10, tint: "#6A4CFF", dim: 0.8 };
+  const t = mergeTheme(DEFAULT_THEME, { zones: [zone] });
+  assert.deepEqual(t.zones, [{ ...zone, tint: "#6a4cff" }]);
+  assert.match(describeTheme(t), /dimmed zones 0,6 6×10/);
+  assert.deepEqual(mergeTheme(t, { lighting: "cool" }).zones, t.zones, "other patches keep the zones");
+  assert.deepEqual(mergeTheme(t, { zones: [] }).zones, [], "[] clears them");
+  assert.deepEqual(brandTheme({ primary: "#e94d3d" }, t).zones, t.zones, "a brand palette doesn't move the zones");
+  assert.deepEqual(themeLook(t).zones, t.zones);
+  const bad = (z, re) => assert.throws(() => mergeTheme(DEFAULT_THEME, { zones: [z] }), re);
+  bad({ ...zone, dim: 1 }, /zones\[0\]\.dim must be a number 0\.\.0\.95/);
+  bad({ ...zone, w: 0 }, /zones\[0\]\.w must be an integer/);
+  bad({ ...zone, tint: "violet" }, /zones\[0\]\.tint must be a #rrggbb/);
+  bad({ ...zone, glow: true }, /unknown field "glow"/);
+  assert.throws(() => mergeTheme(DEFAULT_THEME, { zones: Array.from({ length: ZONES_MAX + 1 }, () => zone) }), /≤8/);
+  const { zones: _z, ...old } = DEFAULT_THEME;
+  assert.throws(() => validateTheme(old), /missing "zones"/, "a complete theme must say its zones");
+  assert.deepEqual(mergeTheme(DEFAULT_THEME, old).zones, [], "a stored theme from before zones upgrades to none");
+  assert.equal(ZONES_GL, ZONES_MAX, "the shader holds every zone a theme may have");
+});
+
+test("zone shader: patches three's real lights chunk (room light dimmed, kind lights exempt)", () => {
+  const src = readFileSync(new URL("../public/vendor/three-0.186.1/three.module.js", import.meta.url), "utf8")
+    + readFileSync(new URL("../public/vendor/three-0.186.1/three.core.js", import.meta.url), "utf8");
+  const m = src.match(/var lights_fragment_begin = (".*?");\n/s);
+  assert.ok(m, "three ships lights_fragment_begin");
+  const chunk = JSON.parse(m[1]);
+  const out = zonedLightsChunk(chunk);
+  assert.ok(out.startsWith("vec3 zoneL = zoneLight( vZoneWorld );"));
+  assert.match(out, /directLight\.color \*= mix\( zoneL, vec3\( 1\.0 \), uPointExempt\[ i \] \);/);
+  assert.match(out, /getDirectionalLightInfo\( directionalLight, directLight \);\n\t\tdirectLight\.color \*= zoneL;/);
+  assert.match(out, /vec3 irradiance = zoneL \* getAmbientLightIrradiance/);
+  assert.match(out, /irradiance \+= zoneL \* getHemisphereLightIrradiance/);
+  assert.throws(() => zonedLightsChunk(chunk.replace("getSunLightInfo( sunLight, directLight );", "")), /three\.js changed/);
+  assert.ok(POINT_LIGHTS_GL >= 6 + 1 + 12, "lamps + fill + kind lights fit the exemption flags");
 });
 
 process.on("exit", () => { if (!process.exitCode) console.log(`check-viewer: ${passed} checks passed`); });

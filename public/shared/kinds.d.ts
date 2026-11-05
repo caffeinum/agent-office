@@ -1,7 +1,21 @@
 import type { Activity, CustomKinds, Grid, Item, Layer, Rot, Seat, Station } from "./catalog.js";
 import type { Theme } from "./theme.js";
 
-export type BoxMaterial = "matte" | "glossy" | "glass" | "screen";
+export type BoxMaterial = "matte" | "glossy" | "glass" | "screen" | "flat";
+/** The side a wedge's top slopes down to. */
+export type Slope = "+x" | "-x" | "+z" | "-z";
+
+/** A coloured point light in local units (16 per cell): lights its surroundings, even inside a dimmed zone. */
+export interface Light {
+  x: number;
+  y: number;
+  z: number;
+  color: string;
+  /** 0.1..4, default 1. */
+  intensity: number;
+  /** Reach in cells, 1..8, default 4. */
+  range: number;
+}
 
 /** One voxel box in local model space (16 units per cell); integer units, inside the footprint, y + h ≤ 64. */
 export interface Box {
@@ -13,8 +27,11 @@ export interface Box {
   d: number;
   color: string;
   emissive?: true;
-  /** Omitted = matte. "screen" boxes show the office logo when the kind has screen: true. */
+  /** Omitted = matte. "screen" boxes show the office logo when the kind has screen: true; "flat" is untextured, flat-shaded. */
   material?: Exclude<BoxMaterial, "matte">;
+  /** Makes the box a wedge: its top slopes down towards this side, to `low` units high there (0 = a sharp edge). */
+  slope?: Slope;
+  low?: number;
 }
 
 /** What agents send to office_define_kind. */
@@ -26,6 +43,7 @@ export interface KindDef {
   boxes: Array<Omit<Box, "emissive" | "material"> & { emissive?: boolean; material?: BoxMaterial }>;
   seats?: Array<Partial<Seat> & { x: number; z: number }>;
   stations?: Array<Partial<Station> & { x: number; z: number; activity: Activity }>;
+  lights?: Array<Partial<Light> & { x: number; y: number; z: number; color: string }>;
   textable?: boolean;
   screen?: boolean;
 }
@@ -40,6 +58,7 @@ export interface CustomKind {
   boxes: Box[];
   seats: Seat[];
   stations: Station[];
+  lights: Light[];
   textable: boolean;
   screen: boolean;
   custom: true;
@@ -93,6 +112,10 @@ export const SEATS_MAX: number;
 export const STATIONS_MAX: number;
 export const LABEL_MAX: number;
 export const BOX_MATERIALS: readonly BoxMaterial[];
+export const SLOPES: readonly Slope[];
+export const LIGHTS_MAX: number;
+export const LIGHT_INTENSITY_MAX: number;
+export const LIGHT_RANGE_MAX: number;
 export const ACTIVITIES: readonly Activity[];
 export const ACTIVITY_DURATION: Readonly<Record<Activity, number>>;
 export const DURATION_MIN: number;
@@ -102,6 +125,7 @@ export const CUSTOM_LAYERS: readonly Layer[];
 
 export function validateSeat(s: unknown, w: number, d: number, where?: string): Seat;
 export function validateStation(s: unknown, w: number, d: number, where?: string): Station;
+export function validateLight(l: unknown, w: number, d: number, where?: string): Light;
 export function validateKindDef(def: unknown): CustomKind;
 export function summarizeKind(k: CustomKind | import("./catalog.js").Kind): Record<string, unknown>;
 export function spotsOf(item: Pick<Item, "id" | "kind" | "x" | "z" | "rot">, custom?: CustomKinds): { seats: PlacedSeat[]; stations: PlacedStation[] };

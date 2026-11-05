@@ -280,6 +280,7 @@ A theme is a palette plus materials. You can set it whole or in parts (a partial
 | `lighting` | `warm` \| `neutral` \| `cool` |
 | `nightWindow` | `city` \| `stars` \| `aurora` \| `rain` |
 | `logo`, `logoOnSigns` | asset id or null; whether signs show it too |
+| `zones` | up to 8 dimmed areas `{x, z, w, d, tint, dim}` in grid cells: inside, the sun, sky, lamps and ceiling fill are multiplied by `tint` × (1 − `dim`, 0..0.95); glowing boxes and custom kinds' `lights` stay full strength, so a dark club corner keeps its neon. A patch replaces the whole list; `[]` clears it. |
 
 `office_theme_set {brand: {primary, dark?, accent?}}` derives the whole theme with a pure, deterministic `brandTheme()` (in `public/shared/theme.js`):
 - a near-black brand gets a concrete floor and dark desks, and other brands get wood;
@@ -303,6 +304,8 @@ agent-office theme set '{"floor":{"material":"wood"},"walls":{"accent":{"materia
 The rules:
 - **Space:** each grid cell is 16 units. x runs along the footprint's `w`, z along its `d`, y goes up, and the front faces +z.
 - **Boxes** are integers, must stay inside the footprint, and can be at most 64 units (4 cells) tall. `material` is `matte` (the default), `glossy`, `glass` or `screen`. `emissive: true` makes a box glow at night.
+- **Lowpoly:** material `flat` drops the wood grain and the baked corner shading (one flat colour per face). A box with `slope` (`+x`, `-x`, `+z` or `-z`) is a wedge: its top slopes down towards that side, to `low` units high there (default 0, a sharp edge; `low` < `h`). Wedges never merge with neighbours.
+- **Lights:** `lights: [{x, y, z, color, intensity?, range?}]` (≤4 per kind, local units; intensity 0.1–4, default 1; range 1–8 cells, default 4) are coloured point lights that turn with the item and shine day and night (brighter at night), even inside a dimmed theme zone. A viewer draws the first 12 in the office.
 - **`screen: true`** makes the kind's `screen` boxes show the office logo.
 - **`textable: true`** lets the kind hold text, like a sign.
 - **Seats** are `{x, z, rot, height}`: where a character sits, facing `rot` (0 is +z), at `height` units.

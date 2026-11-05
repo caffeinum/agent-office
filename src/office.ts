@@ -366,7 +366,8 @@ export class Office extends DurableObject<Env> implements ToolHost {
     for (const [k, at] of await ctx.storage.list<number>({ prefix: "mcps:" })) this.mcpSessions.set(k.slice(5), at);
     this.alarmAt = await ctx.storage.getAlarm();
     this.theme = await this.loadTheme();
-    for (const [, k] of await ctx.storage.list<CustomKind>({ prefix: "kind:" })) this.customKinds[k.kind] = k;
+    // kinds stored before lights existed have none
+    for (const [, k] of await ctx.storage.list<CustomKind>({ prefix: "kind:" })) this.customKinds[k.kind] = { ...k, lights: k.lights ?? [] };
     this.designer = (await ctx.storage.get<string>("designer")) ?? null;
     await this.hooks.load();
     await this.events.load();

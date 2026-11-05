@@ -4,7 +4,8 @@ import { z } from "zod";
 import { ACTIVITY_MAX, defangTags, NAME_MAX, SPOOF_CHARS_RE, SPOOF_LINE_RE, TEXT_MAX } from "./shared/catalog";
 import {
   ACCENT_WALL_MATERIALS, ACCENTS_MAX, ACTIVITIES, BOX_MATERIALS, BOXES_MAX, CUSTOM_LAYERS, DURATION_MAX, DURATION_MIN, FLOOR_MATERIALS,
-  FOOTPRINT_MAX, HEIGHT_MAX, KIND_SLUG_RE, LABEL_MAX, LIGHTING, NIGHT_WINDOWS, SEATS_MAX, STATIONS_MAX, UNITS, WALLS,
+  FOOTPRINT_MAX, HEIGHT_MAX, KIND_SLUG_RE, LABEL_MAX, LIGHT_INTENSITY_MAX, LIGHT_RANGE_MAX, LIGHTING, LIGHTS_MAX, NIGHT_WINDOWS, SEATS_MAX, SLOPES,
+  STATIONS_MAX, UNITS, WALLS, ZONE_CELLS_MAX, ZONE_DIM_MAX, ZONES_MAX,
 } from "./shared/design";
 import { ASSET_BASE64_MAX, IMAGE_TYPES } from "./images";
 import { TRIP_SECRET_MAX, TRIP_SECRET_MIN } from "./auth";
@@ -92,6 +93,22 @@ const themePatch = z
     nightWindow: z.enum(NIGHT_WINDOWS as [string, ...string[]]).optional().describe("What the windows show at night"),
     logo: assetId.nullable().optional().describe("Asset id from office_upload, or null for no logo (office_set_logo does the same)"),
     logoOnSigns: z.boolean().optional(),
+    zones: z
+      .array(
+        z
+          .object({
+            x: z.number().int().min(0).max(ZONE_CELLS_MAX - 1),
+            z: z.number().int().min(0).max(ZONE_CELLS_MAX - 1),
+            w: z.number().int().min(1).max(ZONE_CELLS_MAX),
+            d: z.number().int().min(1).max(ZONE_CELLS_MAX),
+            tint: color.describe("Multiplies the room's light inside the zone, e.g. #6a4cff for a violet club"),
+            dim: z.number().min(0).max(ZONE_DIM_MAX).describe("0 = no dimming, 0.8 = a dark corner"),
+          })
+          .strict(),
+      )
+      .max(ZONES_MAX)
+      .optional()
+      .describe("Dimmed areas in grid cells (replaces the whole list; [] removes them): the sun, sky, lamps and ceiling fill are tinted and dimmed there, while glowing boxes and custom kinds' lights stay bright"),
   })
   .strict();
 
@@ -105,10 +122,22 @@ const box = z
     d: z.number().int().min(1).max(FOOTPRINT_MAX * UNITS),
     color,
     emissive: z.boolean().optional().describe("Glows in its own colour (lamps, LEDs, neon)"),
-    material: z.enum(BOX_MATERIALS as [string, ...string[]]).optional().describe("matte (default), glossy, glass (see-through), screen (shows the logo if the kind has screen: true)"),
+    material: z.enum(BOX_MATERIALS as [string, ...string[]]).optional().describe("matte (default, wood grain), glossy, glass (see-through), screen (shows the logo if the kind has screen: true), flat (untextured, flat-shaded: lowpoly)"),
+    slope: z.enum(SLOPES as [string, ...string[]]).optional().describe("Makes the box a wedge whose top slopes down towards this side (car hoods, windscreens, roofs, fronds)"),
+    low: z.number().int().min(0).max(HEIGHT_MAX - 1).optional().describe("Wedge only: height in units at the low side (default 0, a sharp edge); must be < h"),
   })
   .strict();
 const local = (what: string) => z.number().min(-UNITS).max((FOOTPRINT_MAX + 1) * UNITS).describe(`${what} in local units (16 per cell); may be up to one cell outside the footprint`);
+const lightSchema = z
+  .object({
+    x: local("x"),
+    y: z.number().min(0).max(HEIGHT_MAX + UNITS).describe("Height in local units"),
+    z: local("z"),
+    color,
+    intensity: z.number().min(0.1).max(LIGHT_INTENSITY_MAX).optional().describe("Default 1"),
+    range: z.number().min(1).max(LIGHT_RANGE_MAX).optional().describe("Reach in cells (default 4)"),
+  })
+  .strict();
 const seatSchema = z
   .object({ x: local("x"), z: local("z"), rot: rotDeg.optional().describe("Way the sitter faces at item rot 0 (0 = the model's front, +z)"), height: z.number().min(0).max(HEIGHT_MAX).optional().describe("Seat surface height in units (chair ≈ 7)") })
   .strict();
@@ -341,6 +370,7 @@ export const TOOLS = {
       "Define (or redefine) a custom furniture kind as a voxel model, then place it with office_edit {op: \"add\"} like any built-in. Local space: 16 units per grid cell, " +
       "origin at the footprint's min corner, x along w, z along d, y up; the FRONT faces +z. Boxes must stay inside footprint×16 and ≤64 units tall. " +
       "Add seats (where idle agents sit) and stations (where they stand to do an activity, usually just in front: z ≈ d*16 + 8, rot 180). " +
+      "Lowpoly: boxes with `slope` are wedges, material \"flat\" drops the wood grain; `lights` add coloured light around the piece. " +
       "screen: true shows the office logo on boxes with material \"screen\". Redefining updates placed copies live (refused if a new footprint would collide).",
     shape: {
       kind: slug.describe('Slug for this office, e.g. "arcade-cabinet"; can\'t reuse a built-in name'),
@@ -350,6 +380,7 @@ export const TOOLS = {
       boxes: z.array(box).min(1).max(BOXES_MAX),
       seats: z.array(seatSchema).max(SEATS_MAX).optional(),
       stations: z.array(stationSchema).max(STATIONS_MAX).optional(),
+      lights: z.array(lightSchema).max(LIGHTS_MAX).optional().describe("Coloured point lights (neon spill): they light the floor and furniture around them, even inside a dimmed theme zone"),
       textable: z.boolean().optional().describe("Holds text like a sign"),
       screen: z.boolean().optional().describe("Shows the office logo on its screen boxes"),
       agentToken,

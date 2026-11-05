@@ -17,6 +17,18 @@ export interface Theme {
   logo: string | null;
   /** Also print the logo on signs. */
   logoOnSigns: boolean;
+  /** Dimmed areas (cells): the room's light is multiplied by tint × (1 − dim) there; neon and kind lights stay bright. */
+  zones: DimZone[];
+}
+
+export interface DimZone {
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+  tint: string;
+  /** 0..0.95 */
+  dim: number;
 }
 
 export type ThemePatch = {
@@ -28,6 +40,8 @@ export type ThemePatch = {
   nightWindow?: NightWindow;
   logo?: string | null;
   logoOnSigns?: boolean;
+  /** Replaces the whole list; [] removes every zone. */
+  zones?: DimZone[];
 };
 
 export interface Brand {
@@ -43,6 +57,9 @@ export const LIGHTING: readonly Lighting[];
 export const NIGHT_WINDOWS: readonly NightWindow[];
 export const ACCENTS_MAX: number;
 export const ASSET_ID_RE: RegExp;
+export const ZONES_MAX: number;
+export const ZONE_DIM_MAX: number;
+export const ZONE_CELLS_MAX: number;
 export const DEFAULT_THEME: Readonly<Theme>;
 
 export class ThemeError extends Error {}

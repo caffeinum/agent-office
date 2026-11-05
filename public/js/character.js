@@ -69,6 +69,10 @@ function faceBoxes(look) {
 }
 
 const sharedMats = new Map();
+/** Every character material made so far (the scene hooks them into dimmed zones). */
+export function characterMaterials() {
+  return [...sharedMats.values()];
+}
 function voxMat(key, opts) {
   if (!sharedMats.has(key)) sharedMats.set(key, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, ...opts }));
   return sharedMats.get(key);

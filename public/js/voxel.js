@@ -3,6 +3,7 @@
 // another box get darker, which gives the soft contact shading a shader pack would.
 
 import * as THREE from "three";
+import { cornerPoint, quadNormal } from "./shape.js";
 
 // face: normal, then the two in-plane axes (u, v) and which corner coordinates to take
 const FACES = [
@@ -17,7 +18,8 @@ export const FRONT = 4;
 
 /**
  * A box: {at:[cx, y0, cz] (centre x/z, bottom y), size:[w, h, d], color, faces?: number[] (subset of
- * FACES indices), unitUV?: true (UV 0..1 per face, for textured screens)}.
+ * FACES indices), unitUV?: true (UV 0..1 per face, for textured screens), slope?: "+x"|"-x"|"+z"|"-z" and
+ * lowFrac?: 0..1 (a wedge: the top slopes down to lowFrac·h on that side, see shape.js)}.
  */
 export function vbox(cx, y0, cz, w, h, d, color, extra = {}) {
   return { at: [cx, y0, cz], size: [w, h, d], color, ...extra };
@@ -57,16 +59,18 @@ export function buildGeometry(boxes, { ao = true, floorY = 0 } = {}) {
   const c = new THREE.Color();
   let v = 0;
   for (const [bi, b] of boxes.entries()) {
-    const [cx, y0, cz] = b.at, [w, h, d] = b.size;
-    const min = [cx - w / 2, y0, cz - d / 2], size = [w, h, d];
     c.set(b.color);
     const faces = b.faces ?? [0, 1, 2, 3, 4, 5];
     for (const fi of faces) {
       const F = FACES[fi];
-      for (const corner of F.corners) {
-        const p = [min[0] + corner[0] * size[0], min[1] + corner[1] * size[1], min[2] + corner[2] * size[2]];
+      const pts = F.corners.map((corner) => cornerPoint(b, corner));
+      // a wedge tilts its top and trims its sides: one flat normal per face, and the face its low edge squashed is dropped
+      const n = b.slope ? quadNormal(...pts) : F.n;
+      if (b.slope && n[0] === 0 && n[1] === 0 && n[2] === 0) continue;
+      for (const [ci, corner] of F.corners.entries()) {
+        const p = pts[ci];
         pos.push(p[0], p[1], p[2]);
-        nor.push(...F.n);
+        nor.push(...n);
         let k = 1;
         if (ao) {
           if (p[1] <= floorY + 0.015) k *= 0.62;

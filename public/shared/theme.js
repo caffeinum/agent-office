@@ -11,6 +11,10 @@ export const LIGHTING = Object.freeze(["warm", "neutral", "cool"]);
 export const NIGHT_WINDOWS = Object.freeze(["city", "stars", "aurora", "rain"]);
 export const ACCENTS_MAX = 4;
 export const ASSET_ID_RE = /^a[0-9a-f]{23}$/;
+export const ZONES_MAX = 8;
+export const ZONE_DIM_MAX = 0.95;
+/** Zone rectangles are in grid cells; no office grid is larger than this. */
+export const ZONE_CELLS_MAX = 64;
 
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -24,6 +28,7 @@ export const DEFAULT_THEME = deepFreeze({
   nightWindow: "city",
   logo: null,
   logoOnSigns: false,
+  zones: [],
 });
 
 export class ThemeError extends Error {
@@ -59,6 +64,27 @@ function oneOf(v, list, where) {
   return v;
 }
 
+function cellInt(v, min, max, where) {
+  if (!Number.isInteger(v) || v < min || v > max) fail(`${where} must be an integer ${min}..${max}, got ${JSON.stringify(v)}`);
+  return v;
+}
+
+/** One dimmed area {x, z, w, d, tint, dim}: the room's own light (sun, sky, lamps, ceiling fill) is multiplied by
+ *  tint × (1 − dim) inside it; glowing boxes and custom kinds' lights are not. */
+function validateZone(z, where) {
+  if (!isObj(z)) fail(`${where} must be {x, z, w, d, tint, dim}`);
+  onlyKeys(z, ["x", "z", "w", "d", "tint", "dim"], where);
+  if (typeof z.dim !== "number" || !Number.isFinite(z.dim) || z.dim < 0 || z.dim > ZONE_DIM_MAX) fail(`${where}.dim must be a number 0..${ZONE_DIM_MAX}, got ${JSON.stringify(z.dim)}`);
+  return {
+    x: cellInt(z.x, 0, ZONE_CELLS_MAX - 1, `${where}.x`),
+    z: cellInt(z.z, 0, ZONE_CELLS_MAX - 1, `${where}.z`),
+    w: cellInt(z.w, 1, ZONE_CELLS_MAX, `${where}.w`),
+    d: cellInt(z.d, 1, ZONE_CELLS_MAX, `${where}.d`),
+    tint: color(z.tint, `${where}.tint`),
+    dim: z.dim,
+  };
+}
+
 /** Throws ThemeError unless `t` is a complete, valid theme. Returns a normalised copy (lowercase colours). */
 export function validateTheme(t) {
   if (!isObj(t)) fail("theme is not an object");
@@ -83,6 +109,7 @@ export function validateTheme(t) {
   if (!Array.isArray(t.accents) || t.accents.length < 1 || t.accents.length > ACCENTS_MAX) fail(`theme.accents must be 1-${ACCENTS_MAX} colours`);
   if (t.logo !== null && (typeof t.logo !== "string" || !ASSET_ID_RE.test(t.logo))) fail(`theme.logo must be null or an asset id from office_upload, got ${JSON.stringify(t.logo)}`);
   if (typeof t.logoOnSigns !== "boolean") fail("theme.logoOnSigns must be true or false");
+  if (!Array.isArray(t.zones) || t.zones.length > ZONES_MAX) fail(`theme.zones must be an array of ≤${ZONES_MAX} {x, z, w, d, tint, dim}`);
   return {
     floor: { material: oneOf(t.floor.material, FLOOR_MATERIALS, "theme.floor.material"), color: color(t.floor.color, "theme.floor.color") },
     walls: { color: color(t.walls.color, "theme.walls.color"), trim: color(t.walls.trim, "theme.walls.trim"), accent },
@@ -92,6 +119,7 @@ export function validateTheme(t) {
     nightWindow: oneOf(t.nightWindow, NIGHT_WINDOWS, "theme.nightWindow"),
     logo: t.logo,
     logoOnSigns: t.logoOnSigns,
+    zones: t.zones.map((z, i) => validateZone(z, `theme.zones[${i}]`)),
   };
 }
 
@@ -119,7 +147,7 @@ export function mergeTheme(base, partial) {
       next.walls.accent = { material: "brick", wall: "back", ...(b.walls.accent ?? {}), ...accent };
     }
   }
-  for (const key of ["accents", "lighting", "nightWindow", "logo", "logoOnSigns"]) if (partial[key] !== undefined) next[key] = partial[key];
+  for (const key of ["accents", "lighting", "nightWindow", "logo", "logoOnSigns", "zones"]) if (partial[key] !== undefined) next[key] = partial[key];
   return validateTheme(next);
 }
 
@@ -223,6 +251,7 @@ export function brandTheme(brand, base = DEFAULT_THEME) {
     nightWindow: "city",
     logo: b.logo,
     logoOnSigns: b.logoOnSigns,
+    zones: b.zones,
   });
 }
 
@@ -230,5 +259,5 @@ export function brandTheme(brand, base = DEFAULT_THEME) {
 export function describeTheme(t) {
   const v = validateTheme(t);
   const accentWall = v.walls.accent ? `, ${v.walls.accent.material} accent wall ${v.walls.accent.color} (${v.walls.accent.wall})` : "";
-  return `${v.floor.material} floor ${v.floor.color}; walls ${v.walls.color}${accentWall}; desks ${v.desk.wood} rail ${v.desk.rail}; accents ${v.accents.join(" ")}; ${v.lighting} light; ${v.logo ? `logo ${v.logo}` : "no logo"}`;
+  return `${v.floor.material} floor ${v.floor.color}; walls ${v.walls.color}${accentWall}; desks ${v.desk.wood} rail ${v.desk.rail}; accents ${v.accents.join(" ")}; ${v.lighting} light; ${v.logo ? `logo ${v.logo}` : "no logo"}${v.zones.length ? `; dimmed zones ${v.zones.map((z) => `${z.x},${z.z} ${z.w}×${z.d}`).join(", ")}` : ""}`;
 }
