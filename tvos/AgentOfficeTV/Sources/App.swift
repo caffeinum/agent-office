@@ -86,6 +86,8 @@ final class OfficeModel: ObservableObject {
 
     func start(_ link: OfficeLink) {
         Watchdog.start()
+        // a live office is meant to be left on screen, like a fish tank: no screensaver while the app is open
+        UIApplication.shared.isIdleTimerDisabled = true
         showHints(14)
         do {
             bridge = try Bridge()
