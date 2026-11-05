@@ -1129,6 +1129,11 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
   resize();
 
   const proj = new THREE.Vector3();
+  /** Where a floor point sits across the screen, -1 (left edge) … 1 (right edge), for stereo panning. */
+  function panAt(x, z) {
+    proj.set(x, 0.5, z).project(camera);
+    return Math.max(-1, Math.min(1, proj.x));
+  }
   function anchors() {
     const out = [];
     for (const c of S.chars.values()) {
@@ -1193,7 +1198,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
 
   return {
     setInsets(left, right) { S.insets = { left, right }; applyInsets(); },
-    setState, setTheme, resetView, zoom, focusAgent, unfollow, anchors, pickAt, floorAt, setGhost, selectItem, hideItems, thumbnail,
+    setState, setTheme, resetView, zoom, focusAgent, unfollow, anchors, panAt, pickAt, floorAt, setGhost, selectItem, hideItems, thumbnail,
     /** Where everyone is and what they're doing (for ?debug and tests in the browser). */
     debug() {
       return [...S.chars.values()].map((c) => ({ id: c.id, pose: c.pose, spot: c.spotId, walking: c.path.length > 0, x: +c.pos.x.toFixed(2), z: +c.pos.z.toFixed(2) }));

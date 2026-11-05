@@ -142,6 +142,9 @@ a { color: var(--accent); }
 .ctrls .moon { display: none; }
 #app[data-theme="night"] .ctrls .sun { display: none; }
 #app[data-theme="night"] .ctrls .moon { display: inline; }
+.ctrls .snd-on { display: none; }
+.ctrls [data-act="sound"].on .snd-on { display: inline; }
+.ctrls [data-act="sound"].on .snd-off { display: none; }
 
 /* ── edit mode ───────────────────────────────────────────────────────────────────── */
 

@@ -15,7 +15,7 @@ export function imageFrom(dt) {
   return null;
 }
 
-export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom, onEdit, onKick, onDesigner, onImage, onSide }) {
+export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom, onSound, soundOn, onEdit, onKick, onDesigner, onImage, onSide }) {
   root.insertAdjacentHTML("beforeend", `
     <aside class="side glass">
       <header class="side-head">
@@ -52,6 +52,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
     </section>
     <div class="ctrls glass">
       <button data-act="theme" title="day / night"><span class="sun">☀︎</span><span class="moon">☾</span></button>
+      <button data-act="sound" title="sound on / off"><span class="snd-on">🔊</span><span class="snd-off">🔈</span></button>
       <button data-act="reset" title="reset view">⌂</button>
       <button data-act="in" title="zoom in">+</button>
       <button data-act="out" title="zoom out">−</button>
@@ -94,11 +95,13 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
     updateUnread();
   }
 
+  $('[data-act="sound"]').classList.toggle("on", soundOn());
   $(".ctrls").addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b) return;
     const act = b.dataset.act;
     if (act === "theme") onTheme();
+    else if (act === "sound") b.classList.toggle("on", onSound());
     else if (act === "reset") onReset();
     else if (act === "in") onZoom(0.75);
     else if (act === "out") onZoom(1.33);

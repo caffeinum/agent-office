@@ -2,6 +2,8 @@
 // overlay, sidebar and editor together. State only ever changes through applyFrame().
 
 import { applyFrame } from "./model.js";
+import { soundCues } from "./sound-plan.js";
+import { createSound } from "./sound.js";
 import { kindOf } from "../shared/catalog.js";
 import { createScene } from "./scene.js";
 import { createOverlay } from "./overlay.js";
@@ -82,12 +84,22 @@ function boot() {
   let role = null;
   let fitInsets = null;
 
+  const sound = createSound();
+  /** A cue's place across the screen: the agent's character, or the item's floor spot. */
+  const soundPan = (cue) => {
+    if (cue.x !== undefined) return scene.panAt(cue.x, cue.z);
+    const c = scene.debug().find((x) => x.id === cue.agent);
+    return c ? scene.panAt(c.x, c.z) : 0;
+  };
+
   const ui = createUi(root, {
     onSelectAgent: (id) => selectAgent(id),
     onSend: (msg) => { if (!source) throw new Error("not connected"); source.send(msg); },
     onTheme: () => setTheme(scene.theme === "day" ? "night" : "day"),
     onReset: () => scene.resetView(),
     onZoom: (f) => scene.zoom(f),
+    onSound: () => sound.toggle(),
+    soundOn: () => sound.on,
     onEdit: () => { const on = editor.toggle(); ui.setEditing(on); if (on) selectAgent(null); },
     onKick: (id) => { if (!source) throw new Error("not connected"); source.send({ type: "kick", id, as: asName() }); },
     onDesigner: (id) => {
@@ -186,6 +198,7 @@ function boot() {
       connect?.setRole(role);
       if (!write && role === null) console.warn("office: snapshot carries no role; treating this view as read-only");
     }
+    const before = state;
     try {
       state = applyFrame(state, frame);
     } catch (e) {
@@ -193,6 +206,7 @@ function boot() {
       console.error(e, frame);
       return;
     }
+    sound.play(soundCues(before, frame, state), soundPan);
     document.title = `${state.name ?? state.id} · agent office`;
     const unknown = state.items.filter((it) => !kindOf(it.kind, state.customKinds));
     if (unknown.length) console.warn("office: skipping items of unknown kind", unknown.map((it) => `${it.id}:${it.kind}`));
