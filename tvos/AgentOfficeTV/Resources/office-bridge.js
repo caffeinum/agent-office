@@ -210,6 +210,27 @@
     g.computeBoundingBox();
     return g;
   }
+  function buildMeshGeometry(meshes) {
+    const pos = [], nor = [], col = [], uv = [];
+    const c = new Color();
+    for (const m of meshes) {
+      c.set(m.color);
+      pos.push(...m.positions);
+      nor.push(...m.normals);
+      for (let i = 0; i < m.positions.length / 3; i++) {
+        col.push(c.r, c.g, c.b);
+        uv.push(0, 0);
+      }
+    }
+    const g = new BufferGeometry();
+    g.setAttribute("position", new Float32BufferAttribute(pos, 3));
+    g.setAttribute("normal", new Float32BufferAttribute(nor, 3));
+    g.setAttribute("color", new Float32BufferAttribute(col, 3));
+    g.setAttribute("uv", new Float32BufferAttribute(uv, 2));
+    g.computeBoundingSphere();
+    g.computeBoundingBox();
+    return g;
+  }
 
   // public/shared/catalog.js
   var GRID = Object.freeze({ w: 24, d: 16 });
@@ -1215,6 +1236,32 @@
     });
     return plan;
   }
+  function placedLights(items, custom) {
+    const out = [];
+    for (const it of items) {
+      const kind = custom?.[it.kind];
+      if (!kind) continue;
+      if (!Array.isArray(kind.lights)) throw new Error(`custom kind ${it.kind} has no lights list`);
+      if (!kind.lights.length) continue;
+      const f = footprint(it, custom);
+      const cx = f.x + f.w / 2, cz = f.z + f.d / 2;
+      const r = it.rot * Math.PI / 180;
+      kind.lights.forEach((l, i) => {
+        const ox = l.x / UNITS - kind.w / 2, oz = l.z / UNITS - kind.d / 2;
+        out.push({
+          id: `${it.id}:l${i}`,
+          item: it.id,
+          x: cx + ox * Math.cos(r) + oz * Math.sin(r),
+          y: l.y / UNITS,
+          z: cz - ox * Math.sin(r) + oz * Math.cos(r),
+          color: l.color,
+          intensity: l.intensity,
+          range: l.range
+        });
+      });
+    }
+    return out;
+  }
   var OVERLAP_INFLATE = 2e-3;
   function overlapLayers(boxes) {
     const over = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h && a.z < b.z + b.d && b.z < a.z + a.d;
@@ -2116,6 +2163,13 @@
   var cues = [];
   var gate = cueGate();
   var walk = null;
+  var KIND_LIGHTS_MAX = 12;
+  function meshData(g) {
+    const a = g.attributes;
+    const r = (arr) => arr.map((v) => Math.round(v * 1e5) / 1e5);
+    const idx = g.index ?? Array.from({ length: a.position.array.length / 3 }, (_, i) => i);
+    return { pos: r(a.position.array), nor: a.normal.array, col: r(a.color.array), uv: r(a.uv.array), idx };
+  }
   var boxesOf = (list2) => (list2 ?? []).map((b) => ({ at: b.at, size: b.size, color: b.color, faces: b.faces ?? null, unitUV: !!b.unitUV }));
   function kindParts(kind, custom) {
     if (MODELS[kind]) {
@@ -2137,16 +2191,24 @@
     if (!def) throw new Error(`no model for kind "${kind}"`);
     const plan = kindGeometryPlan(def);
     const toBox = (b, unitUV = false) => ({ at: [b.cx, b.y0, b.cz], size: [b.w, b.h, b.d], color: b.color, faces: null, unitUV, ...b.slope ? { slope: b.slope, lowFrac: b.lowFrac } : {} });
+    const meshPart = (bucket, role) => {
+      const meshes = plan.meshes.filter((m) => m.bucket === bucket);
+      return { role, boxes: [], map: null, mesh: meshes.length ? meshData(buildMeshGeometry(meshes)) : null };
+    };
     return {
       defaultColor: null,
       glowColor: null,
       glowLamp: false,
       parts: [
-        { role: "base", boxes: [...plan.matte, ...plan.glossy, ...plan.flat].map((b) => toBox(b)) },
+        { role: "base", boxes: [...plan.matte, ...plan.glossy].map((b) => toBox(b)) },
+        { role: "flat", boxes: plan.flat.map((b) => toBox(b)) },
         { role: "glass", boxes: plan.glass.map((b) => toBox(b)) },
         { role: "glow", boxes: plan.screen.map((b) => toBox(b, true)), map: "screen" },
-        { role: "glow", boxes: plan.emissive.map((b) => toBox(b)), map: null }
-      ].filter((p) => p.boxes.length)
+        { role: "glow", boxes: plan.emissive.map((b) => toBox(b)), map: null },
+        meshPart("flat", "meshFlat"),
+        meshPart("glossy", "meshGlossy"),
+        meshPart("emissive", "meshGlow")
+      ].filter((p) => p.boxes.length || p.mesh)
     };
   }
   function targets(now) {
@@ -2231,10 +2293,7 @@
     },
     /** voxel.js's merged mesh for a box list (JSON) as JSON {pos, nor, col (linear), uv, idx}: baked AO, world UVs. */
     mesh(json, ao, floorY) {
-      const g = buildGeometry(JSON.parse(json).map((b) => ({ ...b, faces: b.faces ?? void 0 })), { ao, floorY });
-      const a = g.attributes;
-      const r = (arr) => arr.map((v) => Math.round(v * 1e5) / 1e5);
-      return JSON.stringify({ pos: r(a.position.array), nor: a.normal.array, col: r(a.color.array), uv: r(a.uv.array), idx: g.index });
+      return JSON.stringify(meshData(buildGeometry(JSON.parse(json).map((b) => ({ ...b, faces: b.faces ?? void 0 })), { ao, floorY })));
     },
     /** One of textures.js's voxel textures as JSON {w, h, rgb: hex string, 6 chars per pixel}. */
     texture(name, arg) {
@@ -2302,6 +2361,7 @@
         time: timeOfDay(time || clockTheme(new Date(now))),
         kinds,
         items,
+        lights: placedLights(state.items, custom).slice(0, KIND_LIGHTS_MAX),
         agents: state.agents.map((a) => ({
           id: a.id,
           name: a.name,

@@ -136,8 +136,10 @@ final class OfficeRenderer: NSObject {
         let furnished = structural || last!.items != s.items || last!.kinds != s.kinds
         if furnished { buildFurniture(s) }
         if furnished || last!.time != s.time { applyTime(s) }
+        let joined = s.agents.contains { agents[$0.id] == nil }
         syncAgents(s)
         syncScreens(s)
+        stampZones(s.look.zones, force: (furnished || joined) && !s.look.zones.isEmpty)
         if follow.map({ id in !s.agents.contains { $0.id == id } }) == true { follow = nil }
         if touring, let id = newsworthy(s) {
             follow = id
@@ -288,7 +290,7 @@ final class OfficeRenderer: NSObject {
                 guard let kind = s.kinds[item.kind] else { preconditionFailure("scene has item \(item.id) of unknown kind \(item.kind)") }
                 if cache[item.kind] == nil {
                     cache[item.kind] = try kind.parts.map { p in
-                        (p.role, p.map, try voxel.geometry(p.boxes, ao: p.role != "glow" && p.role != "glass"))
+                        (p.role, p.map, try p.mesh.map(Voxel.geometry) ?? voxel.geometry(p.boxes, ao: p.role != "glow" && p.role != "glass"))
                     }
                 }
                 let node = try model(cache[item.kind]!, kind: kind, item: item, look: s.look, voxel: voxel)
@@ -313,10 +315,15 @@ final class OfficeRenderer: NSObject {
             case "rail": voxel.material(map: grain, tint: cssColor(look.desk.rail), roughness: 0.6)
             case "glow": voxel.glow(map: try p.map.map { try voxel.texture($0) }, tint: kind.glowColor.map(cssColor) ?? .white)
             case "glass": voxel.material(map: nil, roughness: 0.08)
+            case "flat", "meshFlat": voxel.material(map: nil, roughness: 0.7)
+            case "meshGlossy": voxel.material(map: nil, roughness: 0.28)
+            case "meshGlow": voxel.glow(map: nil, tint: .white)
             default: voxel.material(map: grain)
             }
             if p.role == "glass" { mat.transparency = 0.38; mat.writesToDepthBuffer = false }
-            if p.role == "glow" { glows.append((mat, kind.glowLamp, p.map == "window")) }
+            if p.role == "glow" || p.role == "meshGlow" { glows.append((mat, kind.glowLamp, p.map == "window")) }
+            // triangle meshes are drawn from both sides, like the web's DoubleSide mesh materials
+            if p.role.hasPrefix("mesh") { mat.isDoubleSided = true }
             let g = p.geo.copy() as! SCNGeometry
             g.firstMaterial = mat
             node.addChildNode(SCNNode(geometry: g))
@@ -397,6 +404,12 @@ final class OfficeRenderer: NSObject {
             preconditionFailure("time of day: \(error)")
         }
         lampLights.childNodes.forEach { $0.removeFromParentNode() }
+        // custom kinds' coloured lights: neon spill, day and night. Zones dim every lit pixel here (zoneModifier), so a
+        // light inside one is boosted by the zone's dimming, standing in for the web's zone-exempt kind lights.
+        for l in s.lights {
+            lampLights.addChildNode(omni(color: cssColor(l.color), intensity: l.intensity * t.neon * Self.kindLightScale / Self.zoneDim(s.look.zones, x: l.x, z: l.z),
+                                         reach: l.range, at: SCNVector3(l.x, l.y, l.z)))
+        }
         guard t.point > 0 else { return }
         // lamp and tv light as a glowing pool on the floor: real omni lights cost the TV half its frame rate up close
         for it in s.items.filter({ $0.kind == "lamp" || $0.kind == "tv" }).prefix(Self.poolScale > 0 ? 6 : 0) {
@@ -423,6 +436,54 @@ final class OfficeRenderer: NSObject {
         n.position = p
         return n
     }
+    private static let kindLightScale = Double(ProcessInfo.processInfo.environment["AO_KIND_LIGHT"] ?? "30") ?? 30
+
+    // MARK: theme zones
+
+    /// zone-glsl.js zoneLight()'s scalar strength (1 − dim) of the zones covering a floor point, 1 outside every zone.
+    static func zoneDim(_ zones: [OfficeScene.Zone], x: Double, z: Double) -> Double {
+        zones.filter { x >= $0.x && x <= $0.x + $0.w && z >= $0.z && z <= $0.z + $0.d }.reduce(1) { $0 * (1 - $1.dim) }
+    }
+
+    /// zone-glsl.js zoneLight() as a SceneKit fragment modifier: each zone's rectangle (soft 0.35 edge) scales the lit
+    /// colour by tint × (1 − dim). nil without zones. Zones are baked in as constants; a change rebuilds the modifier.
+    static func zoneModifier(_ zones: [OfficeScene.Zone]) -> String? {
+        guard !zones.isEmpty else { return nil }
+        let f = { (v: Double) in String(format: "%.5f", v) }
+        let terms = zones.map { z -> String in
+            var (r, g, b, a): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+            guard cssColor(z.tint).getRed(&r, green: &g, blue: &b, alpha: &a) else { preconditionFailure("zone tint \(z.tint) is not RGB") }
+            let lin = { (c: CGFloat) in c < 0.04045 ? Double(c) / 12.92 : pow((Double(c) + 0.055) / 1.055, 2.4) }
+            let k = 1 - z.dim
+            return """
+            { float2 o = max(float2(\(f(z.x)), \(f(z.z))) - zw.xz, zw.xz - float2(\(f(z.x + z.w)), \(f(z.z + z.d))));
+              zl *= mix(float3(1.0), float3(\(f(lin(r) * k)), \(f(lin(g) * k)), \(f(lin(b) * k))), 1.0 - smoothstep(-0.35, 0.35, max(o.x, o.y))); }
+            """
+        }
+        return """
+        #pragma body
+        float3 zw = (scn_frame.inverseViewTransform * float4(_surface.position, 1.0)).xyz;
+        float3 zl = float3(1.0);
+        \(terms.joined(separator: "\n"))
+        _output.color.rgb *= zl;
+        """
+    }
+
+    private var zoneShader: String?
+
+    /// Puts the zone modifier on every lit material in the scene (constant ones — glow, screens, light pools — stay bright).
+    private func stampZones(_ zones: [OfficeScene.Zone], force: Bool) {
+        let shader = Self.zoneModifier(zones)
+        guard force || shader != zoneShader else { return }
+        zoneShader = shader
+        let mods: [SCNShaderModifierEntryPoint: String]? = shader.map { [.fragment: $0] }
+        scene.rootNode.enumerateHierarchy { n, _ in
+            for m in n.geometry?.materials ?? [] where m.lightingModel != .constant {
+                if m.shaderModifiers?[.fragment] != shader { m.shaderModifiers = mods }
+            }
+        }
+    }
+
     // three's physical point-light falloff and SceneKit's linear fade differ; this scale matches the web by eye
     private static let poolScale = Double(ProcessInfo.processInfo.environment["AO_POOL"] ?? "1.1") ?? 1.1
     private static let spillScale = 0.7

@@ -2,6 +2,7 @@
 // shared catalog). Plain node, no deps: `node scripts/check-viewer.mjs`.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import vm from "node:vm";
 import { KINDS, KIND_NAMES, GRID, defaultLayout, applyOp, seatOf, footprint } from "../public/shared/catalog.js";
 import { DEFAULT_THEME, ZONES_MAX, brandTheme, describeTheme, mergeTheme, validateTheme } from "../public/shared/theme.js";
 import { ACTIVITIES, LIGHTS_MAX, MESH_VERTICES_MAX, summarizeKind, validateKindDef } from "../public/shared/kinds.js";
@@ -612,6 +613,38 @@ test("meshTriangles: item frame (cells, centred), one unit normal per triangle, 
   const plan = kindGeometryPlan(validateKindDef(meshDef({ meshes: [pyramid(), pyramid({ emissive: true }), pyramid({ material: "glossy" })] })));
   assert.deepEqual(plan.meshes.map((m) => m.bucket), ["flat", "emissive", "glossy"]);
   assert.throws(() => kindGeometryPlan({ ...k, meshes: undefined }), /has no meshes list/);
+});
+
+test("tvOS bridge (office-bridge.js): wedges, triangle meshes, kind lights and zones reach the Swift scene", () => {
+  const ctx = vm.createContext({ console });
+  vm.runInContext(readFileSync(new URL("../tvos/AgentOfficeTV/Resources/office-bridge.js", import.meta.url), "utf8"), ctx);
+  const kind = validateKindDef(meshDef({
+    boxes: [{ x: 0, y: 0, z: 0, w: 16, h: 8, d: 16, color: "#334455", slope: "+x", low: 2 }, { x: 0, y: 8, z: 0, w: 4, h: 4, d: 4, color: "#ffffff", material: "flat" }],
+    meshes: [pyramid(), pyramid({ emissive: true })],
+    lights: [{ x: 8, y: 20, z: 8, color: "#ff00aa", intensity: 2, range: 4 }],
+  }));
+  const zones = [{ x: 0, z: 0, w: 4, d: 4, tint: "#7a5cff", dim: 0.6 }];
+  ctx.AO.frame(JSON.stringify({ type: "snapshot", state: {
+    id: "tv", grid: { w: 8, d: 8 }, items: [{ id: "t1", kind: kind.kind, x: 2, z: 2, rot: 0 }], agents: [], chat: [],
+    theme: { ...DEFAULT_THEME, zones }, customKinds: [kind], assets: {},
+  } }));
+  const scene = JSON.parse(ctx.AO.scene(Date.now(), "night"));
+  const parts = scene.kinds[kind.kind].parts;
+  assert.deepEqual(parts.map((p) => p.role), ["base", "flat", "meshFlat", "meshGlow"]);
+  const wedge = parts[0].boxes[0];
+  assert.equal(wedge.slope, "+x");
+  const mesh = JSON.parse(ctx.AO.mesh(JSON.stringify([wedge]), true, 0));
+  const flat = JSON.parse(ctx.AO.mesh(JSON.stringify([{ ...wedge, slope: undefined }]), true, 0));
+  assert.notDeepEqual(mesh.nor, flat.nor, "Swift's box round-trip keeps the slope");
+  for (const p of parts.filter((p) => p.mesh)) {
+    assert.equal(p.mesh.pos.length, 6 * 9);
+    assert.equal(p.mesh.idx.length, 6 * 3);
+    assert.equal(p.mesh.uv.length, 6 * 6);
+  }
+  assert.equal(scene.lights.length, 1);
+  assert.equal(scene.lights[0].color, "#ff00aa");
+  assert.deepEqual(scene.look.zones, zones);
+  assert.equal(typeof scene.time.neon, "number");
 });
 
 process.on("exit", () => { if (!process.exitCode) console.log(`check-viewer: ${passed} checks passed`); });

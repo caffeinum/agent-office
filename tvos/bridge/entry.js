@@ -4,7 +4,7 @@
 import { MODELS, SEAT_Y, WALL_H } from "../../public/js/furniture.js";
 import {
   applyFrame, assignSpots, deskSeating, entryPoint, hashStr, idleSpots, itemPoint, kindGeometryPlan, layoutBatches, poseFor, seatOf,
-  usableSpots, wanderSalt, limbAngles, route, cullLabels, labelPriority,
+  usableSpots, wanderSalt, limbAngles, route, cullLabels, labelPriority, placedLights,
 } from "../../public/js/model.js";
 import { blockedCells } from "../../public/shared/kinds.js";
 import { kindOf } from "../../public/shared/catalog.js";
@@ -12,7 +12,7 @@ import { characterRig } from "../../public/js/character.js";
 import { GARDEN_BORDER, cornerPosts, gardenBoxes, roomWalls, wallBoxes } from "../../public/js/room.js";
 import { floorTexture, grainTexture, grassTexture, nightWindowTexture, plinthTexture, rackTexture, rugTexture, screenOffTexture, screenTexture, skyTexture, tvTexture, wallTexture, windowTexture } from "../../public/js/textures.js";
 import { TIMES_OF_DAY, clockTheme, hueColors, themeLook } from "../../public/js/model.js";
-import { buildGeometry } from "../../public/js/voxel.js";
+import { buildGeometry, buildMeshGeometry } from "../../public/js/voxel.js";
 import { installDocument } from "./pixel-canvas.js";
 import { screenKey, screenSpec, screenStyle } from "../../public/js/screen.js";
 import { DESK_SCREEN } from "../../public/js/furniture.js";
@@ -33,6 +33,17 @@ let state = null;
 let cues = [];
 const gate = cueGate();
 let walk = null; // {blocked, grid} of the last scene, for route()
+
+/** scene.js KIND_LIGHTS_MAX: custom kinds' coloured point lights the room carries at once. */
+const KIND_LIGHTS_MAX = 12;
+
+/** A BufferGeometry as JSON-ready {pos, nor, col (linear), uv, idx}; unindexed geometry gets 0…n-1. */
+function meshData(g) {
+  const a = g.attributes;
+  const r = (arr) => arr.map((v) => Math.round(v * 1e5) / 1e5);
+  const idx = g.index ?? Array.from({ length: a.position.array.length / 3 }, (_, i) => i);
+  return { pos: r(a.position.array), nor: a.normal.array, col: r(a.color.array), uv: r(a.uv.array), idx };
+}
 
 const boxesOf = (list) => (list ?? []).map((b) => ({ at: b.at, size: b.size, color: b.color, faces: b.faces ?? null, unitUV: !!b.unitUV }));
 
@@ -57,16 +68,24 @@ function kindParts(kind, custom) {
   if (!def) throw new Error(`no model for kind "${kind}"`);
   const plan = kindGeometryPlan(def);
   const toBox = (b, unitUV = false) => ({ at: [b.cx, b.y0, b.cz], size: [b.w, b.h, b.d], color: b.color, faces: null, unitUV, ...(b.slope ? { slope: b.slope, lowFrac: b.lowFrac } : {}) });
+  const meshPart = (bucket, role) => {
+    const meshes = plan.meshes.filter((m) => m.bucket === bucket);
+    return { role, boxes: [], map: null, mesh: meshes.length ? meshData(buildMeshGeometry(meshes)) : null };
+  };
   return {
     defaultColor: null,
     glowColor: null,
     glowLamp: false,
     parts: [
-      { role: "base", boxes: [...plan.matte, ...plan.glossy, ...plan.flat].map((b) => toBox(b)) },
+      { role: "base", boxes: [...plan.matte, ...plan.glossy].map((b) => toBox(b)) },
+      { role: "flat", boxes: plan.flat.map((b) => toBox(b)) },
       { role: "glass", boxes: plan.glass.map((b) => toBox(b)) },
       { role: "glow", boxes: plan.screen.map((b) => toBox(b, true)), map: "screen" },
       { role: "glow", boxes: plan.emissive.map((b) => toBox(b)), map: null },
-    ].filter((p) => p.boxes.length),
+      meshPart("flat", "meshFlat"),
+      meshPart("glossy", "meshGlossy"),
+      meshPart("emissive", "meshGlow"),
+    ].filter((p) => p.boxes.length || p.mesh),
   };
 }
 
@@ -155,10 +174,7 @@ globalThis.AO = {
   },
   /** voxel.js's merged mesh for a box list (JSON) as JSON {pos, nor, col (linear), uv, idx}: baked AO, world UVs. */
   mesh(json, ao, floorY) {
-    const g = buildGeometry(JSON.parse(json).map((b) => ({ ...b, faces: b.faces ?? undefined })), { ao, floorY });
-    const a = g.attributes;
-    const r = (arr) => arr.map((v) => Math.round(v * 1e5) / 1e5);
-    return JSON.stringify({ pos: r(a.position.array), nor: a.normal.array, col: r(a.color.array), uv: r(a.uv.array), idx: g.index });
+    return JSON.stringify(meshData(buildGeometry(JSON.parse(json).map((b) => ({ ...b, faces: b.faces ?? undefined })), { ao, floorY })));
   },
   /** One of textures.js's voxel textures as JSON {w, h, rgb: hex string, 6 chars per pixel}. */
   texture(name, arg) {
@@ -226,6 +242,7 @@ globalThis.AO = {
       time: timeOfDay(time || clockTheme(new Date(now))),
       kinds,
       items,
+      lights: placedLights(state.items, custom).slice(0, KIND_LIGHTS_MAX),
       agents: state.agents.map((a) => ({
         id: a.id, name: a.name, emoji: a.emoji ?? null, status: a.status, activity: a.activity ?? null, hue: a.hue,
         css: hueColors(a.hue ?? 0).css, phase: (hashStr(a.id) % 1000) / 100, says: a.says && now - a.says.ts < 9000 ? a.says.text : null,

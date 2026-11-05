@@ -16,16 +16,23 @@ struct OfficeScene: Decodable, Equatable {
         let mood: Mood
         let screenBg: String
         let nightWindow: String?
+        /// Theme zones: floor rectangles whose room light is scaled by tint × (1 − dim).
+        let zones: [Zone]
     }
+    struct Zone: Decodable, Equatable { let x, z, w, d: Double; let tint: String; let dim: Double }
+    /// model.js placedLights(): a custom kind's coloured point light, placed in the room.
+    struct Light: Decodable, Equatable { let id: String; let x, y, z: Double; let color: String; let intensity, range: Double }
     /// model.js TIMES_OF_DAY for the local clock (or AO_TIME): three.js light levels.
     struct TimeOfDay: Decodable, Equatable {
         let name: String
         let hemiGround: String; let hemi: Double; let sun: Double; let sunColor: String; let fog: String
-        let glow: Double; let lamp: Double; let point: Double
+        let glow: Double; let lamp: Double; let point: Double; let neon: Double
         var night: Bool { name == "night" }
     }
-    struct Box: Codable, Equatable { let at: [Double]; let size: [Double]; let color: String?; let faces: [Int]?; let unitUV: Bool? }
-    struct Part: Decodable, Equatable { let role: String; let boxes: [Box]; let map: String? }
+    /// voxel.js box; `slope`/`lowFrac` make it a wedge (shape.js).
+    struct Box: Codable, Equatable { let at: [Double]; let size: [Double]; let color: String?; let faces: [Int]?; let unitUV: Bool?; let slope: String?; let lowFrac: Double? }
+    /// Boxes for voxel.js to merge, or (mesh roles) a custom kind's triangle meshes already built by voxel.js.
+    struct Part: Decodable, Equatable { let role: String; let boxes: [Box]; let map: String?; let mesh: MeshData? }
     struct Kind: Decodable, Equatable { let defaultColor: String?; let glowColor: String?; let glowLamp: Bool; let parts: [Part] }
     struct Item: Decodable, Equatable { let id: String; let kind: String; let x: Double; let z: Double; let yaw: Double; let color: String? }
     struct Target: Decodable, Equatable { let key: String; let x: Double; let z: Double; let yaw: Double; let pose: String; let seatY: Double }
@@ -46,6 +53,7 @@ struct OfficeScene: Decodable, Equatable {
     let time: TimeOfDay
     let kinds: [String: Kind]
     let items: [Item]
+    let lights: [Light]
     let agents: [Agent]
     /// Each sitter's own monitor over its desk's screen glass; `key` changes when what it shows does.
     struct Screen: Decodable, Equatable {
@@ -95,7 +103,7 @@ struct Backdrop: Decodable {
 }
 
 /// voxel.js buildGeometry output: positions, normals, linear vertex colours, world-scaled UVs, triangle indices.
-struct MeshData: Decodable { let pos, nor, col, uv: [Float]; let idx: [Int32] }
+struct MeshData: Decodable, Equatable { let pos, nor, col, uv: [Float]; let idx: [Int32] }
 
 /// One textures.js texture: w × h pixels, 6 hex chars (rgb) each.
 struct TextureData: Decodable { let w: Int; let h: Int; let rgb: String }
