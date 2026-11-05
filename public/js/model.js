@@ -120,8 +120,17 @@ export function applyFrame(state, frame) {
 
 /* ── poses ──────────────────────────────────────────────────────────────────────────────────── */
 
+/** How long an agent stays sitting at its desk after it was last working or waiting, before it wanders off. */
+export const DESK_LINGER_MS = 10 * 60_000;
+
+/** Idle, but still sitting at its desk because it worked a moment ago. */
+export function lingering(agent, hasDesk, now) {
+  return agent.status === "idle" && hasDesk && agent.workedAt != null && now - agent.workedAt < DESK_LINGER_MS;
+}
+
 /** Where an agent should be and what it does there: {pose, place: "desk" | "lounge"}. */
-export function poseFor(agent, hasDesk) {
+export function poseFor(agent, hasDesk, now = Date.now()) {
+  if (lingering(agent, hasDesk, now)) return { pose: "sit", place: "desk" };
   switch (agent.status) {
     case "working": return hasDesk ? { pose: "type", place: "desk" } : { pose: "stand", place: "lounge" };
     case "waiting": return hasDesk ? { pose: "handup", place: "desk" } : { pose: "wave", place: "lounge" };

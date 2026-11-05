@@ -714,7 +714,12 @@
         return state2;
     }
   }
-  function poseFor(agent, hasDesk) {
+  var DESK_LINGER_MS = 10 * 6e4;
+  function lingering(agent, hasDesk, now) {
+    return agent.status === "idle" && hasDesk && agent.workedAt != null && now - agent.workedAt < DESK_LINGER_MS;
+  }
+  function poseFor(agent, hasDesk, now = Date.now()) {
+    if (lingering(agent, hasDesk, now)) return { pose: "sit", place: "desk" };
     switch (agent.status) {
       case "working":
         return hasDesk ? { pose: "type", place: "desk" } : { pose: "stand", place: "lounge" };
@@ -1801,13 +1806,13 @@
       }
     }
     const free = spots.filter((s) => ![...chosen.values()].includes(s));
-    const wanters = state.agents.filter((a) => !chosen.has(a.id) && poseFor(a, seating.has(a.id)).place === "lounge").map((a) => ({ id: a.id, joinedAt: a.joinedAt, salt: wanderSalt(a.id, now), current: null, restless: false }));
+    const wanters = state.agents.filter((a) => !chosen.has(a.id) && poseFor(a, seating.has(a.id), now).place === "lounge").map((a) => ({ id: a.id, joinedAt: a.joinedAt, salt: wanderSalt(a.id, now), current: null, restless: false }));
     const assign = assignSpots(wanters, free);
     const out = /* @__PURE__ */ new Map();
     for (const a of state.agents) {
       const desk = seating.get(a.id);
       const pick = chosen.get(a.id);
-      const { pose, place } = poseFor(a, !!desk);
+      const { pose, place } = poseFor(a, !!desk, now);
       if (pick === "desk" || place === "desk" && desk && !pick) {
         const s = seatOf(desk);
         out.set(a.id, { key: `desk:${desk.id}`, x: s.x, z: s.z, yaw: s.yaw, pose: pick === "desk" && a.status === "idle" ? "sit" : pose, seatY: SEAT_Y });

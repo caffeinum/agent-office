@@ -6,7 +6,7 @@ import { KINDS, KIND_NAMES, GRID, defaultLayout, applyOp, seatOf, footprint } fr
 import { DEFAULT_THEME, brandTheme, mergeTheme } from "../public/shared/theme.js";
 import { ACTIVITIES, validateKindDef } from "../public/shared/kinds.js";
 import {
-  applyFrame, poseFor, limbAngles, deskSeating, idleSpots, pickSpot, assignSpots, blockedCells, route, entryPoint, layoutBatches,
+  applyFrame, poseFor, lingering, DESK_LINGER_MS, limbAngles, deskSeating, idleSpots, pickSpot, assignSpots, blockedCells, route, entryPoint, layoutBatches,
   wallOf, cullLabels, labelPriority, chatWith, roomChat, lastLineOf, speakerName, activeSay, CHAT_KEEP, SAY_MS, SEATED,
   themeLook, CLASSIC_COLORS, MOODS, mergeBoxes, kindGeometryPlan, usableSpots,
 } from "../public/js/model.js";
@@ -63,6 +63,17 @@ test("poseFor: status → pose and place", () => {
   assert.deepEqual(poseFor(agent("a", { status: "idle" }), true), { pose: "lounge", place: "lounge" });
   assert.equal(poseFor(agent("a", { status: "working" }), false).place, "lounge");
   assert.throws(() => poseFor(agent("a", { status: "dancing" }), true), /unknown status/);
+});
+
+test("poseFor: an agent that just worked stays sitting at its desk for DESK_LINGER_MS, then wanders", () => {
+  const now = 1_000_000_000;
+  const fresh = agent("a", { status: "idle", workedAt: now - 1000 });
+  assert.deepEqual(poseFor(fresh, true, now), { pose: "sit", place: "desk" });
+  assert.equal(lingering(fresh, true, now), true);
+  assert.equal(poseFor(fresh, false, now).place, "lounge");
+  assert.equal(poseFor(agent("a", { status: "idle", workedAt: now - DESK_LINGER_MS }), true, now).place, "lounge");
+  assert.equal(poseFor(agent("a", { status: "idle" }), true, now).place, "lounge");
+  assert.deepEqual(poseFor(agent("a", { status: "working", workedAt: now }), true, now), { pose: "type", place: "desk" });
 });
 
 test("limbAngles: seated poses sit, walking swings, hand up raises the right arm", () => {
