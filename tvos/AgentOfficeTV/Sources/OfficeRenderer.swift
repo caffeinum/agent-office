@@ -1,4 +1,5 @@
 import GameController
+import os
 import SceneKit
 import SpriteKit
 import UIKit
@@ -81,8 +82,9 @@ final class OfficeRenderer: NSObject {
         sun.light?.shadowMode = .forward
         // the web's soft PCF shadows (radius 5, 12 samples on a 2048 map)
         sun.light?.shadowRadius = 6
-        sun.light?.shadowSampleCount = 8
-        sun.light?.shadowMapSize = CGSize(width: 4096, height: 4096)
+        sun.light?.shadowSampleCount = Int(ProcessInfo.processInfo.environment["AO_SHADOW_SAMPLES"] ?? "4") ?? 4
+        let map = Double(ProcessInfo.processInfo.environment["AO_SHADOW_MAP"] ?? "2048") ?? 2048
+        sun.light?.shadowMapSize = CGSize(width: map, height: map)
         sun.light?.shadowBias = 0.05
         sun.light?.shadowColor = UIColor(white: 0, alpha: 1)
         sun.light?.automaticallyAdjustsShadowProjection = false
@@ -107,6 +109,7 @@ final class OfficeRenderer: NSObject {
         v.scene = scene
         v.pointOfView = camera
         v.overlaySKScene = overlay
+        if Self.stats { v.delegate = self }
         link?.invalidate()
         link = CADisplayLink(target: self, selector: #selector(tick))
         link?.add(to: .main, forMode: .common)
@@ -303,16 +306,16 @@ final class OfficeRenderer: NSObject {
         }
         lampLights.childNodes.forEach { $0.removeFromParentNode() }
         guard t.point > 0 else { return }
-        let lit = s.items.filter { $0.kind == "lamp" || $0.kind == "tv" }.prefix(6)
-        for it in lit {
+        // lamp and tv light as a glowing pool on the floor: real omni lights cost the TV half its frame rate up close
+        for it in s.items.filter({ $0.kind == "lamp" || $0.kind == "tv" }).prefix(Self.poolScale > 0 ? 6 : 0) {
             let lamp = it.kind == "lamp"
-            lampLights.addChildNode(omni(color: lamp ? cssColor(mood.lamp) : cssColor("#8fb6ff"), intensity: t.point * (lamp ? 1 : 0.4) * Self.lampScale, reach: 7,
-                                         at: SCNVector3(it.x, lamp ? 1.4 : 1.0, it.z)))
+            lampLights.addChildNode(pool(color: lamp ? cssColor(mood.lamp) : cssColor("#8fb6ff"), strength: (lamp ? 1 : 0.4) * Self.poolScale, radius: lamp ? 3.2 : 2.2,
+                                         at: SCNVector3(it.x, 0.015, it.z)))
         }
         let objects = s.items.filter { !["rug", "window", "poster", "whiteboard", "sign"].contains($0.kind) }.count
         let density = min(1, Double(objects) / (Double(s.grid.w * s.grid.d) * 0.12))
-        lampLights.addChildNode(omni(color: cssColor(mood.fill), intensity: t.point * (2.2 + 1.6 * density) * 1.2 * Self.fillScale, reach: hypot(Double(s.grid.w), Double(s.grid.d)) + 9,
-                                     at: SCNVector3(Double(s.grid.w) / 2, 9, Double(s.grid.d) / 2)))
+        if Self.fillScale > 0 { lampLights.addChildNode(omni(color: cssColor(mood.fill), intensity: t.point * (2.2 + 1.6 * density) * 1.2 * Self.fillScale, reach: hypot(Double(s.grid.w), Double(s.grid.d)) + 9,
+                                     at: SCNVector3(Double(s.grid.w) / 2, 9, Double(s.grid.d) / 2))) }
     }
 
     /// A three.js PointLight(color, intensity, distance) as a SceneKit omni light fading out at `reach`.
@@ -328,8 +331,37 @@ final class OfficeRenderer: NSObject {
         n.position = p
         return n
     }
-    // three's physical point-light falloff and SceneKit's linear fade differ; these scales match the web by eye
-    private static let lampScale = Double(ProcessInfo.processInfo.environment["AO_LAMP"] ?? "120") ?? 120
+    // three's physical point-light falloff and SceneKit's linear fade differ; this scale matches the web by eye
+    private static let poolScale = Double(ProcessInfo.processInfo.environment["AO_POOL"] ?? "0.8") ?? 0.8
+
+    /// A soft additive disc of light on the floor.
+    private func pool(color: UIColor, strength: Double, radius: Double, at p: SCNVector3) -> SCNNode {
+        let plane = SCNPlane(width: radius * 2, height: radius * 2)
+        let m = SCNMaterial()
+        m.lightingModel = .constant
+        m.diffuse.contents = Self.poolImage
+        m.diffuse.intensity = strength
+        m.multiply.contents = color
+        m.blendMode = .add
+        m.writesToDepthBuffer = false
+        plane.firstMaterial = m
+        let n = SCNNode(geometry: plane)
+        n.eulerAngles.x = -.pi / 2
+        n.position = p
+        n.castsShadow = false
+        return n
+    }
+
+    private static let poolImage: UIImage = {
+        let size = CGSize(width: 128, height: 128)
+        return UIGraphicsImageRenderer(size: size).image { ctx in
+            UIColor.black.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [UIColor.white.cgColor, UIColor(white: 0.35, alpha: 1).cgColor, UIColor.black.cgColor] as CFArray,
+                               locations: [0, 0.35, 1])!
+            ctx.cgContext.drawRadialGradient(g, startCenter: CGPoint(x: 64, y: 64), startRadius: 0, endCenter: CGPoint(x: 64, y: 64), endRadius: 64, options: [])
+        }
+    }()
     private static let fillScale = Double(ProcessInfo.processInfo.environment["AO_FILL"] ?? "30") ?? 30
 
     private func mix(_ a: UIColor, _ b: UIColor) -> UIColor {
@@ -399,13 +431,16 @@ final class OfficeRenderer: NSObject {
             perf.n += 1; perf.step += t1 - t0; perf.limbs += t2 - t1; perf.cam += t3 - t2; perf.pills += t4 - t3
             if now - perf.since > 2 {
                 let ms = { (v: Double) in String(format: "%.1f", v / Double(self.perf.n) * 1000) }
-                print("AO_STATS ticks/s \(Int(Double(perf.n) / (now - perf.since))) step \(ms(perf.step))ms limbs \(ms(perf.limbs))ms cam \(ms(perf.cam))ms pills \(ms(perf.pills))ms")
+                let frames = framesDrawn.withLock { n in defer { n = 0 }; return n }
+                print("AO_STATS frames/s \(Int(Double(frames) / (now - perf.since))) ticks/s \(Int(Double(perf.n) / (now - perf.since))) step \(ms(perf.step))ms limbs \(ms(perf.limbs))ms cam \(ms(perf.cam))ms pills \(ms(perf.pills))ms")
                 perf = (now, 0, 0, 0, 0, 0)
             }
         }
     }
 
     private static let stats = ProcessInfo.processInfo.environment["AO_STATS"] != nil
+    /// Frames SceneKit drew (render thread), for AO_STATS.
+    private let framesDrawn = OSAllocatedUnfairLock(initialState: 0)
     private var perf: (since: Double, n: Int, step: Double, limbs: Double, cam: Double, pills: Double) = (0, 0, 0, 0, 0, 0)
 
     // MARK: camera
@@ -657,3 +692,8 @@ func boxNode(at: [Double], size: [Double], color: UIColor) -> SCNNode {
     return n
 }
 
+extension OfficeRenderer: SCNSceneRendererDelegate {
+    func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
+        framesDrawn.withLock { $0 += 1 }
+    }
+}
