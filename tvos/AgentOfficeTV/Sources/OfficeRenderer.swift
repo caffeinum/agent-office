@@ -25,14 +25,26 @@ final class OfficeRenderer: NSObject {
     private var clock: Double = 0
 
     // camera: the web's homeView() angles (azimuth π/4.6, polar 0.93 rad, 30° vertical fov), orbited by the remote's wheel
-    private var azimuth: Float = .pi / 4.6
-    private var polar: Float = 0.93
+    // The horizon never tilts: the polar angle stays at the web's home view; only spin, zoom and pan move the camera.
+    private static let homeAzimuth: Float = .pi / 4.6
+    private let polar: Float = 0.93
+    private var azimuth: Float = OfficeRenderer.homeAzimuth
     private var zoom: Float = 1
+    private var pan = SIMD2<Float>(0, 0)
     private var camTarget = SCNVector3Zero
     private var camDist: Float = 30
-    private(set) var follow: String?
+    private(set) var follow: String? { didSet { if follow != oldValue { onFollow?(follow); refreshPills() } } }
+    var onFollow: ((String?) -> Void)?
     private var touch: (mode: TouchMode, x: Float, y: Float, angle: Float)?
-    private enum TouchMode { case drag, wheel }
+    private enum TouchMode { case undecided, wheel, zoom, pan }
+
+    // Auto-tour: after `tourAfter` seconds without input the camera spins slowly and visits whoever just spoke or
+    // started working, for `tourVisit` seconds each.
+    private static let tourAfter = Double(ProcessInfo.processInfo.environment["AO_TOUR_AFTER"] ?? "120") ?? 120, tourVisit: Double = 20
+    private var lastInput = CACurrentMediaTime()
+    private var touring = false
+    private var tourUntil: Double = 0
+    private var lastSaid: [String: String] = [:], lastStatus: [String: String] = [:]
 
     override init() {
         super.init()
@@ -75,7 +87,6 @@ final class OfficeRenderer: NSObject {
         v.scene = scene
         v.pointOfView = camera
         v.overlaySKScene = overlay
-        v.input = self
         link?.invalidate()
         link = CADisplayLink(target: self, selector: #selector(tick))
         link?.add(to: .main, forMode: .common)
@@ -93,6 +104,10 @@ final class OfficeRenderer: NSObject {
         if structural || last!.items != s.items || last!.kinds != s.kinds { buildFurniture(s) }
         syncAgents(s)
         if follow.map({ id in !s.agents.contains { $0.id == id } }) == true { follow = nil }
+        if touring, let id = newsworthy(s) {
+            follow = id
+            tourUntil = CACurrentMediaTime() + Self.tourVisit
+        }
         last = s
     }
 
@@ -175,6 +190,18 @@ final class OfficeRenderer: NSObject {
         }
     }
 
+    /// The agent that just said something or just started working (for the tour), recording what each one is doing now.
+    private func newsworthy(_ s: OfficeScene) -> String? {
+        var pick: String?
+        for a in s.agents {
+            if let say = a.says, lastSaid[a.id] != say { pick = a.id }
+            else if a.status == "working", let was = lastStatus[a.id], was != "working", pick == nil { pick = a.id }
+            lastSaid[a.id] = a.says
+            lastStatus[a.id] = a.status
+        }
+        return pick
+    }
+
     // MARK: furniture
 
     private func buildFurniture(_ s: OfficeScene) {
@@ -252,6 +279,7 @@ final class OfficeRenderer: NSObject {
         let dt = lastTick == 0 ? 0 : min(0.05, now - lastTick)
         lastTick = now
         clock += dt
+        stepTour(now: now, dt: Float(dt))
         let list = Array(agents.values)
         for n in list { n.step(dt: Float(dt)) }
         if let angles = try? bridge?.limbs(list.map { ($0.pose, $0.agent.phase) }, t: clock), angles.count == list.count {
@@ -274,7 +302,9 @@ final class OfficeRenderer: NSObject {
             wantTarget = SCNVector3(n.node.position.x, 0.8, n.node.position.z)
             wantDist = 9 * zoom
         } else {
-            wantTarget = SCNVector3(Float(s.grid.w) / 2, 0, Float(s.grid.d) / 2)
+            pan.x = min(Float(s.grid.w) / 2, max(-Float(s.grid.w) / 2, pan.x))
+            pan.y = min(Float(s.grid.d) / 2, max(-Float(s.grid.d) / 2, pan.y))
+            wantTarget = SCNVector3(Float(s.grid.w) / 2 + pan.x, 0, Float(s.grid.d) / 2 + pan.y)
             wantDist = homeDistance(s.grid, aspect: aspect) * zoom
         }
         let k = min(1, dt * 4)
@@ -331,27 +361,45 @@ final class OfficeRenderer: NSObject {
 
     // MARK: remote
 
-    /// Arrows pick the agent to follow (up goes home); the clickpad's outer ring turns the camera like an iPod wheel.
-    func press(_ type: UIPress.PressType) -> Bool {
+    /// Any remote input: stops a tour (dropping the agent it was visiting) and restarts the idle clock.
+    func noteInput() {
+        lastInput = CACurrentMediaTime()
+        if touring { touring = false; follow = nil }
+    }
+
+    /// Follow the next (+1) or previous (-1) agent in roster order.
+    func step(_ by: Int) {
         let order = (last?.agents ?? []).map(\.id)
-        switch type {
-        case .rightArrow, .leftArrow:
-            guard !order.isEmpty else { return true }
-            let i = follow.flatMap { order.firstIndex(of: $0) }
-            let step = type == .rightArrow ? 1 : -1
-            follow = order[((i ?? (step > 0 ? -1 : 0)) + step + order.count) % order.count]
-        case .upArrow:
-            follow = nil
-            zoom = 1
-            polar = 0.93
-            azimuth = .pi / 4.6
-        case .select:
-            follow = follow == nil ? order.first : nil
-        default:
-            return false
-        }
+        guard !order.isEmpty else { return }
+        let i = follow.flatMap { order.firstIndex(of: $0) }
+        follow = order[((i ?? (by > 0 ? -1 : 0)) + by + order.count) % order.count]
+    }
+
+    func toggleFollow() { follow = follow == nil ? last?.agents.first?.id : nil }
+    func unfollow() { follow = nil }
+
+    /// Back to the web's home view of the whole room.
+    func home() {
+        follow = nil
+        zoom = 1
+        pan = .zero
+        azimuth = Self.homeAzimuth
+    }
+
+    private func refreshPills() {
         if let s = last { for a in s.agents { pills[a.id]?.update(a, selected: follow == a.id) } }
-        return true
+    }
+
+    private func stepTour(now: Double, dt: Float) {
+        if !touring, now - lastInput > Self.tourAfter, touch == nil {
+            touring = true
+            zoom = 1
+            pan = .zero
+            _ = last.map(newsworthy)
+        }
+        guard touring else { return }
+        azimuth += dt * 0.06
+        if follow != nil, now > tourUntil { follow = nil }
     }
 
     private func watchControllers() {
@@ -364,56 +412,81 @@ final class OfficeRenderer: NSObject {
     private func listen(_ c: GCController) {
         guard let pad = c.microGamepad else { return }
         pad.reportsAbsoluteDpadValues = true
-        // A touch that starts on the outer ring is a wheel (circle clockwise to zoom in); anywhere else it drags the
-        // camera: left/right orbits, up/down tilts. Lifting the finger reports (0, 0).
+        // Three gestures on one clickpad: circling on the outer ring spins the camera around the room (or the followed
+        // agent); a vertical swipe zooms; a horizontal swipe pans across the room (spins while following). A swipe's
+        // axis is decided by its first clear movement. Lifting the finger reports (0, 0).
         pad.dpad.valueChangedHandler = { [weak self] _, x, y in
             guard let self else { return }
             if x == 0 && y == 0 { self.touch = nil; return }
+            self.noteInput()
             let r = (x * x + y * y).squareRoot(), a = atan2(y, x)
-            guard let t = self.touch else {
-                self.touch = (r > 0.75 ? .wheel : .drag, x, y, a)
+            guard var t = self.touch else {
+                self.touch = (r > 0.75 ? .wheel : .undecided, x, y, a)
                 return
             }
+            let dx = x - t.x, dy = y - t.y
+            if t.mode == .undecided {
+                guard max(abs(dx), abs(dy)) > 0.08 else { return }
+                t.mode = abs(dy) > abs(dx) ? .zoom : .pan
+            }
             switch t.mode {
-            case .drag:
-                self.azimuth -= (x - t.x) * 1.6
-                self.polar = min(1.35, max(0.3, self.polar + (y - t.y) * 0.9))
             case .wheel:
                 var d = a - t.angle
                 while d > .pi { d -= 2 * .pi }
                 while d < -.pi { d += 2 * .pi }
-                self.zoom = min(2.2, max(0.25, self.zoom * exp(d * 0.35)))
+                self.azimuth += d
+            case .zoom:
+                self.zoom = min(2.2, max(0.25, self.zoom * exp(-dy * 0.9)))
+            case .pan:
+                if self.follow != nil {
+                    self.azimuth -= dx * 1.6
+                } else {
+                    // screen-right on the floor, from the camera's spin
+                    let right = SIMD2<Float>(cos(self.azimuth), -sin(self.azimuth))
+                    self.pan -= right * dx * 0.6 * self.camDist * 0.25
+                }
+            case .undecided:
+                return
             }
             self.touch = (t.mode, x, y, a)
         }
     }
 }
 
-/// The SceneKit view: focusable so it receives the Siri Remote's presses.
+/// The SceneKit view: focusable so it receives the Siri Remote's presses, which it hands to `onPress`. Back (menu) is
+/// only swallowed while `consumesMenu` says so; otherwise it reaches the system, which leaves the app.
 final class OfficeSCNView: SCNView {
-    weak var input: OfficeRenderer?
-    var onPlayPause: (() -> Void)?
+    var onPress: ((UIPress.PressType) -> Void)?
+    var consumesMenu: (() -> Bool)?
     var onHoldSelect: (() -> Void)?
+    var onHoldPlayPause: (() -> Void)?
     override var canBecomeFocused: Bool { true }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
         guard gestureRecognizers?.isEmpty ?? true else { return }
-        let hold = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
-        hold.allowedPressTypes = [NSNumber(value: UIPress.PressType.select.rawValue)]
-        hold.minimumPressDuration = 1.2
-        addGestureRecognizer(hold)
+        for (type, action) in [(UIPress.PressType.select, #selector(heldSelect(_:))), (.playPause, #selector(heldPlayPause(_:)))] {
+            let hold = UILongPressGestureRecognizer(target: self, action: action)
+            hold.allowedPressTypes = [NSNumber(value: type.rawValue)]
+            hold.minimumPressDuration = type == .select ? 1.2 : 0.7
+            addGestureRecognizer(hold)
+        }
     }
 
-    @objc private func held(_ g: UILongPressGestureRecognizer) {
-        if g.state == .began { onHoldSelect?() }
+    @objc private func heldSelect(_ g: UILongPressGestureRecognizer) { if g.state == .began { onHoldSelect?() } }
+    @objc private func heldPlayPause(_ g: UILongPressGestureRecognizer) { if g.state == .began { onHoldPlayPause?() } }
+
+    private func ours(_ p: UIPress) -> Bool { p.type != .menu || consumesMenu?() == true }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let rest = presses.filter { !ours($0) }
+        if !rest.isEmpty { super.pressesBegan(rest, with: event) }
     }
 
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var rest = Set<UIPress>()
         for p in presses {
-            if p.type == .playPause { onPlayPause?(); continue }
-            if input?.press(p.type) != true { rest.insert(p) }
+            if ours(p) { onPress?(p.type) } else { rest.insert(p) }
         }
         if !rest.isEmpty { super.pressesEnded(rest, with: event) }
     }

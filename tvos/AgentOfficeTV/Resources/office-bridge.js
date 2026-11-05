@@ -1811,7 +1811,7 @@
           rig: characterRig(a),
           target: t.get(a.id)
         })),
-        chat: state.chat.slice(-6).map((m) => ({ from: nameOf(m.from), to: m.to ? nameOf(m.to) : null, text: m.text, ts: m.ts }))
+        chat: state.chat.slice(-40).map((m) => ({ from: nameOf(m.from), to: m.to ? nameOf(m.to) : null, text: m.text, ts: m.ts }))
       });
     }
   };

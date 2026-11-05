@@ -19,5 +19,29 @@ xcrun devicectl device process launch --device <udid> --environment-variables '{
 ```
 
 Pair the Apple TV first (TV: Settings → Remotes and Devices → Remote App and Devices; Xcode → Devices and Simulators),
-from a Mac on the same network. `AO_LINK` is saved on the TV; without it the app asks for a link. Remote: left/right
-turns the camera, play/pause forgets the link. A free (personal) team's install expires after 7 days.
+from a Mac on the same network. `AO_LINK` is saved on the TV; without it the app asks for a link. A free (personal) team's install
+expires after 7 days.
+
+Remote (Siri Remote clickpad):
+
+| input | overview | following an agent |
+| --- | --- | --- |
+| circle the outer ring | spin 360° around the room | spin around the agent |
+| swipe up / down | zoom | zoom |
+| swipe left / right | pan across the room | spin around the agent |
+| click ◀ ▶ | follow previous / next agent | previous / next agent |
+| click select | follow the first agent | stop following |
+| click ▲ | home view | home view |
+| click ▼ | room chat on / off | room chat on / off |
+| play/pause | agent list on / off | this agent's chat on / off |
+| hold play/pause | hide all UI | hide all UI |
+| back | close panel, then "press back again to exit" | close panel, then stop following |
+| hold select | forget the office link | forget the office link |
+
+The horizon never tilts. After 2 minutes without input the camera tours: it spins slowly and visits whoever just
+spoke or started working, 20 s each; any input ends the tour.
+
+Testing headless in the simulator: `AO_PRESSES="playPause+right+down+menu"` replays presses (one per `AO_PRESS_GAP`
+seconds, from 8 s after launch) and `AO_TOUR_AFTER=6` starts the tour sooner, both via `SIMCTL_CHILD_…`. Separate presses
+with `+`: a comma in the value breaks `simctl launch`. With `--terminate-running-process` every other launch can land
+on the home screen; launch again.
