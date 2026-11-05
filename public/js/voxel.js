@@ -28,8 +28,31 @@ function inside(p, b, eps) {
   return p[0] >= cx - w / 2 - eps && p[0] <= cx + w / 2 + eps && p[1] >= y0 - eps && p[1] <= y0 + h + eps && p[2] >= cz - d / 2 - eps && p[2] <= cz + d / 2 + eps;
 }
 
+/** How much a box grows (each side) per earlier box it overlaps: enough to win the depth test, too little to see. */
+const NEST_GROW = 0.002;
+
+/**
+ * Overlapping boxes often share a face plane (a hair band flush with the head's sides, records flush with a cabinet
+ * front); those faces z-fight and flicker, worst on a far-off camera or a weaker depth buffer. Each box grows a hair
+ * per box it sits on top of, so the later one always shows, as whoever stacked them meant.
+ */
+export function unfight(boxes) {
+  const lo = (b, i) => (i === 1 ? b.at[1] : b.at[i] - b.size[i] / 2), hi = (b, i) => lo(b, i) + b.size[i];
+  const over = (a, b) => [0, 1, 2].every((i) => lo(a, i) < hi(b, i) && lo(b, i) < hi(a, i));
+  const layer = [];
+  return boxes.map((b, i) => {
+    let l = 0;
+    for (let j = 0; j < i; j++) if (over(b, boxes[j])) l = Math.max(l, layer[j] + 1);
+    layer.push(l);
+    if (!l) return b;
+    const e = l * NEST_GROW, sink = b.at[1] > 0 ? e : 0;
+    return { ...b, at: [b.at[0], b.at[1] - sink, b.at[2]], size: [b.size[0] + 2 * e, b.size[1] + sink + e, b.size[2] + 2 * e] };
+  });
+}
+
 /** Merge boxes into one geometry. `ao` false skips occlusion (e.g. glowing screens). */
 export function buildGeometry(boxes, { ao = true, floorY = 0 } = {}) {
+  boxes = unfight(boxes);
   const pos = [], nor = [], col = [], uv = [], idx = [];
   const c = new THREE.Color();
   let v = 0;

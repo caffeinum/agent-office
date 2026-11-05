@@ -60,7 +60,7 @@ final class OfficeRenderer: NSObject {
         camera.camera = SCNCamera()
         camera.camera?.fieldOfView = 30
         camera.camera?.projectionDirection = .vertical
-        camera.camera?.zNear = 0.5
+        camera.camera?.zNear = 1  // the closest follow view is 2.25 away; a farther near plane keeps depth precise
         camera.camera?.zFar = 400
         // the web renders through ACES tone mapping, which lifts and softens colours; approximate it on the camera
         camera.camera?.wantsHDR = ProcessInfo.processInfo.environment["AO_HDR"] != "0"

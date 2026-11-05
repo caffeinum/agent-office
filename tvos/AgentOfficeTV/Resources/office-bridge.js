@@ -97,7 +97,22 @@
     const [cx, y0, cz] = b.at, [w, h, d] = b.size;
     return p[0] >= cx - w / 2 - eps && p[0] <= cx + w / 2 + eps && p[1] >= y0 - eps && p[1] <= y0 + h + eps && p[2] >= cz - d / 2 - eps && p[2] <= cz + d / 2 + eps;
   }
+  var NEST_GROW = 2e-3;
+  function unfight(boxes) {
+    const lo = (b, i) => i === 1 ? b.at[1] : b.at[i] - b.size[i] / 2, hi = (b, i) => lo(b, i) + b.size[i];
+    const over = (a, b) => [0, 1, 2].every((i) => lo(a, i) < hi(b, i) && lo(b, i) < hi(a, i));
+    const layer = [];
+    return boxes.map((b, i) => {
+      let l = 0;
+      for (let j = 0; j < i; j++) if (over(b, boxes[j])) l = Math.max(l, layer[j] + 1);
+      layer.push(l);
+      if (!l) return b;
+      const e = l * NEST_GROW, sink = b.at[1] > 0 ? e : 0;
+      return { ...b, at: [b.at[0], b.at[1] - sink, b.at[2]], size: [b.size[0] + 2 * e, b.size[1] + sink + e, b.size[2] + 2 * e] };
+    });
+  }
   function buildGeometry(boxes, { ao = true, floorY = 0 } = {}) {
+    boxes = unfight(boxes);
     const pos = [], nor = [], col = [], uv = [], idx = [];
     const c = new Color();
     let v = 0;
