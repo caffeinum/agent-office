@@ -511,8 +511,8 @@ final class OfficeRenderer: NSObject {
             defer { self.touch = now }
             guard let t = self.touch, simd_length(now - t) < 0.3 else { return }
             let d = now - t
-            self.azimuthGoal -= d.x * 2.2
-            self.zoomGoal = min(2.2, max(0.25, self.zoomGoal * exp(-d.y * 1.1)))
+            self.azimuthGoal -= d.x * 1.1
+            self.zoomGoal = min(2.2, max(0.25, self.zoomGoal * exp(-d.y * 0.55)))
         }
     }
 }
