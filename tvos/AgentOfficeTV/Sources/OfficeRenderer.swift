@@ -58,7 +58,7 @@ final class OfficeRenderer: NSObject {
         camera.camera?.zNear = 0.5
         camera.camera?.zFar = 400
         // the web renders through ACES tone mapping, which lifts and softens colours; approximate it on the camera
-        camera.camera?.wantsHDR = true
+        camera.camera?.wantsHDR = ProcessInfo.processInfo.environment["AO_HDR"] != "0"
         camera.camera?.wantsExposureAdaptation = false
         camera.camera?.exposureOffset = CGFloat(Double(ProcessInfo.processInfo.environment["AO_EXPOSURE"] ?? "0.35") ?? 0.35)
         camera.camera?.saturation = CGFloat(Double(ProcessInfo.processInfo.environment["AO_SATURATION"] ?? "0.8") ?? 0.8)
@@ -201,12 +201,12 @@ final class OfficeRenderer: NSObject {
     /// room.js cutaway(): walls the camera stands behind drop to their stubs.
     private func updateCutaway() {
         guard let g = last?.grid else { return }
-        let p = camera.presentation.position
+        // the model position we set (reading .presentation would wait on the render thread)
+        let p = camera.simdPosition
         let hide = ["back": p.z < 0.5, "front": p.z > Float(g.d) - 0.5, "left": p.x < 0.5, "right": p.x > Float(g.w) - 0.5]
         for w in walls {
             let h = hide[w.name] ?? false
-            w.full.isHidden = h
-            w.stub.isHidden = !h
+            if w.full.isHidden != h { w.full.isHidden = h; w.stub.isHidden = !h }
         }
     }
 
@@ -312,8 +312,13 @@ final class OfficeRenderer: NSObject {
         }
         let t2 = CACurrentMediaTime()
         Watchdog.at("tick.camera")
+        let c0 = CACurrentMediaTime()
         placeCamera(dt: Float(dt))
+        let c1 = CACurrentMediaTime()
+        Watchdog.at("tick.cutaway")
         updateCutaway()
+        let c2 = CACurrentMediaTime()
+        if c2 - c0 > 0.05 { Watchdog.slow(String(format: "camera %.0fms cutaway %.0fms", (c1 - c0) * 1000, (c2 - c1) * 1000)) }
         let t3 = CACurrentMediaTime()
         Watchdog.at("tick.pills")
         placePills()
@@ -385,15 +390,18 @@ final class OfficeRenderer: NSObject {
     // MARK: pills
 
     private func placePills() {
-        guard let v = view else { return }
-        overlay.size = v.bounds.size
+        guard let v = view, v.bounds.height > 0 else { return }
+        let size = v.bounds.size
+        if overlay.size != size { overlay.size = size }
+        let toScreen = projection(size)
         var rects: [Bridge.LabelRect] = []
         for (id, pill) in pills {
             guard let n = agents[id] else { continue }
-            let world = n.node.convertPosition(SCNVector3(0, n.crownY + 0.12, 0), to: nil)
-            let p = v.projectPoint(world)
-            pill.node.isHidden = p.z < 0 || p.z > 1
-            pill.node.position = CGPoint(x: CGFloat(p.x), y: v.bounds.height - CGFloat(p.y) + pill.node.size.height / 2)
+            let head = n.node.simdWorldPosition + SIMD3<Float>(0, n.crownY + 0.12, 0)
+            guard let p = toScreen(head) else { pill.node.isHidden = true; continue }
+            pill.node.isHidden = false
+            // SpriteKit's origin is bottom-left; p is top-left like UIKit
+            pill.node.position = CGPoint(x: CGFloat(p.x), y: size.height - CGFloat(p.y) + pill.node.size.height / 2)
             pill.node.zPosition = CGFloat(1 - p.z) * 1000
             let sz = pill.labelSize
             rects.append(.init(id: id, x: Double(p.x) - sz.width / 2, y: Double(p.y) - sz.height, w: sz.width, h: sz.height, depth: Double(p.z),
@@ -402,6 +410,25 @@ final class OfficeRenderer: NSObject {
         guard let keep = try? bridge?.cull(rects) else { return }
         for (id, pill) in pills { pill.setKept(keep.contains(id)) }
     }
+
+    /// World → screen points (top-left origin, z = depth 0…1) from the camera we place ourselves. SCNView.projectPoint
+    /// would do the same but waits on SceneKit's render lock, which stalled the main thread for seconds on the TV.
+    private func projection(_ size: CGSize) -> (SIMD3<Float>) -> SIMD3<Float>? {
+        let view = camera.simdWorldTransform.inverse
+        let cam = camera.camera!
+        let near = Float(cam.zNear), far = Float(cam.zFar)
+        let f = 1 / tan(Float(cam.fieldOfView) * .pi / 360)
+        let aspect = Float(size.width / size.height)
+        let w = Float(size.width), h = Float(size.height)
+        return { p in
+            let e = view * SIMD4<Float>(p, 1)  // eye space: camera looks down -z
+            guard -e.z > near else { return nil }
+            let x = (f / aspect) * e.x / -e.z, y = f * e.y / -e.z
+            let depth = (-e.z - near) / (far - near)
+            return SIMD3((x + 1) / 2 * w, (1 - y) / 2 * h, depth)
+        }
+    }
+
 
     // MARK: remote
 

@@ -14,6 +14,9 @@ enum Watchdog {
     private static var mark = "start"
     private static var beat = Date()
 
+    /// A step that took too long, printed as it happens.
+    static func slow(_ what: String) { say("AO_SLOW \(what)") }
+
     static func at(_ m: String) {
         lock.lock(); mark = m; lock.unlock()
     }
