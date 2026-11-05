@@ -2,16 +2,22 @@ import Foundation
 
 struct OfficeScene: Decodable, Equatable {
     struct Grid: Decodable, Equatable { let w: Int; let d: Int }
-    struct Theme: Decodable, Equatable {
-        struct Floor: Decodable, Equatable { let color: String }
-        struct Walls: Decodable, Equatable { let color: String; let trim: String }
+    /// themeLook(): every colour and surface material the web scene paints with.
+    struct Look: Decodable, Equatable {
+        struct Floor: Decodable, Equatable { let material: String; let color: String; let roughness: Double }
+        struct Accent: Decodable, Equatable { let material: String; let color: String; let wall: String }
+        struct Walls: Decodable, Equatable { let color: String; let trim: String; let baseboard: String; let accent: Accent? }
         struct Desk: Decodable, Equatable { let wood: String; let rail: String }
+        struct Mood: Decodable, Equatable { let sun, sky, ground, lamp, fill, nightSky: String }
         let floor: Floor
         let walls: Walls
         let desk: Desk
+        let kindColors: [String: String]
+        let mood: Mood
+        let screenBg: String
     }
-    struct Box: Decodable, Equatable { let at: [Double]; let size: [Double]; let color: String? }
-    struct Part: Decodable, Equatable { let role: String; let boxes: [Box] }
+    struct Box: Codable, Equatable { let at: [Double]; let size: [Double]; let color: String?; let faces: [Int]?; let unitUV: Bool? }
+    struct Part: Decodable, Equatable { let role: String; let boxes: [Box]; let map: String? }
     struct Kind: Decodable, Equatable { let defaultColor: String?; let glowColor: String?; let parts: [Part] }
     struct Item: Decodable, Equatable { let id: String; let kind: String; let x: Double; let z: Double; let yaw: Double; let color: String? }
     struct Target: Decodable, Equatable { let key: String; let x: Double; let z: Double; let yaw: Double; let pose: String; let seatY: Double }
@@ -28,7 +34,7 @@ struct OfficeScene: Decodable, Equatable {
     let name: String?
     let grid: Grid
     let wallH: Double
-    let theme: Theme
+    let look: Look
     let kinds: [String: Kind]
     let items: [Item]
     let agents: [Agent]
@@ -40,3 +46,21 @@ struct LimbAngles: Decodable {
     let legL, legR, armL, armR, armLz, armRz, head, headTilt, lean, bob: Double
     let seated: Bool
 }
+
+/// The room shell from room.js: garden slab border, garden boxes, the four walls (in their own frames) and the posts.
+struct RoomPlan: Decodable {
+    struct Wall: Decodable {
+        let name: String; let surface: String; let len: Double; let doorAt: Double?; let at: [Double]; let yaw: Double
+        let body, trim, stubBody, stubTrim: [OfficeScene.Box]
+    }
+    let border: Double
+    let garden: [OfficeScene.Box]
+    let walls: [Wall]
+    let posts: [OfficeScene.Box]
+}
+
+/// voxel.js buildGeometry output: positions, normals, linear vertex colours, world-scaled UVs, triangle indices.
+struct MeshData: Decodable { let pos, nor, col, uv: [Float]; let idx: [Int32] }
+
+/// One textures.js texture: w × h pixels, 6 hex chars (rgb) each.
+struct TextureData: Decodable { let w: Int; let h: Int; let rgb: String }

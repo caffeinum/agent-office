@@ -1,9 +1,154 @@
 "use strict";
 (() => {
+  // tvos/bridge/three-stub.js
+  var toLinear = (c) => c < 0.04045 ? c * 0.0773993808 : Math.pow(c * 0.9478672986 + 0.0521327014, 2.4);
+  var toSRGB = (c) => c < 31308e-7 ? c * 12.92 : 1.055 * Math.pow(c, 0.41666) - 0.055;
+  var Color = class {
+    constructor(hex) {
+      this.r = 0;
+      this.g = 0;
+      this.b = 0;
+      if (hex !== void 0) this.set(hex);
+    }
+    set(hex) {
+      const hsl = /^hsl\(\s*(\d*\.?\d+)\s*,\s*(\d*\.?\d+)%\s*,\s*(\d*\.?\d+)%\s*\)$/.exec(hex);
+      if (hsl) return this.setHSL(+hsl[1] / 360, +hsl[2] / 100, +hsl[3] / 100);
+      const m = /^#([0-9a-f]{6})$/i.exec(hex);
+      if (!m) throw new Error(`three-stub Color: only #rrggbb and hsl(h, s%, l%) are supported, got ${JSON.stringify(hex)}`);
+      const n = parseInt(m[1], 16);
+      this.r = toLinear((n >> 16) / 255);
+      this.g = toLinear((n >> 8 & 255) / 255);
+      this.b = toLinear((n & 255) / 255);
+      return this;
+    }
+    setHSL(h, s, l) {
+      h = (h % 1 + 1) % 1;
+      const q = l <= 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+      const hue = (t) => {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        if (t < 1 / 6) return p + (q - p) * 6 * t;
+        if (t < 1 / 2) return q;
+        if (t < 2 / 3) return p + (q - p) * 6 * (2 / 3 - t);
+        return p;
+      };
+      this.r = toLinear(hue(h + 1 / 3));
+      this.g = toLinear(hue(h));
+      this.b = toLinear(hue(h - 1 / 3));
+      return this;
+    }
+    multiplyScalar(f) {
+      this.r *= f;
+      this.g *= f;
+      this.b *= f;
+      return this;
+    }
+    getHexString() {
+      const h = (v) => Math.round(Math.max(0, Math.min(1, toSRGB(v))) * 255).toString(16).padStart(2, "0");
+      return h(this.r) + h(this.g) + h(this.b);
+    }
+  };
+  var Float32BufferAttribute = class {
+    constructor(array, itemSize) {
+      this.array = array;
+      this.itemSize = itemSize;
+    }
+  };
+  var BufferGeometry = class {
+    constructor() {
+      this.attributes = {};
+      this.index = null;
+    }
+    setAttribute(name, attr) {
+      this.attributes[name] = attr;
+    }
+    setIndex(idx) {
+      this.index = idx;
+    }
+    computeBoundingSphere() {
+    }
+    computeBoundingBox() {
+    }
+  };
+  var CanvasTexture = class {
+    constructor(canvas2) {
+      this.image = canvas2;
+    }
+  };
+  var NearestFilter = 1003;
+  var NearestMipmapLinearFilter = 1005;
+  var RepeatWrapping = 1e3;
+  var SRGBColorSpace = "srgb";
+
   // public/js/voxel.js
+  var FACES = [
+    { n: [1, 0, 0], corners: [[1, 0, 1], [1, 0, 0], [1, 1, 1], [1, 1, 0]], uv: [2, 1], flipU: true },
+    { n: [-1, 0, 0], corners: [[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1]], uv: [2, 1] },
+    { n: [0, 1, 0], corners: [[0, 1, 1], [1, 1, 1], [0, 1, 0], [1, 1, 0]], uv: [0, 2] },
+    { n: [0, -1, 0], corners: [[0, 0, 0], [1, 0, 0], [0, 0, 1], [1, 0, 1]], uv: [0, 2] },
+    { n: [0, 0, 1], corners: [[0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]], uv: [0, 1] },
+    { n: [0, 0, -1], corners: [[1, 0, 0], [0, 0, 0], [1, 1, 0], [0, 1, 0]], uv: [0, 1], flipU: true }
+  ];
   var FRONT = 4;
-  function vbox(cx, y0, cz, w, h, d, color, extra = {}) {
-    return { at: [cx, y0, cz], size: [w, h, d], color, ...extra };
+  function vbox(cx, y0, cz, w, h, d, color2, extra = {}) {
+    return { at: [cx, y0, cz], size: [w, h, d], color: color2, ...extra };
+  }
+  function inside(p, b, eps) {
+    const [cx, y0, cz] = b.at, [w, h, d] = b.size;
+    return p[0] >= cx - w / 2 - eps && p[0] <= cx + w / 2 + eps && p[1] >= y0 - eps && p[1] <= y0 + h + eps && p[2] >= cz - d / 2 - eps && p[2] <= cz + d / 2 + eps;
+  }
+  function buildGeometry(boxes, { ao = true, floorY = 0 } = {}) {
+    const pos = [], nor = [], col = [], uv = [], idx = [];
+    const c = new Color();
+    let v = 0;
+    for (const [bi, b] of boxes.entries()) {
+      const [cx, y0, cz] = b.at, [w, h, d] = b.size;
+      const min = [cx - w / 2, y0, cz - d / 2], size = [w, h, d];
+      c.set(b.color);
+      const faces = b.faces ?? [0, 1, 2, 3, 4, 5];
+      for (const fi of faces) {
+        const F = FACES[fi];
+        for (const corner of F.corners) {
+          const p = [min[0] + corner[0] * size[0], min[1] + corner[1] * size[1], min[2] + corner[2] * size[2]];
+          pos.push(p[0], p[1], p[2]);
+          nor.push(...F.n);
+          let k2 = 1;
+          if (ao) {
+            if (p[1] <= floorY + 0.015) k2 *= 0.62;
+            else if (p[1] <= floorY + 0.12) k2 *= 0.82;
+            for (const [oj, o] of boxes.entries()) {
+              if (oj === bi || o.unitUV) continue;
+              if (inside(p, o, 0.012)) {
+                k2 *= 0.74;
+                break;
+              }
+            }
+            if (F.n[1] === -1) k2 *= 0.8;
+          }
+          col.push(c.r * k2, c.g * k2, c.b * k2);
+          if (b.unitUV) {
+            let u = corner[F.uv[0]], vv = corner[F.uv[1]];
+            if (F.flipU) u = 1 - u;
+            uv.push(u, vv);
+          } else {
+            let u = p[F.uv[0]], vv = p[F.uv[1]];
+            if (F.flipU) u = -u;
+            uv.push(u, vv);
+          }
+        }
+        idx.push(v, v + 1, v + 2, v + 2, v + 1, v + 3);
+        v += 4;
+      }
+    }
+    const g = new BufferGeometry();
+    g.setAttribute("position", new Float32BufferAttribute(pos, 3));
+    g.setAttribute("normal", new Float32BufferAttribute(nor, 3));
+    g.setAttribute("color", new Float32BufferAttribute(col, 3));
+    g.setAttribute("uv", new Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeBoundingSphere();
+    g.computeBoundingBox();
+    return g;
   }
 
   // public/shared/catalog.js
@@ -298,6 +443,9 @@
   var WALLS = Object.freeze(["back", "left"]);
   var LIGHTING = Object.freeze(["warm", "neutral", "cool"]);
   var NIGHT_WINDOWS = Object.freeze(["city", "stars", "aurora", "rain"]);
+  var ACCENTS_MAX = 4;
+  var ASSET_ID_RE = /^a[0-9a-f]{23}$/;
+  var COLOR_RE = /^#[0-9a-fA-F]{6}$/;
   var DEFAULT_THEME = deepFreeze({
     floor: { material: "wood", color: "#d9b086" },
     walls: { color: "#f3e6cf", trim: "#b98a5e", accent: null },
@@ -308,12 +456,112 @@
     logo: null,
     logoOnSigns: false
   });
+  var ThemeError = class extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "ThemeError";
+    }
+  };
+  var fail2 = (msg) => {
+    throw new ThemeError(msg);
+  };
   function deepFreeze(o) {
     if (o && typeof o === "object") {
       for (const v of Object.values(o)) deepFreeze(v);
       Object.freeze(o);
     }
     return o;
+  }
+  var isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  function onlyKeys(obj, allowed, where) {
+    for (const k2 of Object.keys(obj)) if (!allowed.includes(k2)) fail2(`${where} has unknown field "${k2}" (allowed: ${allowed.join(", ")})`);
+  }
+  function color(v, where) {
+    if (typeof v !== "string" || !COLOR_RE.test(v)) fail2(`${where} must be a #rrggbb colour, got ${JSON.stringify(v)}`);
+    return v.toLowerCase();
+  }
+  function oneOf(v, list2, where) {
+    if (!list2.includes(v)) fail2(`${where} must be one of ${list2.join(", ")}, got ${JSON.stringify(v)}`);
+    return v;
+  }
+  function validateTheme(t) {
+    if (!isObj(t)) fail2("theme is not an object");
+    onlyKeys(t, Object.keys(DEFAULT_THEME), "theme");
+    for (const k2 of Object.keys(DEFAULT_THEME)) if (!Object.hasOwn(t, k2)) fail2(`theme is missing "${k2}"`);
+    if (!isObj(t.floor)) fail2("theme.floor must be {material, color}");
+    onlyKeys(t.floor, ["material", "color"], "theme.floor");
+    if (!isObj(t.walls)) fail2("theme.walls must be {color, trim, accent}");
+    onlyKeys(t.walls, ["color", "trim", "accent"], "theme.walls");
+    let accent = null;
+    if (t.walls.accent !== null) {
+      if (!isObj(t.walls.accent)) fail2("theme.walls.accent must be null or {material, color, wall}");
+      onlyKeys(t.walls.accent, ["material", "color", "wall"], "theme.walls.accent");
+      accent = {
+        material: oneOf(t.walls.accent.material, ACCENT_WALL_MATERIALS, "theme.walls.accent.material"),
+        color: color(t.walls.accent.color, "theme.walls.accent.color"),
+        wall: oneOf(t.walls.accent.wall, WALLS, "theme.walls.accent.wall")
+      };
+    }
+    if (!isObj(t.desk)) fail2("theme.desk must be {wood, rail}");
+    onlyKeys(t.desk, ["wood", "rail"], "theme.desk");
+    if (!Array.isArray(t.accents) || t.accents.length < 1 || t.accents.length > ACCENTS_MAX) fail2(`theme.accents must be 1-${ACCENTS_MAX} colours`);
+    if (t.logo !== null && (typeof t.logo !== "string" || !ASSET_ID_RE.test(t.logo))) fail2(`theme.logo must be null or an asset id from office_upload, got ${JSON.stringify(t.logo)}`);
+    if (typeof t.logoOnSigns !== "boolean") fail2("theme.logoOnSigns must be true or false");
+    return {
+      floor: { material: oneOf(t.floor.material, FLOOR_MATERIALS, "theme.floor.material"), color: color(t.floor.color, "theme.floor.color") },
+      walls: { color: color(t.walls.color, "theme.walls.color"), trim: color(t.walls.trim, "theme.walls.trim"), accent },
+      desk: { wood: color(t.desk.wood, "theme.desk.wood"), rail: color(t.desk.rail, "theme.desk.rail") },
+      accents: t.accents.map((c, i) => color(c, `theme.accents[${i}]`)),
+      lighting: oneOf(t.lighting, LIGHTING, "theme.lighting"),
+      nightWindow: oneOf(t.nightWindow, NIGHT_WINDOWS, "theme.nightWindow"),
+      logo: t.logo,
+      logoOnSigns: t.logoOnSigns
+    };
+  }
+  function hexToRgb(hex) {
+    color(hex, "colour");
+    const n = parseInt(hex.slice(1), 16);
+    return [n >> 16 & 255, n >> 8 & 255, n & 255];
+  }
+  function rgbToHex([r, g, b]) {
+    const c = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
+    return `#${c(r)}${c(g)}${c(b)}`;
+  }
+  function mixHex(a, b, t) {
+    const pa = hexToRgb(a), pb = hexToRgb(b);
+    return rgbToHex(pa.map((v, i) => v + (pb[i] - v) * t));
+  }
+  function hexToHsl(hex) {
+    const [r, g, b] = hexToRgb(hex).map((v) => v / 255);
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    if (max === min) return [0, 0, l];
+    const d = max - min;
+    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    const h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return [h * 60, s, l];
+  }
+  function hslToHex([h, s, l]) {
+    const hue = (h % 360 + 360) % 360 / 360;
+    const sat = Math.max(0, Math.min(1, s)), lig = Math.max(0, Math.min(1, l));
+    if (sat === 0) return rgbToHex([lig * 255, lig * 255, lig * 255]);
+    const q = lig < 0.5 ? lig * (1 + sat) : lig + sat - lig * sat;
+    const p = 2 * lig - q;
+    const ch = (t) => {
+      const u = t < 0 ? t + 1 : t > 1 ? t - 1 : t;
+      if (u < 1 / 6) return p + (q - p) * 6 * u;
+      if (u < 1 / 2) return q;
+      if (u < 2 / 3) return p + (q - p) * (2 / 3 - u) * 6;
+      return p;
+    };
+    return rgbToHex([ch(hue + 1 / 3) * 255, ch(hue) * 255, ch(hue - 1 / 3) * 255]);
+  }
+  function luminance(hex) {
+    const lin = hexToRgb(hex).map((v) => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
   }
 
   // public/shared/kinds.js
@@ -322,13 +570,13 @@
   var ACTIVITIES = Object.freeze(["coffee", "snack", "read", "play", "water-plants", "whiteboard", "chat", "think", "watch"]);
   var ACTIVITY_DURATION = Object.freeze({ coffee: 25, snack: 20, read: 60, play: 45, "water-plants": 15, whiteboard: 40, chat: 45, think: 30, watch: 50 });
   var CUSTOM_LAYERS = Object.freeze(["object", "floor", "wall"]);
-  var fail2 = (msg) => {
+  var fail3 = (msg) => {
     throw new OfficeError(msg);
   };
   var round2 = (v) => Math.round(v * 100) / 100;
   function spotsOf(item, custom) {
     const kind = kindOf(item.kind, custom);
-    if (!kind) fail2(`unknown kind ${JSON.stringify(item.kind)}`);
+    if (!kind) fail3(`unknown kind ${JSON.stringify(item.kind)}`);
     const f = footprint(item, custom);
     const cx = f.x + f.w / 2, cz = f.z + f.d / 2;
     const r = item.rot * Math.PI / 180;
@@ -812,7 +1060,7 @@
   }
   function hueColors(hue) {
     const h = (Math.round(hue) % 360 + 360) % 360;
-    return { shirt: `hsl(${h} 62% 58%)`, shirtDark: `hsl(${h} 52% 44%)`, accent: `hsl(${h} 80% 72%)`, css: `hsl(${h} 70% 60%)` };
+    return { shirt: `hsl(${h}, 62%, 58%)`, shirtDark: `hsl(${h}, 52%, 44%)`, accent: `hsl(${h}, 80%, 72%)`, css: `hsl(${h}, 70%, 60%)` };
   }
   function mergeBoxes(boxes) {
     let list2 = boxes.map((b) => ({ ...b }));
@@ -859,7 +1107,43 @@
     neutral: { sun: "#fff3e4", sky: "#e2ecf8", ground: "#d6cfc6", lamp: "#ffe0b8", fill: "#ffe9cf", nightSky: "#45507f" },
     cool: { sun: "#eef3ff", sky: "#d2e4ff", ground: "#c4cfd9", lamp: "#d6e6ff", fill: "#dfe9ff", nightSky: "#3f5a96" }
   });
+  var FLOOR_ROUGH = { wood: 0.78, tile: 0.5, concrete: 0.62, carpet: 1 };
   var CLASSIC_COLORS = Object.freeze({ desk: "#6aa6c9", chair: "#e39a5b", sofa: "#6f9fc0", beanbag: "#f2a65a", rug: "#d98f6f", sign: "#3a4a3f", lamp: "#2e313a", poster: "#f2c879" });
+  var sameList = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+  function themeLook(theme) {
+    const t = validateTheme(theme);
+    const classic = sameList(t.accents, DEFAULT_THEME.accents);
+    const a = (i) => t.accents[i % t.accents.length];
+    const soft = (hex, l = 0.62) => {
+      const [h, s] = hexToHsl(hex);
+      return hslToHex([h, Math.min(s, 0.55), l]);
+    };
+    const darkest = [...t.accents].sort((x, y) => luminance(x) - luminance(y))[0];
+    const ink = luminance(darkest) < 0.06 ? darkest : hslToHex([hexToHsl(a(0))[0], 0.25, 0.1]);
+    const kindColors = classic ? { ...CLASSIC_COLORS } : {
+      desk: a(0),
+      chair: a(0),
+      sofa: soft(a(0), 0.5),
+      beanbag: a(1),
+      rug: soft(a(1), 0.66),
+      sign: ink,
+      lamp: ink,
+      poster: soft(a(1), 0.8)
+    };
+    return {
+      floor: { material: t.floor.material, color: t.floor.color, roughness: FLOOR_ROUGH[t.floor.material] },
+      walls: { color: t.walls.color, trim: t.walls.trim, baseboard: mixHex(t.walls.color, t.walls.trim, 0.25), accent: t.walls.accent },
+      desk: { wood: t.desk.wood, rail: t.desk.rail },
+      kindColors,
+      mood: MOODS[t.lighting],
+      nightWindow: t.nightWindow,
+      signBg: classic ? "#34433a" : ink,
+      signFg: classic ? "#f6f1e3" : mixHex("#ffffff", a(1), 0.12),
+      screenBg: classic ? "#18233a" : ink,
+      logo: t.logo,
+      logoOnSigns: t.logoOnSigns
+    };
+  }
 
   // public/js/character.js
   var LEG_H = 0.4;
@@ -959,10 +1243,423 @@
     return { look, parts, props };
   }
 
+  // public/js/room.js
+  var GARDEN_BORDER = 2.5;
+  function gardenBoxes(grid) {
+    const W = grid.w, D = grid.d;
+    const deco = [];
+    let seed = hashStr(`${W}x${D}`);
+    const rnd = () => {
+      seed = seed * 1664525 + 1013904223 >>> 0;
+      return seed / 4294967296;
+    };
+    const tree = (x, z, s) => {
+      deco.push(vbox(x, -0.01, z, 0.3 * s, 1.1 * s, 0.3 * s, "#8a5a3a"));
+      deco.push(vbox(x, 0.9 * s, z, 1.2 * s, 0.8 * s, 1.2 * s, "#4f9c43"));
+      deco.push(vbox(x + 0.1 * s, 1.55 * s, z - 0.05 * s, 0.8 * s, 0.5 * s, 0.8 * s, "#5fae4e"));
+      deco.push(vbox(x - 0.25 * s, 1.2 * s, z + 0.3 * s, 0.5 * s, 0.4 * s, 0.5 * s, "#72c05a"));
+    };
+    const bush = (x, z) => {
+      deco.push(vbox(x, -0.01, z, 0.7, 0.45, 0.6, "#5aa64a"));
+      deco.push(vbox(x + 0.1, 0.35, z, 0.4, 0.25, 0.4, "#6cba57"));
+    };
+    const flower = (x, z, c) => {
+      deco.push(vbox(x, -0.01, z, 0.04, 0.2, 0.04, "#3f8a3a"));
+      deco.push(vbox(x, 0.19, z, 0.12, 0.1, 0.12, c));
+    };
+    const ring = [];
+    for (let x = -1.6; x < W + 1.6; x += 1.4) {
+      ring.push([x, -1.4], [x, D + 1.4]);
+    }
+    for (let z = 0; z < D; z += 1.4) {
+      ring.push([-1.4, z], [W + 1.4, z]);
+    }
+    for (const [x, z] of ring) {
+      const r = rnd();
+      if (Math.abs(x - W / 2) < 1.6 && z > D) continue;
+      if (r < 0.16) tree(x + (rnd() - 0.5) * 0.4, z + (rnd() - 0.5) * 0.4, 0.8 + rnd() * 0.5);
+      else if (r < 0.38) bush(x, z);
+      else if (r < 0.62) flower(x + rnd() * 0.6, z + rnd() * 0.6, ["#ff8fa8", "#ffd45c", "#ffffff", "#b99bff"][Math.floor(rnd() * 4)]);
+    }
+    for (let z = D + 0.3; z < D + GARDEN_BORDER; z += 0.7) deco.push(vbox(W / 2 + (rnd() - 0.5) * 0.2, -0.04, z, 0.9, 0.06, 0.5, "#c9c2b4"));
+    return deco;
+  }
+  function wallBoxes(len, doorAt) {
+    const segs = doorAt == null ? [[0, len]] : [[0, doorAt - 1], [doorAt + 1, len]];
+    const body = [], trim = [], stubBody = [], stubTrim = [];
+    for (const [a, b] of segs) {
+      const L = b - a, c = (a + b) / 2;
+      body.push(vbox(c, 0, -0.12, L, WALL_H, 0.24, "#ffffff"));
+      trim.push(vbox(c, WALL_H, -0.12, L + 0.02, 0.1, 0.3, "#ffffff"));
+      trim.push(vbox(c, 0, 0.015, L, 0.14, 0.03, "#d8d8d8"));
+      stubBody.push(vbox(c, 0, -0.12, L, 0.32, 0.24, "#ffffff"));
+      stubTrim.push(vbox(c, 0.32, -0.12, L + 0.02, 0.06, 0.3, "#ffffff"));
+    }
+    if (doorAt != null) body.push(vbox(doorAt, 2.1, -0.12, 2, WALL_H - 2.1, 0.24, "#ffffff"));
+    return { body, trim, stubBody, stubTrim };
+  }
+  function roomWalls(grid) {
+    const W = grid.w, D = grid.d;
+    return [
+      { name: "back", surface: "wallBack", len: W, doorAt: null, at: [0, 0, 0], yaw: 0 },
+      { name: "front", surface: "wallPlain", len: W, doorAt: W / 2, at: [W, 0, D], yaw: Math.PI },
+      { name: "left", surface: "wallLeft", len: D, doorAt: null, at: [0, 0, D], yaw: Math.PI / 2 },
+      { name: "right", surface: "wallPlain", len: D, doorAt: null, at: [W, 0, 0], yaw: -Math.PI / 2 }
+    ];
+  }
+  function cornerPosts(grid) {
+    const W = grid.w, D = grid.d;
+    return [[0, 0], [W, 0], [0, D], [W, D]].map(([x, z]) => vbox(x, 0, z, 0.3, WALL_H + 0.12, 0.3, "#ffffff"));
+  }
+
+  // public/js/textures.js
+  function rng(seed) {
+    let s = seed >>> 0 || 1;
+    return () => {
+      s ^= s << 13;
+      s >>>= 0;
+      s ^= s >>> 17;
+      s ^= s << 5;
+      s >>>= 0;
+      return s / 4294967296;
+    };
+  }
+  function canvas(w, h) {
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    return [c, c.getContext("2d")];
+  }
+  function tex(c, { repeat = false, srgb = true } = {}) {
+    const t = new CanvasTexture(c);
+    t.magFilter = NearestFilter;
+    t.minFilter = NearestMipmapLinearFilter;
+    t.generateMipmaps = true;
+    if (srgb) t.colorSpace = SRGBColorSpace;
+    if (repeat) {
+      t.wrapS = t.wrapT = RepeatWrapping;
+    }
+    t.anisotropy = 4;
+    return t;
+  }
+  var shade = (hex, f) => {
+    const c = new Color(hex);
+    c.multiplyScalar(f);
+    return `#${c.getHexString()}`;
+  };
+  function grainTexture() {
+    const [c, g] = canvas(16, 16);
+    const r = rng(7);
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const v = Math.round(255 * (0.88 + r() * 0.12));
+      g.fillStyle = `rgb(${v},${v},${v})`;
+      g.fillRect(x, y, 1, 1);
+    }
+    return tex(c, { repeat: true });
+  }
+  function grassTexture() {
+    const [c, g] = canvas(16, 16);
+    const r = rng(31);
+    const greens = ["#79b85a", "#6fae52", "#86c265", "#68a44c", "#8ccb6b"];
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      g.fillStyle = greens[Math.floor(r() * greens.length)];
+      g.fillRect(x, y, 1, 1);
+    }
+    return tex(c, { repeat: true });
+  }
+  function plinthTexture() {
+    const [c, g] = canvas(16, 16);
+    const r = rng(37);
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const course = y >> 2;
+      const joint = y % 4 === 3 || (x + course % 2 * 4) % 8 === 7;
+      const cap = y < 2;
+      const base = cap ? "#b9a892" : course % 2 ? "#d8c6a8" : "#cfbb9b";
+      g.fillStyle = joint ? shade("#9c8a72", 0.95 + r() * 0.08) : shade(base, 0.93 + r() * 0.1);
+      g.fillRect(x, y, 1, 1);
+    }
+    return tex(c, { repeat: true });
+  }
+  function rugTexture() {
+    const [c, g] = canvas(32, 48);
+    const r = rng(41);
+    for (let y = 0; y < 48; y++) for (let x = 0; x < 32; x++) {
+      const border = x < 2 || y < 2 || x > 29 || y > 45;
+      const inner = x === 3 || y === 3 || x === 28 || y === 44;
+      const check = ((x >> 2) + (y >> 2)) % 2 === 0;
+      const v = border ? 0.62 : inner ? 1 : check ? 0.9 : 0.84;
+      const n = v * (0.95 + r() * 0.06);
+      const k2 = Math.round(255 * Math.min(1, n));
+      g.fillStyle = `rgb(${k2},${k2},${k2})`;
+      g.fillRect(x, y, 1, 1);
+    }
+    return tex(c);
+  }
+  function screenTexture() {
+    const [c, g] = canvas(32, 20);
+    const r = rng(53);
+    g.fillStyle = "#18233a";
+    g.fillRect(0, 0, 32, 20);
+    const cols = ["#7fd1ff", "#ffd479", "#b8f28a", "#ff9fb8", "#c9b6ff", "#e8eef8"];
+    for (let y = 2; y < 18; y += 2) {
+      let x = 2 + (r() < 0.5 ? 2 : 0) + (r() < 0.3 ? 2 : 0);
+      while (x < 29) {
+        const len = 2 + Math.floor(r() * 6);
+        g.fillStyle = cols[Math.floor(r() * cols.length)];
+        g.fillRect(x, y, Math.min(len, 30 - x), 1);
+        x += len + 1;
+        if (r() < 0.25) break;
+      }
+    }
+    g.fillStyle = "#2b3a5c";
+    g.fillRect(0, 0, 32, 1);
+    return tex(c);
+  }
+  function tvTexture() {
+    const [c, g] = canvas(32, 18);
+    g.fillStyle = "#1d2440";
+    g.fillRect(0, 0, 32, 18);
+    const bars = [5, 9, 7, 12, 10, 14, 11];
+    bars.forEach((h, i) => {
+      g.fillStyle = i % 2 ? "#ffb86b" : "#7ee0c3";
+      g.fillRect(3 + i * 3, 16 - h, 2, h);
+    });
+    g.fillStyle = "#ff7a9c";
+    g.fillRect(25, 3, 5, 5);
+    g.fillStyle = "#ffe08a";
+    g.fillRect(25, 10, 5, 2);
+    g.fillRect(25, 13, 3, 2);
+    return tex(c);
+  }
+  function rackTexture() {
+    const [c, g] = canvas(16, 32);
+    const r = rng(61);
+    g.fillStyle = "#20232b";
+    g.fillRect(0, 0, 16, 32);
+    for (let y = 1; y < 31; y += 3) {
+      g.fillStyle = "#2e323d";
+      g.fillRect(1, y, 14, 2);
+      g.fillStyle = r() < 0.5 ? "#6dffb0" : r() < 0.5 ? "#7fc8ff" : "#ffcf6b";
+      g.fillRect(2, y, 1, 1);
+      if (r() < 0.6) {
+        g.fillStyle = "#6dffb0";
+        g.fillRect(4, y, 1, 1);
+      }
+    }
+    return tex(c);
+  }
+  function windowTexture(night) {
+    const [c, g] = canvas(32, 16);
+    const r = rng(night ? 71 : 73);
+    const grad = g.createLinearGradient(0, 0, 0, 16);
+    if (night) {
+      grad.addColorStop(0, "#141a3a");
+      grad.addColorStop(1, "#2b2f5e");
+    } else {
+      grad.addColorStop(0, "#8fd0ff");
+      grad.addColorStop(1, "#d8f0ff");
+    }
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 32, 16);
+    if (night) {
+      for (let i = 0; i < 14; i++) {
+        g.fillStyle = r() < 0.3 ? "#fff6c8" : "#cfd8ff";
+        g.fillRect(Math.floor(r() * 32), Math.floor(r() * 11), 1, 1);
+      }
+      g.fillStyle = "#fff3c4";
+      g.fillRect(24, 3, 3, 3);
+      g.fillStyle = "#2b2f5e";
+      g.fillRect(25, 3, 2, 1);
+      g.fillStyle = "#3a3f73";
+      g.fillRect(0, 13, 32, 3);
+      g.fillStyle = "#ffd27a";
+      for (let x = 1; x < 32; x += 4) if (r() < 0.6) g.fillRect(x, 14, 1, 1);
+    } else {
+      g.fillStyle = "#ffffff";
+      g.fillRect(4, 4, 6, 2);
+      g.fillRect(6, 3, 3, 1);
+      g.fillRect(18, 7, 8, 2);
+      g.fillRect(20, 6, 4, 1);
+      g.fillStyle = "#86c46a";
+      g.fillRect(0, 13, 32, 3);
+      g.fillStyle = "#6aa955";
+      for (let x = 0; x < 32; x += 3) g.fillRect(x, 12 + x % 2, 2, 1);
+    }
+    return tex(c);
+  }
+  function grey(g, x, y, v) {
+    const k2 = Math.round(255 * Math.max(0, Math.min(1, v)));
+    g.fillStyle = `rgb(${k2},${k2},${k2})`;
+    g.fillRect(x, y, 1, 1);
+  }
+  function floorTexture(material) {
+    const [c, g] = canvas(16, 16);
+    const r = rng({ wood: 11, tile: 13, concrete: 17, carpet: 19 }[material] ?? 23);
+    if (material === "wood") {
+      const tone = [0.98, 0.9, 1.02, 0.93];
+      for (let p = 0; p < 4; p++) {
+        for (let y = p * 4; y < p * 4 + 4; y++) for (let x = 0; x < 16; x++) grey(g, x, y, tone[p] * (0.95 + r() * 0.06) - (y === p * 4 + 3 ? 0.1 : 0));
+        const seam = (p * 7 + 3) % 16;
+        for (let y = p * 4; y < p * 4 + 4; y++) grey(g, seam, y, tone[p] * 0.7);
+        if (r() < 0.6) {
+          const x = Math.floor(r() * 14);
+          grey(g, x, p * 4 + 1, tone[p] * 0.8);
+          grey(g, x + 1, p * 4 + 1, tone[p] * 0.8);
+        }
+      }
+    } else if (material === "tile") {
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const grout = x % 8 === 7 || y % 8 === 7;
+        const which = ((x >> 3) + (y >> 3)) % 2;
+        const edge = x % 8 === 0 || y % 8 === 0;
+        grey(g, x, y, grout ? 0.66 : (which ? 0.97 : 0.92) * (edge ? 1.04 : 1) * (0.98 + r() * 0.03));
+      }
+    } else if (material === "concrete") {
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        let v = 0.95 + r() * 0.05;
+        if (r() < 0.05) v -= 0.12;
+        if (r() < 0.03) v += 0.08;
+        grey(g, x, y, v);
+      }
+      for (let x = 0; x < 16; x++) grey(g, x, 15, 0.8);
+    } else if (material === "carpet") {
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const loop = (x + y) % 4 === 0 ? 0.04 : 0;
+        grey(g, x, y, 0.91 + r() * 0.06 + loop);
+      }
+    } else throw new Error(`floorTexture: unknown material ${JSON.stringify(material)}`);
+    return tex(c, { repeat: true });
+  }
+  function wallTexture(material) {
+    const [c, g] = canvas(16, 16);
+    const r = rng({ plaster: 29, brick: 31, "wood-panels": 37 }[material] ?? 41);
+    if (material === "plaster") {
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) grey(g, x, y, 0.93 + r() * 0.07);
+    } else if (material === "brick") {
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const course = y >> 2;
+        const mortar = y % 4 === 3 || (x + course % 2 * 4) % 8 === 7;
+        const brickId = course * 2 + (x + course % 2 * 4 >> 3 & 1);
+        const tone = 0.78 + brickId * 37 % 11 / 60;
+        grey(g, x, y, mortar ? 1.12 + r() * 0.04 : tone * (0.94 + r() * 0.08));
+      }
+    } else if (material === "wood-panels") {
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const panel = x >> 2;
+        const groove = x % 4 === 3;
+        grey(g, x, y, groove ? 0.62 : [0.95, 0.88, 0.99, 0.91][panel] * (0.96 + r() * 0.06));
+      }
+    } else throw new Error(`wallTexture: unknown material ${JSON.stringify(material)}`);
+    return tex(c, { repeat: true });
+  }
+
+  // tvos/bridge/pixel-canvas.js
+  function parse(style) {
+    let m = /^#([0-9a-f]{6})$/i.exec(style);
+    if (m) {
+      const n = parseInt(m[1], 16);
+      return [n >> 16, n >> 8 & 255, n & 255];
+    }
+    m = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(style);
+    if (m) return [+m[1], +m[2], +m[3]];
+    throw new Error(`pixel-canvas: unsupported fillStyle ${JSON.stringify(style)}`);
+  }
+  function verticalGradient(y0, y1) {
+    const stops = [];
+    return {
+      addColorStop(at, color2) {
+        stops.push([at, parse(color2)]);
+        stops.sort((a, b) => a[0] - b[0]);
+      },
+      at(y) {
+        const t = Math.max(0, Math.min(1, (y + 0.5 - y0) / (y1 - y0)));
+        if (t <= stops[0][0]) return stops[0][1];
+        for (let i = 1; i < stops.length; i++) {
+          const [b, cb] = stops[i], [a, ca] = stops[i - 1];
+          if (t <= b) {
+            const k2 = (t - a) / (b - a);
+            return ca.map((v, c) => Math.round(v + (cb[c] - v) * k2));
+          }
+        }
+        return stops[stops.length - 1][1];
+      }
+    };
+  }
+  function pixelCanvas(w, h) {
+    const px = new Uint8Array(w * h * 3);
+    let fill = [0, 0, 0];
+    const ctx = {
+      set fillStyle(s) {
+        fill = typeof s === "string" ? parse(s) : s;
+      },
+      get fillStyle() {
+        return fill;
+      },
+      createLinearGradient(x0, y0, x1, y1) {
+        if (x0 !== x1) throw new Error("pixel-canvas: only vertical gradients are supported");
+        return verticalGradient(y0, y1);
+      },
+      fillRect(x, y, rw, rh) {
+        for (let j = Math.max(0, y); j < Math.min(h, y + rh); j++) {
+          const c = Array.isArray(fill) ? fill : fill.at(j);
+          for (let i = Math.max(0, x); i < Math.min(w, x + rw); i++) px.set(c, (j * w + i) * 3);
+        }
+      }
+    };
+    return {
+      width: w,
+      height: h,
+      pixels: px,
+      getContext(kind) {
+        if (kind !== "2d") throw new Error(`pixel-canvas: no ${kind} context`);
+        return ctx;
+      }
+    };
+  }
+  function installDocument() {
+    globalThis.document = {
+      createElement(tag) {
+        if (tag !== "canvas") throw new Error(`pixel-canvas: document.createElement(${tag}) is not available`);
+        const c = { _w: 0, _h: 0, _real: null };
+        return new Proxy(c, {
+          set(t, k2, v) {
+            if (k2 === "width") t._w = v;
+            else if (k2 === "height") t._h = v;
+            else t[k2] = v;
+            return true;
+          },
+          get(t, k2) {
+            if (k2 === "getContext") return (kind) => {
+              t._real ?? (t._real = pixelCanvas(t._w, t._h));
+              return t._real.getContext(kind);
+            };
+            if (k2 === "width") return t._w;
+            if (k2 === "height") return t._h;
+            if (k2 === "pixels") return t._real?.pixels;
+            return t[k2];
+          }
+        });
+      }
+    };
+  }
+
   // tvos/bridge/entry.js
+  installDocument();
+  var TEXTURES = {
+    grain: () => grainTexture(),
+    grass: () => grassTexture(),
+    plinth: () => plinthTexture(),
+    rug: () => rugTexture(),
+    floor: (m) => floorTexture(m),
+    wall: (m) => wallTexture(m),
+    screen: () => screenTexture(),
+    tv: () => tvTexture(),
+    rack: () => rackTexture(),
+    window: () => windowTexture(false)
+  };
   var state = null;
   var walk = null;
-  var boxesOf = (list2) => (list2 ?? []).map((b) => ({ at: b.at, size: b.size, color: b.color }));
+  var boxesOf = (list2) => (list2 ?? []).map((b) => ({ at: b.at, size: b.size, color: b.color, faces: b.faces ?? null, unitUV: !!b.unitUV }));
   function kindParts(kind, custom) {
     if (MODELS[kind]) {
       const m = MODELS[kind]();
@@ -971,24 +1668,25 @@
         glowColor: m.glow?.color ?? null,
         parts: [
           { role: "base", boxes: boxesOf(m.base) },
-          { role: "accent", boxes: boxesOf(m.accent) },
+          { role: "accent", boxes: boxesOf(m.accent), map: m.accentMap === "rug" ? "rug" : "grain" },
           { role: "finish", boxes: boxesOf(m.finish) },
           { role: "rail", boxes: boxesOf(m.rail) },
-          { role: "glow", boxes: boxesOf(m.glow?.boxes) }
+          { role: "glow", boxes: boxesOf(m.glow?.boxes), map: m.glow?.tex ?? null }
         ].filter((p) => p.boxes.length)
       };
     }
     const def = custom[kind];
     if (!def) throw new Error(`no model for kind "${kind}"`);
     const plan = kindGeometryPlan(def);
-    const toBox = (b) => ({ at: [b.cx, b.y0, b.cz], size: [b.w, b.h, b.d], color: b.color });
+    const toBox = (b, unitUV = false) => ({ at: [b.cx, b.y0, b.cz], size: [b.w, b.h, b.d], color: b.color, faces: null, unitUV });
     return {
       defaultColor: null,
       glowColor: null,
       parts: [
-        { role: "base", boxes: [...plan.matte, ...plan.glossy].map(toBox) },
-        { role: "glass", boxes: plan.glass.map(toBox) },
-        { role: "glow", boxes: [...plan.screen, ...plan.emissive].map(toBox) }
+        { role: "base", boxes: [...plan.matte, ...plan.glossy].map((b) => toBox(b)) },
+        { role: "glass", boxes: plan.glass.map((b) => toBox(b)) },
+        { role: "glow", boxes: plan.screen.map((b) => toBox(b, true)), map: "screen" },
+        { role: "glow", boxes: plan.emissive.map((b) => toBox(b)), map: null }
       ].filter((p) => p.boxes.length)
     };
   }
@@ -1033,7 +1731,6 @@
     if (ref.startsWith("human:")) return ref.slice(6);
     return state.agents.find((a) => a.id === ref)?.name ?? ref;
   }
-  var hueCss = (hue) => `hsl(${(Math.round(hue ?? 0) % 360 + 360) % 360} 70% 60%)`;
   globalThis.AO = {
     /** The web viewer's A* walk from one point to another (cell centres, then the exact goal), as JSON [[x, z], …]. */
     route(fx, fz, tx, tz) {
@@ -1048,6 +1745,32 @@
     /** limbAngles() for many characters at once: JSON [{pose, phase}] at clock t → JSON [angles]. */
     limbs(json, t) {
       return JSON.stringify(JSON.parse(json).map((c) => limbAngles(c.pose, t, c.phase)));
+    },
+    /** voxel.js's merged mesh for a box list (JSON) as JSON {pos, nor, col (linear), uv, idx}: baked AO, world UVs. */
+    mesh(json, ao, floorY) {
+      const g = buildGeometry(JSON.parse(json).map((b) => ({ ...b, faces: b.faces ?? void 0 })), { ao, floorY });
+      const a = g.attributes;
+      const r = (arr) => arr.map((v) => Math.round(v * 1e5) / 1e5);
+      return JSON.stringify({ pos: r(a.position.array), nor: a.normal.array, col: r(a.color.array), uv: r(a.uv.array), idx: g.index });
+    },
+    /** One of textures.js's voxel textures as JSON {w, h, rgb: hex string, 6 chars per pixel}. */
+    texture(name, arg) {
+      const make = TEXTURES[name];
+      if (!make) throw new Error(`no texture "${name}"`);
+      const c = make(arg).image;
+      let rgb = "";
+      for (const v of c.pixels) rgb += v.toString(16).padStart(2, "0");
+      return JSON.stringify({ w: c.width, h: c.height, rgb });
+    },
+    /** The room shell for a grid: garden slab size, garden boxes, the four walls (full + stub boxes, frame) and posts. */
+    room(w, d) {
+      const grid = { w, d };
+      return JSON.stringify({
+        border: GARDEN_BORDER,
+        garden: gardenBoxes(grid),
+        walls: roomWalls(grid).map((wall) => ({ ...wall, ...wallBoxes(wall.len, wall.doorAt) })),
+        posts: cornerPosts(grid)
+      });
     },
     /** One WebSocket frame (JSON text); returns its type. */
     frame(text) {
@@ -1072,6 +1795,7 @@
         grid: state.grid,
         wallH: WALL_H,
         theme: state.theme,
+        look: themeLook(state.theme),
         kinds,
         items,
         agents: state.agents.map((a) => ({
@@ -1081,7 +1805,7 @@
           status: a.status,
           activity: a.activity ?? null,
           hue: a.hue,
-          css: hueCss(a.hue),
+          css: hueColors(a.hue ?? 0).css,
           phase: hashStr(a.id) % 1e3 / 100,
           says: a.says && now - a.says.ts < 9e3 ? a.says.text : null,
           rig: characterRig(a),

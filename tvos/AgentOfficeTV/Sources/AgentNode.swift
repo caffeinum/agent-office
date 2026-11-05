@@ -9,14 +9,16 @@ final class AgentNode {
     private var props: [String: SCNNode] = [:]
     private var path: [(Double, Double)] = []
     private var targetKey = ""
+    private let voxel: Voxel
     private(set) var walking = false
 
     /// The web viewer's walk speed (scene.js WALK_SPEED) and which poses hold which hand prop (character.js POSE_PROPS).
     static let walkSpeed: Float = 1.7
     private static let poseProps = ["sip": "mug", "coffee": "mug", "snack": "snack", "read": "book", "water-plants": "can", "whiteboard": "marker"]
 
-    init(_ a: OfficeScene.Agent) {
+    init(_ a: OfficeScene.Agent, voxel: Voxel) {
         agent = a
+        self.voxel = voxel
         build(a.rig)
         node.position = SCNVector3(a.target.x, 0, a.target.z)
         node.eulerAngles.y = Float(a.target.yaw)
@@ -38,7 +40,8 @@ final class AgentNode {
             for (name, part) in ready {
                 let g = SCNNode()
                 g.position = SCNVector3(part.at[0], part.at[1], part.at[2])
-                for b in part.boxes + (part.face ?? []) { g.addChildNode(boxNode(at: b.at, size: b.size, color: cssColor(b.color ?? "#ffffff"))) }
+                if !part.boxes.isEmpty { g.addChildNode(mesh(part.boxes, ao: name != "eyes")) }
+                if let face = part.face { g.addChildNode(mesh(face, ao: false)) }
                 (part.parent.flatMap { parts[$0] } ?? node).addChildNode(g)
                 parts[name] = g
                 pending[name] = nil
@@ -47,10 +50,21 @@ final class AgentNode {
         for (name, prop) in rig.props {
             guard let parent = parts[prop.parent] else { preconditionFailure("prop \(name) hangs on missing part \(prop.parent)") }
             let g = SCNNode()
-            for b in prop.boxes { g.addChildNode(boxNode(at: b.at, size: b.size, color: cssColor(b.color ?? "#ffffff"))) }
+            g.addChildNode(mesh(prop.boxes, ao: false))
             g.isHidden = true
             parent.addChildNode(g)
             props[name] = g
+        }
+    }
+
+    /// character.js buildCharacter's meshes: voxel.js geometry with the grain texture, AO measured off the floor.
+    private func mesh(_ boxes: [OfficeScene.Box], ao: Bool) -> SCNNode {
+        do {
+            let g = try voxel.geometry(boxes, ao: ao, floorY: -99)
+            g.firstMaterial = voxel.material(map: try voxel.texture("grain"))
+            return SCNNode(geometry: g)
+        } catch {
+            preconditionFailure("character mesh failed: \(error)")
         }
     }
 

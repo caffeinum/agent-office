@@ -44,6 +44,25 @@ final class Bridge {
         return try JSONDecoder().decode([LimbAngles].self, from: Data(json.utf8))
     }
 
+    /// voxel.js's merged mesh for a box list.
+    func mesh(_ boxes: [OfficeScene.Box], ao: Bool = true, floorY: Double = 0) throws -> MeshData {
+        let input = String(decoding: try JSONEncoder().encode(boxes), as: UTF8.self)
+        let json = try call("mesh", [input, ao, floorY]).toString() ?? "null"
+        return try JSONDecoder().decode(MeshData.self, from: Data(json.utf8))
+    }
+
+    /// A textures.js voxel texture by name ("grain", "grass", "plinth", "rug", "floor" + material, "wall" + material).
+    func texture(_ name: String, _ arg: String? = nil) throws -> TextureData {
+        let json = try call("texture", [name, arg ?? NSNull()]).toString() ?? "null"
+        return try JSONDecoder().decode(TextureData.self, from: Data(json.utf8))
+    }
+
+    /// room.js's shell for a grid.
+    func room(_ g: OfficeScene.Grid) throws -> RoomPlan {
+        let json = try call("room", [g.w, g.d]).toString() ?? "null"
+        return try JSONDecoder().decode(RoomPlan.self, from: Data(json.utf8))
+    }
+
     struct LabelRect: Encodable { let id: String; let x, y, w, h, depth: Double; let status: String; let selected, speaking, kept: Bool }
 
     /// The web overlay's cullLabels(): which labels stay visible.

@@ -8,7 +8,9 @@ import UIKit
 final class OfficeRenderer: NSObject {
     let scene = SCNScene()
     let camera = SCNNode()
-    weak var bridge: Bridge?
+    weak var bridge: Bridge? { didSet { voxel = bridge.map(Voxel.init) } }
+    private var voxel: Voxel?
+    private var walls: [(name: String, full: SCNNode, stub: SCNNode)] = []
     private(set) var view: OfficeSCNView?
     private let room = SCNNode()
     private let furniture = SCNNode()
@@ -86,7 +88,7 @@ final class OfficeRenderer: NSObject {
     }
 
     func apply(_ s: OfficeScene) {
-        let structural = last == nil || last!.grid != s.grid || last!.theme != s.theme || last!.wallH != s.wallH
+        let structural = last == nil || last!.grid != s.grid || last!.look != s.look || last!.wallH != s.wallH
         if structural { buildRoom(s) }
         if structural || last!.items != s.items || last!.kinds != s.kinds { buildFurniture(s) }
         syncAgents(s)
@@ -98,58 +100,125 @@ final class OfficeRenderer: NSObject {
 
     private func buildRoom(_ s: OfficeScene) {
         room.childNodes.forEach { $0.removeFromParentNode() }
-        let w = Double(s.grid.w), d = Double(s.grid.d)
+        walls = []
+        guard let bridge, let voxel else { preconditionFailure("renderer has no bridge") }
+        do {
+            try buildRoom(s, plan: bridge.room(s.grid), voxel: voxel)
+        } catch {
+            preconditionFailure("room build failed: \(error)")
+        }
+    }
+
+    /// scene.js buildRoom(): textured floor, grass slab with a stone plinth, the seeded garden, four walls with cutaway stubs.
+    private func buildRoom(_ s: OfficeScene, plan: RoomPlan, voxel: Voxel) throws {
+        let w = Double(s.grid.w), d = Double(s.grid.d), look = s.look
         // a fixed shadow box over the room: the sun sits back along its own direction from the floor's centre
         let back = sun.worldFront * -40
         sun.position = SCNVector3(Float(w / 2) + back.x, back.y, Float(d / 2) + back.z)
-        sun.light?.orthographicScale = CGFloat(max(w, d)) * 0.62
+        sun.light?.orthographicScale = CGFloat(max(w, d) + plan.border * 2) * 0.62
         sun.light?.zNear = 1
-        sun.light?.zFar = 90
-        room.addChildNode(boxNode(at: [w / 2, -0.46, d / 2], size: [w + 60, 0.1, d + 60], color: UIColor(red: 0.53, green: 0.75, blue: 0.42, alpha: 1)))
-        room.addChildNode(boxNode(at: [w / 2, -0.34, d / 2], size: [w + 0.6, 0.23, d + 0.6], color: UIColor(red: 0.62, green: 0.55, blue: 0.47, alpha: 1)))
-        room.addChildNode(boxNode(at: [w / 2, -0.1, d / 2], size: [w, 0.1, d], color: cssColor(s.theme.floor.color)))
-        let wall = cssColor(s.theme.walls.color), trim = cssColor(s.theme.walls.trim)
-        room.addChildNode(boxNode(at: [w / 2 - 0.15, 0, -0.15], size: [w + 0.3, s.wallH, 0.3], color: wall))
-        room.addChildNode(boxNode(at: [-0.15, 0, d / 2], size: [0.3, s.wallH, d], color: wall))
-        room.addChildNode(boxNode(at: [w / 2 - 0.15, s.wallH, -0.15], size: [w + 0.4, 0.1, 0.4], color: trim))
-        room.addChildNode(boxNode(at: [-0.15, s.wallH, d / 2], size: [0.4, 0.1, d], color: trim))
-        room.addChildNode(boxNode(at: [w / 2, 0, 0.0], size: [w, 0.12, 0.06], color: trim))
-        room.addChildNode(boxNode(at: [0.0, 0, d / 2], size: [0.06, 0.12, d], color: trim))
+        sun.light?.zFar = 100
+
+        let floor = SCNNode(geometry: SCNPlane(width: w, height: d))
+        floor.geometry?.firstMaterial = voxel.material(map: try voxel.texture("floor", look.floor.material), tint: cssColor(look.floor.color), repeat: CGSize(width: w, height: d))
+        floor.eulerAngles.x = -.pi / 2
+        floor.position = SCNVector3(w / 2, 0, d / 2)
+        room.addChildNode(floor)
+
+        let gw = w + plan.border * 2, gd = d + plan.border * 2
+        let slab = SCNNode(geometry: SCNBox(width: gw, height: 1, length: gd, chamferRadius: 0))
+        let plinth = try voxel.texture("plinth"), grass = try voxel.texture("grass")
+        let alongX = voxel.material(map: plinth, repeat: CGSize(width: gw, height: 1)), alongZ = voxel.material(map: plinth, repeat: CGSize(width: gd, height: 1))
+        // SCNBox faces: front (+z), right (+x), back (-z), left (-x), top, bottom
+        slab.geometry?.materials = [alongX, alongZ, alongX, alongZ, voxel.material(map: grass, repeat: CGSize(width: gw, height: gd)), alongX]
+        slab.position = SCNVector3(w / 2, -0.505, d / 2)
+        room.addChildNode(slab)
+
+        let grain = try voxel.texture("grain")
+        let garden = SCNNode(geometry: try voxel.geometry(plan.garden))
+        garden.geometry?.firstMaterial = voxel.material(map: grain)
+        room.addChildNode(garden)
+
+        let trim = voxel.material(map: grain, tint: cssColor(look.walls.trim))
+        for wall in plan.walls {
+            let accent = look.walls.accent.flatMap { $0.wall == wall.name ? $0 : nil }
+            let body = voxel.material(map: try voxel.texture("wall", accent?.material ?? "plaster"), tint: cssColor(accent?.color ?? look.walls.color))
+            let frame = SCNNode()
+            frame.position = SCNVector3(wall.at[0], wall.at[1], wall.at[2])
+            frame.eulerAngles.y = Float(wall.yaw)
+            let full = SCNNode(), stub = SCNNode()
+            for (parent, boxes, mat) in [(full, wall.body, body), (full, wall.trim, trim), (stub, wall.stubBody, body), (stub, wall.stubTrim, trim)] {
+                let n = SCNNode(geometry: try voxel.geometry(boxes))
+                n.geometry?.firstMaterial = mat
+                parent.addChildNode(n)
+            }
+            stub.isHidden = true
+            frame.addChildNode(full)
+            frame.addChildNode(stub)
+            room.addChildNode(frame)
+            walls.append((wall.name, full, stub))
+        }
+        let posts = SCNNode(geometry: try voxel.geometry(plan.posts))
+        posts.geometry?.firstMaterial = trim
+        room.addChildNode(posts)
+    }
+
+    /// room.js cutaway(): walls the camera stands behind drop to their stubs.
+    private func updateCutaway() {
+        guard let g = last?.grid else { return }
+        let p = camera.presentation.position
+        let hide = ["back": p.z < 0.5, "front": p.z > Float(g.d) - 0.5, "left": p.x < 0.5, "right": p.x > Float(g.w) - 0.5]
+        for w in walls {
+            let h = hide[w.name] ?? false
+            w.full.isHidden = h
+            w.stub.isHidden = !h
+        }
     }
 
     // MARK: furniture
 
     private func buildFurniture(_ s: OfficeScene) {
         furniture.childNodes.forEach { $0.removeFromParentNode() }
-        for item in s.items {
-            guard let kind = s.kinds[item.kind] else { preconditionFailure("scene has item \(item.id) of unknown kind \(item.kind)") }
-            let node = model(of: kind, item: item, theme: s.theme)
-            node.position = SCNVector3(item.x, 0, item.z)
-            node.eulerAngles.y = Float(item.yaw)
-            furniture.addChildNode(node)
+        guard let voxel else { preconditionFailure("renderer has no bridge") }
+        var cache: [String: [(role: String, map: String?, geo: SCNGeometry)]] = [:]
+        do {
+            for item in s.items {
+                guard let kind = s.kinds[item.kind] else { preconditionFailure("scene has item \(item.id) of unknown kind \(item.kind)") }
+                if cache[item.kind] == nil {
+                    cache[item.kind] = try kind.parts.map { p in
+                        (p.role, p.map, try voxel.geometry(p.boxes, ao: p.role != "glow" && p.role != "glass"))
+                    }
+                }
+                let node = try model(cache[item.kind]!, kind: kind, item: item, look: s.look, voxel: voxel)
+                node.position = SCNVector3(item.x, 0, item.z)
+                node.eulerAngles.y = Float(item.yaw)
+                furniture.addChildNode(node)
+            }
+        } catch {
+            preconditionFailure("furniture build failed: \(error)")
         }
     }
 
-    private func model(of kind: OfficeScene.Kind, item: OfficeScene.Item, theme: OfficeScene.Theme) -> SCNNode {
+    /// One item: each part's shared mesh with the web's material for its role (scene.js builtinAssets/customAssets).
+    private func model(_ parts: [(role: String, map: String?, geo: SCNGeometry)], kind: OfficeScene.Kind, item: OfficeScene.Item, look: OfficeScene.Look, voxel: Voxel) throws -> SCNNode {
         let node = SCNNode()
-        let accent = cssColor(item.color ?? kind.defaultColor ?? "#ffffff")
-        for part in kind.parts {
-            for b in part.boxes {
-                let base = cssColor(b.color ?? "#ffffff")
-                let color: UIColor = switch part.role {
-                case "accent": multiply(base, accent)
-                case "finish": multiply(base, cssColor(theme.desk.wood))
-                case "rail": multiply(base, cssColor(theme.desk.rail))
-                case "glow": kind.glowColor.map(cssColor) ?? UIColor(red: 0.62, green: 0.82, blue: 1, alpha: 1)
-                default: base
-                }
-                let n = boxNode(at: b.at, size: b.size, color: color)
-                if part.role == "glow" { n.geometry?.firstMaterial?.emission.contents = color }
-                if part.role == "glass" { n.geometry?.firstMaterial?.transparency = 0.45 }
-                node.addChildNode(n)
+        let accent = cssColor(item.color ?? look.kindColors[item.kind] ?? kind.defaultColor ?? "#ffffff")
+        let grain = try voxel.texture("grain")
+        for p in parts {
+            let mat: SCNMaterial = switch p.role {
+            case "accent": voxel.material(map: try voxel.texture(p.map ?? "grain"), tint: accent)
+            case "finish": voxel.material(map: grain, tint: cssColor(look.desk.wood))
+            case "rail": voxel.material(map: grain, tint: cssColor(look.desk.rail))
+            case "glow": voxel.glow(map: try p.map.map { try voxel.texture($0) }, tint: kind.glowColor.map(cssColor) ?? .white)
+            case "glass": voxel.material(map: nil)
+            default: voxel.material(map: grain)
             }
+            if p.role == "glass" { mat.transparency = 0.38; mat.writesToDepthBuffer = false }
+            let g = p.geo.copy() as! SCNGeometry
+            g.firstMaterial = mat
+            node.addChildNode(SCNNode(geometry: g))
         }
-        return node.flattenedClone()
+        return node
     }
 
     // MARK: agents
@@ -166,7 +235,7 @@ final class OfficeRenderer: NSObject {
             if let n = agents[a.id] {
                 n.update(a) { [weak self] from, to in (try? self?.bridge?.route(from: from, to: to)) ?? [to] }
             } else {
-                let n = AgentNode(a)
+                let n = AgentNode(a, voxel: voxel!)
                 n.node.scale = SCNVector3(0.01, 0.01, 0.01)
                 n.node.runAction(.scale(to: 1, duration: 0.42))
                 people.addChildNode(n.node)
@@ -189,6 +258,7 @@ final class OfficeRenderer: NSObject {
             for (n, a) in zip(list, angles) { n.apply(a, clock: clock) }
         }
         placeCamera(dt: Float(dt))
+        updateCutaway()
         placePills()
     }
 
@@ -362,9 +432,3 @@ func boxNode(at: [Double], size: [Double], color: UIColor) -> SCNNode {
     return n
 }
 
-private func multiply(_ a: UIColor, _ b: UIColor) -> UIColor {
-    var (r1, g1, b1, a1, r2, g2, b2, a2): (CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0, 0, 0, 0, 0)
-    a.getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
-    b.getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
-    return UIColor(red: r1 * r2, green: g1 * g2, blue: b1 * b2, alpha: 1)
-}
