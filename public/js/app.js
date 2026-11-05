@@ -193,7 +193,8 @@ function boot() {
     if (frame.type === "snapshot") {
       role = frame.role ?? null;
       const write = role === "owner";
-      ui.setWrite(write, role === "join" ? (frame.as ?? null) : null);
+      // the shared "everyone" link is anyone: each viewer picks a name, marked as a guest (a named invite keeps its label)
+      ui.setWrite(write, role === "join" ? (frame.as && frame.as !== "everyone" ? frame.as : "") : null);
       ui.setRole(connect ? role : null);
       connect?.setRole(role);
       if (!write && role === null) console.warn("office: snapshot carries no role; treating this view as read-only");

@@ -15,6 +15,14 @@ export function imageFrom(dt) {
   return null;
 }
 
+const GUEST_ADJ = ["mossy", "sunny", "quiet", "brave", "fuzzy", "lucky", "sleepy", "zippy", "cosy", "misty", "pebbly", "breezy"];
+const GUEST_ANIMAL = ["otter", "fox", "owl", "panda", "koala", "heron", "lynx", "moth", "badger", "finch", "newt", "yak"];
+/** A friendly random name for a guest on the shared link, e.g. "mossy-otter". */
+function guestName() {
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  return `${pick(GUEST_ADJ)}-${pick(GUEST_ANIMAL)}`;
+}
+
 export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom, onSound, soundOn, onEdit, onKick, onDesigner, onImage, onSide }) {
   root.insertAdjacentHTML("beforeend", `
     <aside class="side glass">
@@ -37,7 +45,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
         </form>
       </div>
       <footer class="side-foot">
-        <label class="as" hidden>chatting as <input class="as-input" maxlength="32" placeholder="your name" spellcheck="false"></label>
+        <label class="as" hidden>chatting as <input class="as-input" maxlength="32" placeholder="your name" spellcheck="false"><span class="as-guest" hidden>(guest)</span></label>
         <div class="ro" hidden>Read-only view. Open the owner link to chat and edit.</div>
       </footer>
     </aside>
@@ -136,11 +144,12 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
       e.preventDefault();
       const text = ta.value.trim();
       if (!text) return;
-      const as = chatAs ?? asInput.value.trim();
+      const as = chatAs || asInput.value.trim();
       if (!as) { asInput.focus(); toast("Pick a name to chat as first (bottom of the sidebar)."); return; }
       const to = form.dataset.to === "dm" ? dmAgent : null;
       try {
-        onSend(chatAs === null ? { type: "chat", to, text, as } : { type: "chat", to, text });
+        // owner and shared-link guests send their name (a guest's is shown as "<name> (guest)"); a named invite chats as its label
+        onSend(chatAs ? { type: "chat", to, text } : { type: "chat", to, text, as });
         ta.value = "";
         ta.style.height = "auto";
       } catch (err) {
@@ -305,8 +314,14 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
       chatAs = w ? null : as;
       root.querySelector(".side .composer").hidden = !canChat();
       $(".as").hidden = !canChat();
-      asInput.disabled = chatAs !== null;
-      if (chatAs !== null) asInput.value = chatAs;
+      // chatAs: null = owner (any name), "" = the shared link (pick a name, shown as a guest), else a named invite's label
+      asInput.disabled = !!chatAs;
+      if (chatAs) asInput.value = chatAs;
+      $(".as-guest").hidden = chatAs !== "";
+      if (chatAs === "" && !asInput.value.trim()) {
+        asInput.value = guestName();
+        try { localStorage.setItem("office.as", asInput.value); } catch { /* fine: a new name next time */ }
+      }
       $(".ro").hidden = canChat();
       $('[data-act="edit"]').hidden = !w;
       if (state) renderDm();

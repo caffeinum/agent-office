@@ -231,6 +231,13 @@ interface WsAttachment {
   label?: string;
 }
 
+/** A shared-link guest's chosen name, cleaned and marked: "mossy-otter" → "mossy-otter (guest)"; nothing usable → "guest". */
+export function guestName(picked: string): string {
+  const suffix = " (guest)";
+  const clean = defangTags(picked).replace(new RegExp(SPOOF_LINE_RE.source, "gu"), " ").replace(/[()]/g, "").replace(/\s+/g, " ").trim().slice(0, NAME_MAX - suffix.length).trim();
+  return clean ? clean + suffix : "guest";
+}
+
 /** The Worker's end of one GET /mcp event stream (tags "mcp" and "s:<session hash>"). */
 interface McpAttachment {
   role: "mcp";
@@ -1938,13 +1945,16 @@ export class Office extends DurableObject<Env> implements ToolHost {
       }
       if (frame.type === "ping") return;
       if (role === "join" && frame.type === "chat") {
-        // a friend on a join link chats as their invite's label, never as someone else
+        // a person's own invite chats as its label; the shared link is anyone, so each viewer picks a name and it is
+        // always marked "(guest)": nobody on it can take the owner's name or a named invite's
         await this.markActive(false);
         this.rateLimit(`join-ws:${label ?? DEFAULT_INVITE}`, RATE_MAX);
+        const picked = typeof frame.as === "string" ? frame.as : "";
         const f = parseOwnerFrame({ ...frame, as: undefined });
         if (f.type !== "chat") throw new ToolError(400, "expected a chat frame");
         const to = f.to ? this.findAgentRef(f.to) : null;
-        await this.postChat(`human:${label ?? DEFAULT_INVITE}`, "guest", to, f.text);
+        const who = label && label !== DEFAULT_INVITE ? label : guestName(picked);
+        await this.postChat(`human:${who}`, "guest", to, f.text);
         return;
       }
       if (role !== "owner") throw new ToolError(403, role === "join" ? "a join link can chat; edits need the ownerKey" : "read-only view: chat and edits need the ownerKey");
