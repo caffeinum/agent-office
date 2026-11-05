@@ -378,7 +378,7 @@ final class OfficeRenderer: NSObject {
         for (id, n) in agents where !ids.contains(id) {
             n.node.runAction(.sequence([.scale(to: 0.01, duration: 0.42), .removeFromParentNode()]))
             agents[id] = nil
-            pills[id]?.node.removeFromParent()
+            if let pill = pills[id] { pill.node.removeFromParent(); Graveyard.keep(pill) }
             pills[id] = nil
         }
         for a in s.agents {

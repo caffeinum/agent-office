@@ -43,6 +43,7 @@ final class Pill {
         guard s != sig else { return }
         sig = s
         let img = Self.draw(name: a.name, emoji: a.emoji, status: a.status, act: act, say: say, hue: cssColor(a.css), selected: selected)
+        if let old = full?.texture { Graveyard.keep(old) }
         full = (SKTexture(image: img), img.size)
         labelSize = CGSize(width: img.size.width - 16 * Self.scale, height: img.size.height - 16 * Self.scale)
         working = a.status == "working"
@@ -114,3 +115,16 @@ final class Pill {
 }
 
 private func clip(_ s: String, _ n: Int) -> String { s.count <= n ? s : String(s.prefix(n - 1)) + "…" }
+
+/// SceneKit draws the SpriteKit overlay on its render thread while the main thread swaps pill textures and removes
+/// pills; releasing one mid-frame crashed in set_fragment_texture. What leaves the overlay is kept alive a few seconds.
+enum Graveyard {
+    private static var kept: [(at: CFTimeInterval, obj: AnyObject)] = []
+
+    static func keep(_ obj: AnyObject) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let now = CACurrentMediaTime()
+        kept.removeAll { now - $0.at > 3 }
+        kept.append((now, obj))
+    }
+}
