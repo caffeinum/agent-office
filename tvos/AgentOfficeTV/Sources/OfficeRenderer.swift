@@ -36,7 +36,8 @@ final class OfficeRenderer: NSObject {
     private(set) var follow: String? { didSet { if follow != oldValue { onFollow?(follow); refreshPills() } } }
     var onFollow: ((String?) -> Void)?
     private var touch: (mode: TouchMode, x: Float, y: Float, angle: Float)?
-    private enum TouchMode { case undecided, wheel, zoom, pan }
+    enum TouchMode { case undecided, wheel, zoom, pan }
+    private var path: [SIMD2<Float>] = []
 
     // Auto-tour: after `tourAfter` seconds without input the camera spins slowly and visits whoever just spoke or
     // started working, for `tourVisit` seconds each.
@@ -55,28 +56,39 @@ final class OfficeRenderer: NSObject {
         camera.camera?.projectionDirection = .vertical
         camera.camera?.zNear = 0.5
         camera.camera?.zFar = 400
+        // the web renders through ACES tone mapping, which lifts and softens colours; approximate it on the camera
+        camera.camera?.wantsHDR = true
+        camera.camera?.wantsExposureAdaptation = false
+        camera.camera?.exposureOffset = CGFloat(Double(ProcessInfo.processInfo.environment["AO_EXPOSURE"] ?? "0.35") ?? 0.35)
+        camera.camera?.saturation = CGFloat(Double(ProcessInfo.processInfo.environment["AO_SATURATION"] ?? "0.8") ?? 0.8)
+        camera.camera?.contrast = CGFloat(Double(ProcessInfo.processInfo.environment["AO_CONTRAST"] ?? "0") ?? 0)
+        camera.camera?.bloomIntensity = 0
         scene.rootNode.addChildNode(camera)
         let sun = SCNNode()
         sun.light = SCNLight()
         sun.light?.type = .directional
-        sun.light?.intensity = 700
-        sun.light?.color = UIColor(red: 1, green: 0.98, blue: 0.95, alpha: 1)
+        // scene.js day theme: sun #ffe4bd at 2.7 and hemisphere #d7ecff/#e3c39d at 1.25, each through three's
+        // Lambert BRDF (÷π); SceneKit's lambert takes the light as is, so the intensities carry the ÷π
+        sun.light?.intensity = 2.7 / .pi * 1000
+        sun.light?.color = cssColor("#ffe4bd")
         sun.light?.castsShadow = true
         sun.light?.shadowMode = .forward
-        sun.light?.shadowRadius = 2
-        sun.light?.shadowSampleCount = 4
+        sun.light?.shadowRadius = 3
+        sun.light?.shadowSampleCount = 8
         sun.light?.shadowMapSize = CGSize(width: 4096, height: 4096)
         sun.light?.shadowBias = 0.05
-        sun.light?.shadowColor = UIColor(red: 0.25, green: 0.15, blue: 0.05, alpha: 0.3)
+        sun.light?.shadowColor = UIColor(white: 0, alpha: 1)
         sun.light?.automaticallyAdjustsShadowProjection = false
-        sun.eulerAngles = SCNVector3(-0.95, 0.75, 0)
         scene.rootNode.addChildNode(sun)
         self.sun = sun
         let fill = SCNNode()
         fill.light = SCNLight()
         fill.light?.type = .ambient
-        fill.light?.intensity = 600
-        fill.light?.color = UIColor(white: 1, alpha: 1)
+        fill.light?.intensity = 1.25 / .pi * 1000 * 0.85
+        fill.light?.color = cssColor("#ddd7ce")
+        scene.fogColor = cssColor("#e8eef2")
+        scene.fogStartDistance = 50
+        scene.fogEndDistance = 160
         scene.rootNode.addChildNode(fill)
         overlay.scaleMode = .resizeFill
         overlay.backgroundColor = .clear
@@ -128,11 +140,16 @@ final class OfficeRenderer: NSObject {
     private func buildRoom(_ s: OfficeScene, plan: RoomPlan, voxel: Voxel) throws {
         let w = Double(s.grid.w), d = Double(s.grid.d), look = s.look
         // a fixed shadow box over the room: the sun sits back along its own direction from the floor's centre
-        let back = sun.worldFront * -40
-        sun.position = SCNVector3(Float(w / 2) + back.x, back.y, Float(d / 2) + back.z)
-        sun.light?.orthographicScale = CGFloat(max(w, d) + plan.border * 2) * 0.62
-        sun.light?.zNear = 1
-        sun.light?.zFar = 100
+        // scene.js buildRoom: the sun sits along (-0.55, 1, 0.75) from the room's centre, R × 2.4 away
+        let R = Float(hypot(w, d) / 2 + plan.border + 1)
+        let c = SIMD3<Float>(Float(w / 2), 0, Float(d / 2))
+        let at = c + simd_normalize(SIMD3<Float>(-0.55, 1, 0.75)) * R * 2.4
+        sun.position = SCNVector3(at.x, at.y, at.z)
+        sun.look(at: SCNVector3(c.x, c.y, c.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 0, -1))
+        sun.light?.orthographicScale = CGFloat(R)
+        sun.light?.zNear = 0.5
+        sun.light?.zFar = CGFloat(R * 5)
+        scene.background.contents = try voxel.texture("sky")
 
         let floor = SCNNode(geometry: SCNPlane(width: w, height: d))
         floor.geometry?.firstMaterial = voxel.material(map: try voxel.texture("floor", look.floor.material), tint: cssColor(look.floor.color), repeat: CGSize(width: w, height: d))
@@ -328,7 +345,8 @@ final class OfficeRenderer: NSObject {
         camDist += (wantDist - camDist) * k
         let dir = SCNVector3(sin(polar) * sin(azimuth), cos(polar), sin(polar) * cos(azimuth))
         camera.position = SCNVector3(camTarget.x + dir.x * camDist, camTarget.y + dir.y * camDist, camTarget.z + dir.z * camDist)
-        camera.look(at: camTarget)
+        // world up, every frame: plain look(at:) keeps the node's current up, so roll would creep in while orbiting
+        camera.look(at: camTarget, up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 0, -1))
     }
 
     private func homeDistance(_ g: OfficeScene.Grid, aspect: Float) -> Float {
@@ -429,44 +447,74 @@ final class OfficeRenderer: NSObject {
     private func listen(_ c: GCController) {
         guard let pad = c.microGamepad else { return }
         pad.reportsAbsoluteDpadValues = true
-        // Three gestures on one clickpad: circling on the outer ring spins the camera around the room (or the followed
-        // agent); a vertical swipe zooms; a horizontal swipe pans across the room (spins while following). A swipe's
-        // axis is decided by its first clear movement. Lifting the finger reports (0, 0).
+        // Three gestures on one clickpad: circling spins the camera around the room (or the followed agent); a vertical
+        // swipe zooms; a horizontal swipe pans across the room (spins while following). The gesture is told apart by
+        // its path: once the finger has travelled far enough, a path that turns around the pad's centre is a circle,
+        // a straight one is a swipe along its main axis. Lifting the finger reports (0, 0).
         pad.dpad.valueChangedHandler = { [weak self] _, x, y in
             guard let self else { return }
-            if x == 0 && y == 0 { self.touch = nil; return }
+            if x == 0 && y == 0 { self.touch = nil; self.path = []; return }
             self.noteInput()
-            let r = (x * x + y * y).squareRoot(), a = atan2(y, x)
+            let a = atan2(y, x)
             guard var t = self.touch else {
-                self.touch = (r > 0.75 ? .wheel : .undecided, x, y, a)
+                self.touch = (.undecided, x, y, a)
+                self.path = [SIMD2(x, y)]
                 return
             }
             let dx = x - t.x, dy = y - t.y
             if t.mode == .undecided {
-                guard max(abs(dx), abs(dy)) > 0.08 else { return }
-                t.mode = abs(dy) > abs(dx) ? .zoom : .pan
+                self.path.append(SIMD2(x, y))
+                guard let mode = Self.classify(self.path) else { self.touch = (t.mode, x, y, a); return }
+                t.mode = mode
             }
             switch t.mode {
             case .wheel:
                 var d = a - t.angle
                 while d > .pi { d -= 2 * .pi }
                 while d < -.pi { d += 2 * .pi }
-                self.azimuth += d
+                self.azimuth -= d
             case .zoom:
                 self.zoom = min(2.2, max(0.25, self.zoom * exp(-dy * 0.9)))
             case .pan:
                 if self.follow != nil {
-                    self.azimuth += dx * 1.6
+                    self.azimuth -= dx * 1.6
                 } else {
                     // screen-right on the floor, from the camera's spin
                     let right = SIMD2<Float>(cos(self.azimuth), -sin(self.azimuth))
-                    self.pan += right * dx * 0.6 * self.camDist * 0.25
+                    self.pan -= right * dx * 0.6 * self.camDist * 0.25
                 }
             case .undecided:
                 return
             }
             self.touch = (t.mode, x, y, a)
         }
+    }
+
+    /// Circle or swipe, once the finger has moved far enough to tell: a circle keeps turning its heading the same way
+    /// (about 1/radius per unit of travel), a swipe keeps its heading. Headings are taken over steps of at least 0.06
+    /// so finger jitter doesn't count as turning.
+    static func classify(_ path: [SIMD2<Float>]) -> TouchMode? {
+        guard let first = path.first, let last = path.last else { return nil }
+        var points = [first]
+        var length: Float = 0
+        for p in path.dropFirst() where simd_length(p - points.last!) >= 0.06 {
+            length += simd_length(p - points.last!)
+            points.append(p)
+        }
+        var turn: Float = 0
+        if points.count >= 3 {
+            for i in 2..<points.count {
+                let h0 = points[i - 1] - points[i - 2], h1 = points[i] - points[i - 1]
+                var d = atan2(h1.y, h1.x) - atan2(h0.y, h0.x)
+                while d > .pi { d -= 2 * .pi }
+                while d < -.pi { d += 2 * .pi }
+                turn += d
+            }
+        }
+        if abs(turn) > 0.5 { return .wheel }
+        guard length > 0.45 && abs(turn) < 0.3 || length > 0.9 else { return nil }
+        let chord = last - first
+        return abs(chord.y) > abs(chord.x) ? .zoom : .pan
     }
 }
 
@@ -479,23 +527,35 @@ final class OfficeSCNView: SCNView {
     var onHoldPlayPause: (() -> Void)?
     override var canBecomeFocused: Bool { true }
 
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        guard gestureRecognizers?.isEmpty ?? true else { return }
-        for (type, action) in [(UIPress.PressType.select, #selector(heldSelect(_:))), (.playPause, #selector(heldPlayPause(_:)))] {
-            let hold = UILongPressGestureRecognizer(target: self, action: action)
-            hold.allowedPressTypes = [NSNumber(value: type.rawValue)]
-            hold.minimumPressDuration = type == .select ? 1.2 : 0.7
-            addGestureRecognizer(hold)
+    /// Holds fire while the button is still down (after `holdAfter`), and that press then does nothing on release.
+    private static let holdAfter: [UIPress.PressType: Double] = [.playPause: 0.6, .select: 1.2]
+    private var holds: [UIPress.PressType: DispatchWorkItem] = [:]
+    private var held: Set<UIPress.PressType> = []
+
+    private func startHold(_ type: UIPress.PressType) {
+        guard let after = Self.holdAfter[type] else { return }
+        held.remove(type)
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.held.insert(type)
+            if type == .playPause { self.onHoldPlayPause?() } else { self.onHoldSelect?() }
         }
+        holds[type]?.cancel()
+        holds[type] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + after, execute: work)
     }
 
-    @objc private func heldSelect(_ g: UILongPressGestureRecognizer) { if g.state == .began { onHoldSelect?() } }
-    @objc private func heldPlayPause(_ g: UILongPressGestureRecognizer) { if g.state == .began { onHoldPlayPause?() } }
+    /// True when this release ends a hold that already fired.
+    private func endHold(_ type: UIPress.PressType) -> Bool {
+        holds[type]?.cancel()
+        holds[type] = nil
+        return held.remove(type) != nil
+    }
 
     private func ours(_ p: UIPress) -> Bool { p.type != .menu || consumesMenu?() == true }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        for p in presses where ours(p) { startHold(p.type) }
         let rest = presses.filter { !ours($0) }
         if !rest.isEmpty { super.pressesBegan(rest, with: event) }
     }
@@ -503,9 +563,14 @@ final class OfficeSCNView: SCNView {
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var rest = Set<UIPress>()
         for p in presses {
-            if ours(p) { onPress?(p.type) } else { rest.insert(p) }
+            if ours(p) { if !endHold(p.type) { onPress?(p.type) } } else { rest.insert(p) }
         }
         if !rest.isEmpty { super.pressesEnded(rest, with: event) }
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        for p in presses { _ = endHold(p.type) }
+        super.pressesCancelled(presses, with: event)
     }
 }
 

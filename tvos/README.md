@@ -33,15 +33,22 @@ Remote (Siri Remote clickpad):
 | click select | follow the first agent | stop following |
 | click ▲ | home view | home view |
 | click ▼ | room chat on / off | room chat on / off |
-| play/pause | agent list on / off (▲▼ move through it, select follows) | this agent's chat on / off |
+| play/pause | agent list on / off (▲▼ move through it, select follows that agent and opens its chat) | this agent's chat on / off |
 | hold play/pause | hide all UI | hide all UI |
-| back | close panel, then "press back again to exit" | close panel, then stop following |
+| back | agent chat → room chat → closed, then "press back again to exit" | same, then stop following |
 | hold select | forget the office link | forget the office link |
 
-The horizon never tilts. After 2 minutes without input the camera tours: it spins slowly and visits whoever just
+A circle and a swipe are told apart by how much the finger's heading turns. The horizon never tilts. Holds fire
+while the button is still down. A controls strip shows for a while after launch and after ▲. After 2 minutes without input the camera tours: it spins slowly and visits whoever just
 spoke or started working, 20 s each; any input ends the tour.
 
 Testing headless in the simulator: `AO_PRESSES="playPause+right+down+menu"` replays presses (one per `AO_PRESS_GAP`
 seconds, from 8 s after launch), `AO_TOUR_AFTER=6` starts the tour sooner and `AO_STATS=1` shows SceneKit statistics and logs tick timings, via `SIMCTL_CHILD_…` (or `devicectl … --environment-variables` on the TV). Separate presses
 with `+`: a comma in the value breaks `simctl launch`. With `--terminate-running-process` every other launch can land
 on the home screen; launch again.
+
+## Icon
+
+`icon/make-svg.py` draws the icon as SVG layers (`back.svg` sky, `front.svg` an isometric voxel office) and
+`swift icon/render.swift icon AgentOfficeTV/Resources/Assets.xcassets` renders them into the tvOS brand assets
+(layered app icon 400×240 @1x/@2x and 1280×768, top shelf 1920×720 and 2320×720).

@@ -71,6 +71,9 @@ final class OfficeModel: ObservableObject {
     @Published var following: String?
     @Published var clean = false
     @Published var exitHint = false
+    /// The controls strip: shown for a while after launch and after ▲ (home), hidden on other input.
+    @Published var hints = true
+    private var hintsUntil = Date().addingTimeInterval(14)
     /// The highlighted row while the agent list is open.
     @Published var cursor = 0
     let renderer = OfficeRenderer()
@@ -82,6 +85,7 @@ final class OfficeModel: ObservableObject {
     private var timer: Timer?
 
     func start(_ link: OfficeLink) {
+        showHints(14)
         do {
             bridge = try Bridge()
         } catch {
@@ -110,11 +114,14 @@ final class OfficeModel: ObservableObject {
     /// agent list (or the followed agent's chat), back closes things one at a time and then exits on a second press.
     func press(_ type: UIPress.PressType) {
         renderer.noteInput()
+        showHints(type == .upArrow ? 8 : 0)
         if panel == .agents, !agents.isEmpty, [.upArrow, .downArrow, .select].contains(type) {
             switch type {
             case .upArrow: cursor = max(0, cursor - 1)
             case .downArrow: cursor = min(agents.count - 1, cursor + 1)
-            default: renderer.follow(agents[cursor].id)
+            default:
+                renderer.follow(agents[cursor].id)
+                panel = .chat(agent: agents[cursor].id)
             }
             exitHint = false
             return
@@ -131,6 +138,7 @@ final class OfficeModel: ObservableObject {
             if panel == .agents { cursor = following.flatMap { id in agents.firstIndex { $0.id == id } } ?? 0 }
         case .menu:
             if clean { clean = false }
+            else if case .chat(_?) = panel { panel = .chat(agent: nil) }
             else if panel != .none { panel = .none }
             else if following != nil { renderer.unfollow() }
             else {
@@ -166,6 +174,15 @@ final class OfficeModel: ObservableObject {
     /// Back is ours unless the exit hint is up: then it goes to the system, which leaves the app.
     func consumesMenu() -> Bool {
         clean || panel != .none || following != nil || Date() >= exitHintUntil
+    }
+
+    private func showHints(_ seconds: Double) {
+        hintsUntil = Date().addingTimeInterval(seconds)
+        hints = seconds > 0
+        guard seconds > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            if let self, Date() >= self.hintsUntil { self.hints = false }
+        }
     }
 
     func toggleClean() {
@@ -220,6 +237,13 @@ struct OfficeScreen: View {
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
                     .padding(48)
                 }
+            }
+            if model.hints && !model.clean && model.panel == .none && !model.exitHint {
+                Text("◀ ▶ follow · ⏯ agents · ▼ chat · ▲ home · ⟳ circle: spin · swipe ↕ zoom ↔ pan · hold ⏯ hide")
+                    .font(.caption2).foregroundStyle(Color(red: 0.17, green: 0.14, blue: 0.13))
+                    .padding(.horizontal, 26).padding(.vertical, 12)
+                    .background(Capsule().fill(Color(red: 1, green: 0.99, blue: 0.97, opacity: 0.92)))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).padding(.bottom, 60)
             }
             if model.exitHint {
                 Text("press back again to exit").font(.callout).padding(.horizontal, 28).padding(.vertical, 14)

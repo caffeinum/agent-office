@@ -1487,6 +1487,24 @@
     }
     return tex(c);
   }
+  function skyTexture(night) {
+    const [c, g] = canvas(4, 256);
+    const grad = g.createLinearGradient(0, 0, 0, 256);
+    if (night) {
+      grad.addColorStop(0, "#0d1026");
+      grad.addColorStop(0.6, "#1d2147");
+      grad.addColorStop(1, "#33305a");
+    } else {
+      grad.addColorStop(0, "#9fd3f5");
+      grad.addColorStop(0.55, "#d9eef7");
+      grad.addColorStop(1, "#fbe7cf");
+    }
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 4, 256);
+    const t = new CanvasTexture(c);
+    t.colorSpace = SRGBColorSpace;
+    return t;
+  }
   function grey(g, x, y, v) {
     const k2 = Math.round(255 * Math.max(0, Math.min(1, v)));
     g.fillStyle = `rgb(${k2},${k2},${k2})`;
@@ -1655,7 +1673,8 @@
     screen: () => screenTexture(),
     tv: () => tvTexture(),
     rack: () => rackTexture(),
-    window: () => windowTexture(false)
+    window: () => windowTexture(false),
+    sky: () => skyTexture(false)
   };
   var state = null;
   var walk = null;

@@ -10,7 +10,7 @@ import { blockedCells } from "../../public/shared/kinds.js";
 import { kindOf } from "../../public/shared/catalog.js";
 import { characterRig } from "../../public/js/character.js";
 import { GARDEN_BORDER, cornerPosts, gardenBoxes, roomWalls, wallBoxes } from "../../public/js/room.js";
-import { floorTexture, grainTexture, grassTexture, plinthTexture, rackTexture, rugTexture, screenTexture, tvTexture, wallTexture, windowTexture } from "../../public/js/textures.js";
+import { floorTexture, grainTexture, grassTexture, plinthTexture, rackTexture, rugTexture, screenTexture, skyTexture, tvTexture, wallTexture, windowTexture } from "../../public/js/textures.js";
 import { hueColors, themeLook } from "../../public/js/model.js";
 import { buildGeometry } from "../../public/js/voxel.js";
 import { installDocument } from "./pixel-canvas.js";
@@ -20,7 +20,7 @@ installDocument();
 const TEXTURES = {
   grain: () => grainTexture(), grass: () => grassTexture(), plinth: () => plinthTexture(), rug: () => rugTexture(),
   floor: (m) => floorTexture(m), wall: (m) => wallTexture(m),
-  screen: () => screenTexture(), tv: () => tvTexture(), rack: () => rackTexture(), window: () => windowTexture(false),
+  screen: () => screenTexture(), tv: () => tvTexture(), rack: () => rackTexture(), window: () => windowTexture(false), sky: () => skyTexture(false),
 };
 
 let state = null;
