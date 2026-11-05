@@ -83,7 +83,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
 
   const tex = {
     grain: T.grainTexture(), wood: T.woodTexture(), plaster: T.plasterTexture(), grass: T.grassTexture(), plinth: T.plinthTexture(),
-    rug: T.rugTexture(), screen: T.screenTexture(), tv: T.tvTexture(), rack: T.rackTexture(),
+    rug: T.rugTexture(), screen: T.screenTexture(), screenOff: T.screenOffTexture(), tv: T.tvTexture(), rack: T.rackTexture(),
     windowDay: T.windowTexture(false), skyDay: T.skyTexture(false), skyNight: T.skyTexture(true), blob: T.blobTexture(),
   };
   const texCache = new Map();
@@ -179,7 +179,8 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     if (m.glow) {
       const fallback = m.glow.tex === "window" ? tex.windowDay : m.glow.tex ? tex[m.glow.tex] : null;
       const glowMat = new THREE.MeshBasicMaterial({ map: fallback, color: m.glow.color ?? "#ffffff", toneMapped: true });
-      const screen = m.glow.tex === "screen" || m.glow.tex === "tv";
+      // a desk's own monitor is off until someone sits there (then syncScreens draws theirs over it)
+      const screen = m.glow.tex === "screen" || m.glow.tex === "screenOff" || m.glow.tex === "tv";
       glowMat.userData = { baseColor: new THREE.Color(m.glow.color ?? "#ffffff"), lamp: !!m.glow.lamp, window: m.glow.tex === "window", screen, fallback, logo: screen && !!kindOf(kind)?.screen };
       if (screen) { glowMat.map = screenMap(glowMat); screenMats.add(glowMat); }
       S.glowMats.set(kind, glowMat);

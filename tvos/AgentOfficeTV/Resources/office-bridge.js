@@ -357,7 +357,7 @@
           ...ch.base
         ],
         accent: ch.accent,
-        glow: { boxes: [vbox(DESK_SCREEN.x, DESK_SCREEN.y, DESK_SCREEN.z, DESK_SCREEN.w, DESK_SCREEN.h, 0.01, WHITE, front)], tex: "screen" }
+        glow: { boxes: [vbox(DESK_SCREEN.x, DESK_SCREEN.y, DESK_SCREEN.z, DESK_SCREEN.w, DESK_SCREEN.h, 0.01, WHITE, front)], tex: "screenOff" }
       };
     },
     chair: () => {
@@ -1528,6 +1528,14 @@
     }
     return tex(c);
   }
+  function screenOffTexture() {
+    const [c, g] = canvas(32, 20);
+    g.fillStyle = "#0c0f16";
+    g.fillRect(0, 0, 32, 20);
+    g.fillStyle = "#151a24";
+    for (let i = 0; i < 6; i++) g.fillRect(20 + i, 2 + i * 2, 3, 2);
+    return tex(c);
+  }
   function screenTexture() {
     const [c, g] = canvas(32, 20);
     const r = rng(53);
@@ -2097,6 +2105,7 @@
     floor: (m) => floorTexture(m),
     wall: (m) => wallTexture(m),
     screen: () => screenTexture(),
+    screenOff: () => screenOffTexture(),
     tv: () => tvTexture(),
     rack: () => rackTexture(),
     window: () => windowTexture(false),

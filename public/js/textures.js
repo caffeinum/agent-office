@@ -123,6 +123,16 @@ export function rugTexture() {
 }
 
 /** Monitor screen: dark editor with coloured code lines. */
+/** A monitor that's switched off: dark glass with a faint sheen (desks nobody sits at). */
+export function screenOffTexture() {
+  const [c, g] = canvas(32, 20);
+  g.fillStyle = "#0c0f16";
+  g.fillRect(0, 0, 32, 20);
+  g.fillStyle = "#151a24";
+  for (let i = 0; i < 6; i++) g.fillRect(20 + i, 2 + i * 2, 3, 2);
+  return tex(c);
+}
+
 export function screenTexture() {
   const [c, g] = canvas(32, 20);
   const r = rng(53);

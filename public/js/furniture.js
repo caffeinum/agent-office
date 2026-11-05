@@ -89,7 +89,7 @@ export const MODELS = {
         ...ch.base,
       ],
       accent: ch.accent,
-      glow: { boxes: [vbox(DESK_SCREEN.x, DESK_SCREEN.y, DESK_SCREEN.z, DESK_SCREEN.w, DESK_SCREEN.h, 0.01, WHITE, front)], tex: "screen" },
+      glow: { boxes: [vbox(DESK_SCREEN.x, DESK_SCREEN.y, DESK_SCREEN.z, DESK_SCREEN.w, DESK_SCREEN.h, 0.01, WHITE, front)], tex: "screenOff" },
     };
   },
   chair: () => {
