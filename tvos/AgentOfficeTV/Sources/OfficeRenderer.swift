@@ -112,6 +112,8 @@ final class OfficeRenderer: NSObject {
     }
 
     func apply(_ s: OfficeScene) {
+        Watchdog.at("apply")
+        defer { Watchdog.at("idle") }
         let structural = last == nil || last!.grid != s.grid || last!.look != s.look || last!.wallH != s.wallH
         if structural { buildRoom(s) }
         if structural || last!.items != s.items || last!.kinds != s.kinds { buildFurniture(s) }
@@ -298,18 +300,24 @@ final class OfficeRenderer: NSObject {
         lastTick = now
         clock += dt
         let t0 = CACurrentMediaTime()
+        Watchdog.at("tick.tour")
         stepTour(now: now, dt: Float(dt))
         let list = Array(agents.values)
+        Watchdog.at("tick.step")
         for n in list { n.step(dt: Float(dt)) }
         let t1 = CACurrentMediaTime()
+        Watchdog.at("tick.limbs")
         if let angles = try? bridge?.limbs(list.map { ($0.pose, $0.agent.phase) }, t: clock), angles.count == list.count {
             for (n, a) in zip(list, angles) { n.apply(a, clock: clock) }
         }
         let t2 = CACurrentMediaTime()
+        Watchdog.at("tick.camera")
         placeCamera(dt: Float(dt))
         updateCutaway()
         let t3 = CACurrentMediaTime()
+        Watchdog.at("tick.pills")
         placePills()
+        Watchdog.at("idle")
         let t4 = CACurrentMediaTime()
         if Self.stats {
             perf.n += 1; perf.step += t1 - t0; perf.limbs += t2 - t1; perf.cam += t3 - t2; perf.pills += t4 - t3
@@ -469,7 +477,8 @@ final class OfficeRenderer: NSObject {
             self.liftWork?.cancel()
             self.liftWork = nil
             self.noteInput()
-            defer { self.touch = SIMD2(x, y) }
+            Watchdog.at("touch")
+            defer { self.touch = SIMD2(x, y); Watchdog.at("idle") }
             guard let t = self.touch, !crossedDeadZone else { return }
             let dx = x - t.x, dy = y - t.y
             self.azimuthGoal -= dx * 2.2

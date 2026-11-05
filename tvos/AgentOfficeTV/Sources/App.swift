@@ -85,6 +85,7 @@ final class OfficeModel: ObservableObject {
     private var timer: Timer?
 
     func start(_ link: OfficeLink) {
+        Watchdog.start()
         showHints(14)
         do {
             bridge = try Bridge()
@@ -113,6 +114,8 @@ final class OfficeModel: ObservableObject {
     /// The remote: ◀ ▶ step through agents, select follows, ▲ goes home, ▼ toggles the room chat, play/pause toggles the
     /// agent list (or the followed agent's chat), back closes things one at a time and then exits on a second press.
     func press(_ type: UIPress.PressType) {
+        Watchdog.at("press \(type.rawValue)")
+        defer { Watchdog.at("idle") }
         renderer.noteInput()
         showHints(type == .upArrow ? 8 : 0)
         if panel == .agents, !agents.isEmpty, [.upArrow, .downArrow, .select].contains(type) {
@@ -191,6 +194,8 @@ final class OfficeModel: ObservableObject {
     }
 
     private func receive(_ text: String) {
+        Watchdog.at("frame")
+        defer { Watchdog.at("idle") }
         do {
             let type = try bridge?.frame(text)
             if type == "snapshot" { status = "live" }
@@ -201,6 +206,8 @@ final class OfficeModel: ObservableObject {
     }
 
     private func refresh() {
+        Watchdog.at("refresh.scene")
+        defer { Watchdog.at("idle") }
         do {
             guard let s = try bridge?.scene() else { return }
             renderer.apply(s)

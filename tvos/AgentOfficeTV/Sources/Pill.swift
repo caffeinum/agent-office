@@ -13,7 +13,7 @@ final class Pill {
     private(set) var kept = true
     /// The tag + activity box the web measures for culling (without the padding around the drawing).
     private(set) var labelSize = CGSize.zero
-    private static let scale: CGFloat = 1.9
+    private static let scale: CGFloat = 1.45
     private static let dot: [String: UIColor] = [
         "working": cssColor("#4fbf7a"), "idle": cssColor("#8fa6c9"), "waiting": cssColor("#f2b33d"), "away": cssColor("#b4aaa2"),
     ]
