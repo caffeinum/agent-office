@@ -34,11 +34,12 @@ if (what === "agent") {
   const [name, needle] = args;
   const { agentToken } = await call("join", { name: `checker-${process.pid}` });
   const read = await call("chat_read", {}, agentToken);
-  const messages = read.messages ?? read;
-  const hit = JSON.stringify(messages).toLowerCase();
   await call("leave", {}, agentToken).catch(() => {});
-  if (!hit.includes(name.toLowerCase()) || !hit.includes(needle.toLowerCase()))
-    fail(`no chat from ${name} containing "${needle}": ${JSON.stringify(messages).slice(0, 800)}`);
+  if (!Array.isArray(read.messages) || !read.names) fail(`unexpected chat_read shape: ${JSON.stringify(read).slice(0, 400)}`);
+  const hit = read.messages.find(
+    (m) => m.sender === "agent" && read.names[m.from] === name && m.text.toLowerCase().includes(needle.toLowerCase()),
+  );
+  if (!hit) fail(`no chat from ${name} containing "${needle}": ${JSON.stringify(read.messages).slice(0, 800)}`);
 } else if (what === "items") {
   const [kind, min] = args;
   const count = look.items.filter((i) => i.split(" ")[1] === kind).length;
