@@ -53,6 +53,28 @@ describe("MCP over Streamable HTTP", () => {
     await client.close();
   });
 
+  it("an agent keeps its look (body seed, hue, emoji) even as a brand-new character, and a numbered twin matches it", async () => {
+    const o = await createOffice();
+    const first = await connect(o);
+    const a = (await tool(first.client, "office_join", { name: "Mia", client: "paw", emoji: "🦊" })).body.agent;
+    expect(a.lookSeed).toBe("mia|paw");
+    expect((await tool(first.client, "office_delete_me")).body.deleted).toBe(a.id);
+    await first.client.close();
+    const again = await connect(o);
+    const b = (await tool(again.client, "office_join", { name: "Mia", client: "paw", emoji: "🦊" })).body.agent;
+    expect(b.id).not.toBe(a.id);
+    expect([b.lookSeed, b.hue]).toEqual([a.lookSeed, a.hue]);
+    const back = (await tool(again.client, "office_join", { name: "Mia", client: "paw" })).body.agent;
+    expect(back.emoji).toBe("🦊"); // a join that names no emoji keeps the one it had
+    const twin = await connect(o);
+    const c = (await tool(twin.client, "office_join", { name: "Mia", client: "paw" })).body.agent;
+    expect(c.name).toBe("Mia 2");
+    expect(c.hue).toBe(a.hue);
+    const trip = await connect(o);
+    expect((await tool(trip.client, "office_join", { name: "Mia#a-long-private-secret", client: "paw" })).body.agent.lookSeed).toMatch(/^[A-Za-z0-9_-]{10}$/);
+    for (const x of [again, twin, trip]) await x.client.close();
+  });
+
   it("every tool works, the session remembers the agent", async () => {
     const o = await createOffice();
     const { client, transport } = await connect(o);

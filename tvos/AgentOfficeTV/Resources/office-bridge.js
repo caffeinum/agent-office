@@ -1204,7 +1204,7 @@
   var PANTS = ["#3d4a66", "#4a4f5c", "#5b4a3f", "#34495e", "#6b5b7b"];
   var STYLES = ["crop", "bob", "bun", "spiky", "cap"];
   function lookFor(agent) {
-    const h = hashStr(agent.id || agent.name);
+    const h = hashStr(agent.lookSeed ?? agent.id);
     return {
       skin: SKINS[h % SKINS.length],
       hair: HAIRS[(h >>> 4) % HAIRS.length],

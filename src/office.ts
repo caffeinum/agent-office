@@ -77,6 +77,9 @@ export interface Agent {
   name: string;
   hue: number;
   emoji?: string;
+  /** Seeds the character's body (skin, hair, style, pants): the tripcode, else name + client, so the same agent
+   *  always looks the same, even as a brand-new character after the old one expired. */
+  lookSeed?: string;
   client?: string;
   /** Public proof of a "name#secret" join; part of the display name too ("claude !Ab3dE6fGh_"). */
   tripcode?: string;
@@ -1366,9 +1369,10 @@ export class Office extends DurableObject<Env> implements ToolHost {
     if (trip) a.tripcode = trip;
     else delete a.tripcode;
     a.name = this.uniqueName(trip ? `${baseName} !${trip}` : baseName, a.id);
-    a.hue = args.hue ?? hueOf(a.name);
+    // hue from the name it asked for (not "name 2") and the body from the same identity: one agent, one look
+    a.hue = args.hue ?? hueOf(baseName);
+    a.lookSeed = trip ?? `${baseName.toLowerCase()}|${args.client ?? ""}`;
     if (args.emoji) a.emoji = args.emoji;
-    else delete a.emoji;
     if (args.client) a.client = args.client;
     else delete a.client;
     a.lastSeen = now;
