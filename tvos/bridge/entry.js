@@ -82,9 +82,11 @@ function kindParts(kind, custom) {
       { role: "glass", boxes: plan.glass.map((b) => toBox(b)) },
       { role: "glow", boxes: plan.screen.map((b) => toBox(b, true)), map: "screen" },
       { role: "glow", boxes: plan.emissive.map((b) => toBox(b)), map: null },
+      { role: "nightGlow", boxes: plan.nightGlow.map((b) => toBox(b)), map: null },
       meshPart("flat", "meshFlat"),
       meshPart("glossy", "meshGlossy"),
       meshPart("emissive", "meshGlow"),
+      meshPart("nightGlow", "meshNightGlow"),
     ].filter((p) => p.boxes.length || p.mesh),
   };
 }
@@ -232,6 +234,7 @@ globalThis.AO = {
     for (const it of items) if (!kinds[it.kind]) kinds[it.kind] = kindParts(it.kind, custom);
     const t = targets(now);
     walk = { blocked: blockedCells(state.items, state.grid, custom), grid: state.grid };
+    const tod = timeOfDay(time || clockTheme(new Date(now)));
     return JSON.stringify({
       id: state.id,
       name: state.name ?? null,
@@ -239,10 +242,11 @@ globalThis.AO = {
       wallH: WALL_H,
       theme: state.theme,
       look: themeLook(state.theme),
-      time: timeOfDay(time || clockTheme(new Date(now))),
+      time: tod,
       kinds,
       items,
-      lights: placedLights(state.items, custom).slice(0, KIND_LIGHTS_MAX),
+      // scene.js updateLampLights: night-only lights are left out by day, then the first KIND_LIGHTS_MAX
+      lights: placedLights(state.items, custom).filter((l) => !l.night || tod.nightNeon > 0).slice(0, KIND_LIGHTS_MAX),
       agents: state.agents.map((a) => ({
         id: a.id, name: a.name, emoji: a.emoji ?? null, status: a.status, activity: a.activity ?? null, hue: a.hue,
         css: hueColors(a.hue ?? 0).css, phase: (hashStr(a.id) % 1000) / 100, says: a.says && now - a.says.ts < 9000 ? a.says.text : null,

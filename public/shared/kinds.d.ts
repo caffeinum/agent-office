@@ -11,6 +11,8 @@ export interface Mesh {
   faces: Array<[number, number, number]>;
   color: string;
   emissive?: true;
+  /** With emissive: glows only at night, dark by day. */
+  night?: true;
   /** Omitted = flat. */
   material?: "glossy";
 }
@@ -25,6 +27,8 @@ export interface Light {
   intensity: number;
   /** Reach in cells, 1..8, default 4. */
   range: number;
+  /** On only at night. */
+  night?: true;
 }
 
 /** One voxel box in local model space (16 units per cell); integer units, inside the footprint, y + h ≤ 64. */
@@ -37,6 +41,8 @@ export interface Box {
   d: number;
   color: string;
   emissive?: true;
+  /** With emissive: glows only at night, dark by day. */
+  night?: true;
   /** Omitted = matte. "screen" boxes show the office logo when the kind has screen: true; "flat" is untextured, flat-shaded. */
   material?: Exclude<BoxMaterial, "matte">;
   /** Makes the box a wedge: its top slopes down towards this side, to `low` units high there (0 = a sharp edge). */
@@ -50,11 +56,11 @@ export interface KindDef {
   label: string;
   footprint: { w: number; d: number };
   layer?: Layer;
-  boxes?: Array<Omit<Box, "emissive" | "material"> & { emissive?: boolean; material?: BoxMaterial }>;
-  meshes?: Array<Omit<Mesh, "emissive" | "material"> & { emissive?: boolean; material?: "flat" | "glossy" }>;
+  boxes?: Array<Omit<Box, "emissive" | "night" | "material"> & { emissive?: boolean; night?: boolean; material?: BoxMaterial }>;
+  meshes?: Array<Omit<Mesh, "emissive" | "night" | "material"> & { emissive?: boolean; night?: boolean; material?: "flat" | "glossy" }>;
   seats?: Array<Partial<Seat> & { x: number; z: number }>;
   stations?: Array<Partial<Station> & { x: number; z: number; activity: Activity }>;
-  lights?: Array<Partial<Light> & { x: number; y: number; z: number; color: string }>;
+  lights?: Array<Partial<Omit<Light, "night">> & { x: number; y: number; z: number; color: string; night?: boolean }>;
   textable?: boolean;
   screen?: boolean;
 }

@@ -22,7 +22,7 @@ final class OfficeRenderer: NSObject {
     private var cityLights: SCNNode?
     private let lampLights = SCNNode()
     /// Glow materials and what they light up as at night (scene.js applyGlow).
-    private var glows: [(mat: SCNMaterial, lamp: Bool, window: Bool)] = []
+    private var glows: [(mat: SCNMaterial, lamp: Bool, window: Bool, night: Bool)] = []
     private var pills: [String: Pill] = [:]
     private var last: OfficeScene?
     private var agents: [String: AgentNode] = [:]
@@ -290,7 +290,7 @@ final class OfficeRenderer: NSObject {
                 guard let kind = s.kinds[item.kind] else { preconditionFailure("scene has item \(item.id) of unknown kind \(item.kind)") }
                 if cache[item.kind] == nil {
                     cache[item.kind] = try kind.parts.map { p in
-                        (p.role, p.map, try p.mesh.map(Voxel.geometry) ?? voxel.geometry(p.boxes, ao: p.role != "glow" && p.role != "glass"))
+                        (p.role, p.map, try p.mesh.map(Voxel.geometry) ?? voxel.geometry(p.boxes, ao: !["glow", "nightGlow", "glass"].contains(p.role)))
                     }
                 }
                 let node = try model(cache[item.kind]!, kind: kind, item: item, look: s.look, voxel: voxel)
@@ -317,11 +317,13 @@ final class OfficeRenderer: NSObject {
             case "glass": voxel.material(map: nil, roughness: 0.08)
             case "flat", "meshFlat": voxel.material(map: nil, roughness: 0.7)
             case "meshGlossy": voxel.material(map: nil, roughness: 0.28)
-            case "meshGlow": voxel.glow(map: nil, tint: .white)
+            case "meshGlow", "nightGlow", "meshNightGlow": voxel.glow(map: nil, tint: .white)
             default: voxel.material(map: grain)
             }
             if p.role == "glass" { mat.transparency = 0.38; mat.writesToDepthBuffer = false }
-            if p.role == "glow" || p.role == "meshGlow" { glows.append((mat, kind.glowLamp, p.map == "window")) }
+            if ["glow", "meshGlow", "nightGlow", "meshNightGlow"].contains(p.role) {
+                glows.append((mat, kind.glowLamp, p.map == "window", p.role == "nightGlow" || p.role == "meshNightGlow"))
+            }
             // triangle meshes are drawn from both sides, like the web's DoubleSide mesh materials
             if p.role.hasPrefix("mesh") { mat.isDoubleSided = true }
             let g = p.geo.copy() as! SCNGeometry
@@ -397,7 +399,7 @@ final class OfficeRenderer: NSObject {
                 sc.spill.isHidden = !(sc.lit && t.night)
             }
             for g in glows {
-                g.mat.diffuse.intensity = g.lamp ? t.lamp : t.glow
+                g.mat.diffuse.intensity = g.night ? t.nightGlow : g.lamp ? t.lamp : t.glow
                 if g.window { g.mat.diffuse.contents = t.night ? night : day; g.mat.diffuse.intensity = t.night ? 0.95 : 1.05 }
             }
         } catch {
@@ -407,7 +409,7 @@ final class OfficeRenderer: NSObject {
         // custom kinds' coloured lights: neon spill, day and night. Zones dim every lit pixel here (zoneModifier), so a
         // light inside one is boosted by the zone's dimming, standing in for the web's zone-exempt kind lights.
         for l in s.lights {
-            lampLights.addChildNode(omni(color: cssColor(l.color), intensity: l.intensity * t.neon * Self.kindLightScale / Self.zoneDim(s.look.zones, x: l.x, z: l.z),
+            lampLights.addChildNode(omni(color: cssColor(l.color), intensity: l.intensity * (l.night ? t.nightNeon : t.neon) * Self.kindLightScale / Self.zoneDim(s.look.zones, x: l.x, z: l.z),
                                          reach: l.range, at: SCNVector3(l.x, l.y, l.z)))
         }
         guard t.point > 0 else { return }

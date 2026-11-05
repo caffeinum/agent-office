@@ -647,4 +647,41 @@ test("tvOS bridge (office-bridge.js): wedges, triangle meshes, kind lights and z
   assert.equal(typeof scene.time.neon, "number");
 });
 
+test("night-only glow: validated, bucketed apart, dark by day, its lights on only at night (web and tvOS bridge)", () => {
+  const glow = { x: 0, y: 0, z: 0, w: 16, h: 1, d: 1, color: "#ff2fd0", emissive: true, night: true };
+  const k = validateKindDef(meshDef({
+    boxes: [glow, { ...glow, x: 0, y: 2, emissive: true, night: undefined }],
+    meshes: [pyramid({ emissive: true, night: true })],
+    lights: [{ x: 8, y: 8, z: 8, color: "#ff2fd0", night: true }, { x: 8, y: 8, z: 8, color: "#00e5ff" }],
+  }));
+  assert.equal(k.boxes[0].night, true);
+  assert.equal(k.boxes[1].night, undefined);
+  assert.equal(k.lights[0].night, true);
+  assert.equal(k.lights[1].night, undefined);
+  assert.throws(() => validateKindDef(meshDef({ boxes: [{ ...glow, emissive: undefined }] })), /boxes\[0\]\.night only applies to a glowing part/);
+  assert.throws(() => validateKindDef(meshDef({ meshes: [pyramid({ night: true })] })), /meshes\[0\]\.night only applies/);
+  assert.throws(() => validateKindDef(meshDef({ lights: [{ x: 0, y: 0, z: 0, color: "#ffffff", night: 1 }] })), /lights\[0\]\.night must be true or false/);
+  const plan = kindGeometryPlan(k);
+  assert.equal(plan.nightGlow.length, 1);
+  assert.equal(plan.emissive.length, 1, "a night box doesn't merge with an always-on one");
+  assert.deepEqual(plan.meshes.map((m) => m.bucket), ["nightGlow"]);
+  assert.ok(TIMES_OF_DAY.day.nightGlow <= 0.15 && TIMES_OF_DAY.night.nightGlow > TIMES_OF_DAY.night.glow, "dark by day, brighter than other glow at night");
+  assert.equal(TIMES_OF_DAY.day.nightNeon, 0);
+  assert.ok(TIMES_OF_DAY.night.nightNeon > 0);
+  assert.deepEqual(placedLights([{ id: "s1", kind: k.kind, x: 0, z: 0, rot: 0 }], { [k.kind]: k }).map((l) => l.night), [true, false]);
+
+  const ctx = vm.createContext({ console });
+  vm.runInContext(readFileSync(new URL("../tvos/AgentOfficeTV/Resources/office-bridge.js", import.meta.url), "utf8"), ctx);
+  ctx.AO.frame(JSON.stringify({ type: "snapshot", state: {
+    id: "tv", grid: { w: 8, d: 8 }, items: [{ id: "s1", kind: k.kind, x: 2, z: 2, rot: 0 }], agents: [], chat: [],
+    theme: DEFAULT_THEME, customKinds: [k], assets: {},
+  } }));
+  const at = (time) => JSON.parse(ctx.AO.scene(Date.now(), time));
+  const roles = at("night").kinds[k.kind].parts.map((p) => p.role);
+  assert.ok(roles.includes("nightGlow") && roles.includes("meshNightGlow"), roles.join());
+  assert.deepEqual(at("day").lights.map((l) => l.color), ["#00e5ff"]);
+  assert.deepEqual(at("night").lights.map((l) => [l.color, l.night]), [["#ff2fd0", true], ["#00e5ff", false]]);
+  assert.equal(at("night").time.nightNeon, TIMES_OF_DAY.night.nightNeon);
+});
+
 process.on("exit", () => { if (!process.exitCode) console.log(`check-viewer: ${passed} checks passed`); });

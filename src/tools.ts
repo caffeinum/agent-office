@@ -122,6 +122,7 @@ const box = z
     d: z.number().int().min(1).max(FOOTPRINT_MAX * UNITS),
     color,
     emissive: z.boolean().optional().describe("Glows in its own colour (lamps, LEDs, neon)"),
+    night: z.boolean().optional().describe("With emissive: glows only at night (neon strips, signs after hours); by day it is a dark, unlit strip"),
     material: z.enum(BOX_MATERIALS as [string, ...string[]]).optional().describe("matte (default, wood grain), glossy, glass (see-through), screen (shows the logo if the kind has screen: true), flat (untextured, flat-shaded: lowpoly)"),
     slope: z.enum(SLOPES as [string, ...string[]]).optional().describe("Makes the box a wedge whose top slopes down towards this side (car hoods, windscreens, roofs, fronds)"),
     low: z.number().int().min(0).max(HEIGHT_MAX - 1).optional().describe("Wedge only: height in units at the low side (default 0, a sharp edge); must be < h"),
@@ -134,6 +135,7 @@ const meshSchema = z
     faces: z.array(z.tuple([z.number().int(), z.number().int(), z.number().int()])).min(1).max(MESH_FACES_MAX).describe("Triangles as vertex indices; winding doesn't matter (both sides draw)"),
     color,
     emissive: z.boolean().optional().describe("Glows in its own colour"),
+    night: z.boolean().optional().describe("With emissive: glows only at night (neon strips, signs after hours); by day it is a dark, unlit strip"),
     material: z.enum(MESH_MATERIALS as [string, ...string[]]).optional().describe("flat (default, lowpoly) or glossy"),
   })
   .strict();
@@ -145,6 +147,7 @@ const lightSchema = z
     color,
     intensity: z.number().min(0.1).max(LIGHT_INTENSITY_MAX).optional().describe("Default 1"),
     range: z.number().min(1).max(LIGHT_RANGE_MAX).optional().describe("Reach in cells (default 4)"),
+    night: z.boolean().optional().describe("On only at night (default: on day and night)"),
   })
   .strict();
 const seatSchema = z

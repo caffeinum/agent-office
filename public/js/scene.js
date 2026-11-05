@@ -125,6 +125,9 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     meshGlossy: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.28, metalness: 0.15, flatShading: true, side: THREE.DoubleSide }),
     meshEmissive: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: true, side: THREE.DoubleSide }),
     emissive: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: true }),
+    // emissive + night: glows after dark, a dark strip by day (TIMES_OF_DAY nightGlow)
+    nightGlow: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: true }),
+    meshNightGlow: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: true, side: THREE.DoubleSide }),
     // room surfaces (persist across room rebuilds so a theme fade survives a grid change)
     floor: fadeMaterial({ map: floorTex("wood"), roughness: 0.78 }),
     wallPlain: fadeMaterial({ vertexColors: true, map: wallTex("plaster"), roughness: 0.95 }),
@@ -134,6 +137,8 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
   };
   mats.emissive.userData = { baseColor: new THREE.Color("#ffffff"), lamp: false, window: false };
   mats.meshEmissive.userData = { baseColor: new THREE.Color("#ffffff"), lamp: false, window: false };
+  mats.nightGlow.userData = { baseColor: new THREE.Color("#ffffff"), lamp: false, window: false, night: true };
+  mats.meshNightGlow.userData = { baseColor: new THREE.Color("#ffffff"), lamp: false, window: false, night: true };
   for (const [key, m] of Object.entries(mats)) if (m.isMeshStandardMaterial) withZones(m);
   const charBase = baseMaterial(tex.grain);
   const charAway = awayMaterial(tex.grain);
@@ -205,6 +210,11 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
       applyGlow(mats.emissive);
       parts.push({ role: "emissive", geo: buildGeometry(boxes(plan.emissive), { ao: false }), mat: mats.emissive });
     }
+    if (plan.nightGlow.length) {
+      S.glowMats.set("@nightGlow", mats.nightGlow);
+      applyGlow(mats.nightGlow);
+      parts.push({ role: "emissive", geo: buildGeometry(boxes(plan.nightGlow), { ao: false }), mat: mats.nightGlow });
+    }
     const meshesOf = (bucket) => plan.meshes.filter((m) => m.bucket === bucket);
     if (meshesOf("flat").length) parts.push({ role: "base", geo: buildMeshGeometry(meshesOf("flat")), mat: mats.meshFlat });
     if (meshesOf("glossy").length) parts.push({ role: "base", geo: buildMeshGeometry(meshesOf("glossy")), mat: mats.meshGlossy });
@@ -212,6 +222,11 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
       S.glowMats.set("@meshEmissive", mats.meshEmissive);
       applyGlow(mats.meshEmissive);
       parts.push({ role: "emissive", geo: buildMeshGeometry(meshesOf("emissive")), mat: mats.meshEmissive });
+    }
+    if (meshesOf("nightGlow").length) {
+      S.glowMats.set("@meshNightGlow", mats.meshNightGlow);
+      applyGlow(mats.meshNightGlow);
+      parts.push({ role: "emissive", geo: buildMeshGeometry(meshesOf("nightGlow")), mat: mats.meshNightGlow });
     }
     if (plan.screen.length) {
       const glowMat = new THREE.MeshBasicMaterial({ color: "#ffffff", toneMapped: true });
@@ -525,8 +540,9 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     scene.add(fill);
     S.lampLights.push(fill);
     // custom kinds' coloured lights: neon spill, on day and night, and not dimmed by theme zones
-    for (const l of placedLights(S.items, S.custom).slice(0, KIND_LIGHTS_MAX)) {
-      const pl = new THREE.PointLight(l.color, l.intensity * th.neon, l.range, 1.6);
+    // night-only lights are left out by day, so they don't take a slot from the ones that are on
+    for (const l of placedLights(S.items, S.custom).filter((l) => !l.night || th.nightNeon > 0).slice(0, KIND_LIGHTS_MAX)) {
+      const pl = new THREE.PointLight(l.color, l.intensity * (l.night ? th.nightNeon : th.neon), l.range, 1.6);
       pl.position.set(l.x, l.y, l.z);
       pl.userData.kindLight = true;
       scene.add(pl);
@@ -863,7 +879,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
   function applyGlow(m) {
     const th = TIMES_OF_DAY[S.theme];
     const night = S.theme === "night";
-    m.color.copy(m.userData.baseColor).multiplyScalar(m.userData.lamp ? th.lamp : th.glow);
+    m.color.copy(m.userData.baseColor).multiplyScalar(m.userData.night ? th.nightGlow : m.userData.lamp ? th.lamp : th.glow);
     if (m.userData.window) {
       const map = night ? nightWindowTex(S.look.nightWindow) : tex.windowDay;
       if (m.map !== map) { m.map = map; m.needsUpdate = true; }

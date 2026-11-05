@@ -500,6 +500,37 @@ describe("lowpoly neon: wedges, flat boxes, kind lights, dimmed zones", () => {
   });
 });
 
+describe("night-only neon", () => {
+  const strip = {
+    kind: "neon-strip",
+    label: "Neon strip",
+    footprint: { w: 2, d: 1 },
+    layer: "wall",
+    boxes: [
+      { x: 0, y: 36, z: 0, w: 32, h: 3, d: 1, color: "#16141f", material: "flat" },
+      { x: 0, y: 37, z: 1, w: 32, h: 1, d: 1, color: "#ff2fd0", emissive: true, night: true },
+    ],
+    lights: [{ x: 16, y: 34, z: 20, color: "#ff2fd0", intensity: 2, range: 6, night: true }],
+  };
+
+  it("define_kind keeps night on glowing boxes and lights and sends it to viewers; night without emissive is refused", async () => {
+    const o = await createOffice();
+    const a = await join(o, "Night Owl");
+    const t = { token: a.agentToken };
+    const viewer = await openWs(o, o.viewKey);
+    await viewer.next((f) => f.type === "snapshot");
+    const def = await call(o, "define_kind", strip, t);
+    expect(def.status).toBe(200);
+    const kf = await viewer.next((f) => f.type === "kind");
+    expect(kf.kind.boxes[1]).toMatchObject({ emissive: true, night: true });
+    expect(kf.kind.lights[0]).toMatchObject({ night: true, range: 6 });
+    const bad = await call(o, "define_kind", { ...strip, kind: "dark-strip", boxes: [{ ...strip.boxes[0], night: true }] }, t);
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toMatch(/night only applies to a glowing part/);
+    viewer.ws.close();
+  });
+});
+
 describe("triangle meshes", () => {
   const cone = {
     kind: "lowpoly-cone",

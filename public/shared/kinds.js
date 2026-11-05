@@ -85,8 +85,8 @@ export function validateStation(s, w, d, where = "station") {
 }
 
 function validateBox(b, w, d, where) {
-  if (!isObj(b)) fail(`${where} must be {x, y, z, w, h, d, color, emissive?, material?, slope?, low?}`);
-  onlyKeys(b, ["x", "y", "z", "w", "h", "d", "color", "emissive", "material", "slope", "low"], where);
+  if (!isObj(b)) fail(`${where} must be {x, y, z, w, h, d, color, emissive?, night?, material?, slope?, low?}`);
+  onlyKeys(b, ["x", "y", "z", "w", "h", "d", "color", "emissive", "night", "material", "slope", "low"], where);
   const box = {
     x: int(b.x, 0, w * UNITS - 1, `${where}.x`),
     y: int(b.y, 0, HEIGHT_MAX - 1, `${where}.y`),
@@ -105,6 +105,7 @@ function validateBox(b, w, d, where) {
     if (typeof b.emissive !== "boolean") fail(`${where}.emissive must be true or false`);
     if (b.emissive) box.emissive = true;
   }
+  if (nightOnly(b, box.emissive, where)) box.night = true;
   if (b.material !== undefined) {
     if (!BOX_MATERIALS.includes(b.material)) fail(`${where}.material must be one of ${BOX_MATERIALS.join(", ")}, got ${JSON.stringify(b.material)}`);
     if (b.material !== "matte") box.material = b.material;
@@ -119,13 +120,21 @@ function validateBox(b, w, d, where) {
 
 const r2 = (v) => Math.round(v * 100) / 100;
 
+/** `night: true` on a glowing box or mesh: it glows only at night and is a dark, unlit strip by day. */
+function nightOnly(x, emissive, where) {
+  if (x.night === undefined) return false;
+  if (typeof x.night !== "boolean") fail(`${where}.night must be true or false`);
+  if (x.night && !emissive) fail(`${where}.night only applies to a glowing part: set emissive: true too`);
+  return x.night;
+}
+
 /**
  * Validates one triangle mesh {vertices: [[x, y, z]…], faces: [[a, b, c]…], color, emissive?, material?} in local units
  * (inside the footprint, 0 ≤ y ≤ 64). Faces index vertices; winding doesn't matter (meshes draw both sides). Flat-shaded.
  */
 export function validateMesh(m, w, d, where = "mesh") {
-  if (!isObj(m)) fail(`${where} must be {vertices, faces, color, emissive?, material?}`);
-  onlyKeys(m, ["vertices", "faces", "color", "emissive", "material"], where);
+  if (!isObj(m)) fail(`${where} must be {vertices, faces, color, emissive?, night?, material?}`);
+  onlyKeys(m, ["vertices", "faces", "color", "emissive", "night", "material"], where);
   if (!Array.isArray(m.vertices) || m.vertices.length < 3) fail(`${where}.vertices must be an array of ≥3 [x, y, z]`);
   if (!Array.isArray(m.faces) || m.faces.length < 1) fail(`${where}.faces must be a non-empty array of [a, b, c] vertex indices`);
   const vertices = m.vertices.map((v, i) => {
@@ -148,6 +157,7 @@ export function validateMesh(m, w, d, where = "mesh") {
     if (typeof m.emissive !== "boolean") fail(`${where}.emissive must be true or false`);
     if (m.emissive) out.emissive = true;
   }
+  if (nightOnly(m, out.emissive, where)) out.night = true;
   if (m.material !== undefined) {
     if (!MESH_MATERIALS.includes(m.material)) fail(`${where}.material must be one of ${MESH_MATERIALS.join(", ")}, got ${JSON.stringify(m.material)}`);
     if (m.material !== "flat") out.material = m.material;
@@ -155,12 +165,13 @@ export function validateMesh(m, w, d, where = "mesh") {
   return out;
 }
 
-/** Validates one light {x, y, z, color, intensity?, range?}: a coloured point light in local units. */
+/** Validates one light {x, y, z, color, intensity?, range?, night?}: a coloured point light in local units (night: on only at night). */
 export function validateLight(l, w, d, where = "light") {
-  if (!isObj(l)) fail(`${where} must be {x, y, z, color, intensity?, range?}`);
-  onlyKeys(l, ["x", "y", "z", "color", "intensity", "range"], where);
+  if (!isObj(l)) fail(`${where} must be {x, y, z, color, intensity?, range?, night?}`);
+  onlyKeys(l, ["x", "y", "z", "color", "intensity", "range", "night"], where);
   if (typeof l.color !== "string" || !COLOR_RE.test(l.color)) fail(`${where}.color must be #rrggbb, got ${JSON.stringify(l.color)}`);
-  return {
+  if (l.night !== undefined && typeof l.night !== "boolean") fail(`${where}.night must be true or false`);
+  const out = {
     x: num(l.x, -UNITS, w * UNITS + UNITS, `${where}.x`),
     y: num(l.y, 0, HEIGHT_MAX + UNITS, `${where}.y`),
     z: num(l.z, -UNITS, d * UNITS + UNITS, `${where}.z`),
@@ -168,6 +179,8 @@ export function validateLight(l, w, d, where = "light") {
     intensity: num(l.intensity ?? 1, 0.1, LIGHT_INTENSITY_MAX, `${where}.intensity`),
     range: num(l.range ?? 4, 1, LIGHT_RANGE_MAX, `${where}.range`),
   };
+  if (l.night) out.night = true;
+  return out;
 }
 
 /**

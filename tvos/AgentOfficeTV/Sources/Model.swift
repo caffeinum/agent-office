@@ -21,12 +21,12 @@ struct OfficeScene: Decodable, Equatable {
     }
     struct Zone: Decodable, Equatable { let x, z, w, d: Double; let tint: String; let dim: Double }
     /// model.js placedLights(): a custom kind's coloured point light, placed in the room.
-    struct Light: Decodable, Equatable { let id: String; let x, y, z: Double; let color: String; let intensity, range: Double }
+    struct Light: Decodable, Equatable { let id: String; let x, y, z: Double; let color: String; let intensity, range: Double; let night: Bool }
     /// model.js TIMES_OF_DAY for the local clock (or AO_TIME): three.js light levels.
     struct TimeOfDay: Decodable, Equatable {
         let name: String
         let hemiGround: String; let hemi: Double; let sun: Double; let sunColor: String; let fog: String
-        let glow: Double; let lamp: Double; let point: Double; let neon: Double
+        let glow: Double; let lamp: Double; let point: Double; let neon: Double; let nightNeon: Double; let nightGlow: Double
         var night: Bool { name == "night" }
     }
     /// voxel.js box; `slope`/`lowFrac` make it a wedge (shape.js).

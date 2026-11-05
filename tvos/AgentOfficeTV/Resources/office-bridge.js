@@ -1187,7 +1187,7 @@
   }
   function mergeBoxes(boxes) {
     let list2 = boxes.map((b) => ({ ...b }));
-    const same = (a, b) => !a.slope && !b.slope && a.color.toLowerCase() === b.color.toLowerCase() && (a.material ?? "matte") === (b.material ?? "matte") && !!a.emissive === !!b.emissive;
+    const same = (a, b) => !a.slope && !b.slope && a.color.toLowerCase() === b.color.toLowerCase() && (a.material ?? "matte") === (b.material ?? "matte") && !!a.emissive === !!b.emissive && !!a.night === !!b.night;
     let changed = true;
     while (changed) {
       changed = false;
@@ -1215,10 +1215,10 @@
     const U = UNITS;
     const fw = def.w, fd = def.d;
     const merged = mergeBoxes(def.boxes);
-    const plan = { matte: [], glossy: [], flat: [], glass: [], screen: [], emissive: [], meshes: [], input: def.boxes.length, merged: merged.length };
+    const plan = { matte: [], glossy: [], flat: [], glass: [], screen: [], emissive: [], nightGlow: [], meshes: [], input: def.boxes.length, merged: merged.length };
     if (!Array.isArray(def.meshes)) throw new Error(`custom kind ${def.kind} has no meshes list`);
     for (const m of def.meshes) {
-      const bucket = m.emissive ? "emissive" : m.material === "glossy" ? "glossy" : "flat";
+      const bucket = m.night ? "nightGlow" : m.emissive ? "emissive" : m.material === "glossy" ? "glossy" : "flat";
       plan.meshes.push({ bucket, color: m.color, ...meshTriangles(m, fw, fd, U) });
     }
     const layer = overlapLayers(merged);
@@ -1231,7 +1231,7 @@
       const y0 = Math.max(0, b.y / U - e), y1 = (b.y + b.h) / U + e;
       const out = { cx: (x0 + x1) / 2, y0, cz: (z0 + z1) / 2, w: x1 - x0, h: y1 - y0, d: z1 - z0, color: b.color };
       if (b.slope) Object.assign(out, { slope: b.slope, lowFrac: b.low / b.h });
-      const bucket = mat === "screen" ? "screen" : b.emissive ? "emissive" : mat;
+      const bucket = mat === "screen" ? "screen" : b.night ? "nightGlow" : b.emissive ? "emissive" : mat;
       plan[bucket].push(out);
     });
     return plan;
@@ -1256,7 +1256,8 @@
           z: cz - ox * Math.sin(r) + oz * Math.cos(r),
           color: l.color,
           intensity: l.intensity,
-          range: l.range
+          range: l.range,
+          night: !!l.night
         });
       });
     }
@@ -1274,8 +1275,8 @@
     return layer;
   }
   var TIMES_OF_DAY = Object.freeze({
-    day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.28, threshold: 0.92, glow: 1, lamp: 0.95, point: 0, neon: 3, exposure: 1 },
-    night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.32, sun: 0.22, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 1, glow: 1.2, lamp: 2.4, point: 9, neon: 8, exposure: 1.05 }
+    day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.28, threshold: 0.92, glow: 1, lamp: 0.95, point: 0, neon: 3, nightNeon: 0, nightGlow: 0.1, exposure: 1 },
+    night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.32, sun: 0.22, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 1, glow: 1.2, lamp: 2.4, point: 9, neon: 8, nightNeon: 8, nightGlow: 1.5, exposure: 1.05 }
   });
   function clockTheme(date = /* @__PURE__ */ new Date()) {
     const h = date.getHours();
@@ -2205,9 +2206,11 @@
         { role: "glass", boxes: plan.glass.map((b) => toBox(b)) },
         { role: "glow", boxes: plan.screen.map((b) => toBox(b, true)), map: "screen" },
         { role: "glow", boxes: plan.emissive.map((b) => toBox(b)), map: null },
+        { role: "nightGlow", boxes: plan.nightGlow.map((b) => toBox(b)), map: null },
         meshPart("flat", "meshFlat"),
         meshPart("glossy", "meshGlossy"),
-        meshPart("emissive", "meshGlow")
+        meshPart("emissive", "meshGlow"),
+        meshPart("nightGlow", "meshNightGlow")
       ].filter((p) => p.boxes.length || p.mesh)
     };
   }
@@ -2351,6 +2354,7 @@
       for (const it of items) if (!kinds[it.kind]) kinds[it.kind] = kindParts(it.kind, custom);
       const t = targets(now);
       walk = { blocked: blockedCells(state.items, state.grid, custom), grid: state.grid };
+      const tod = timeOfDay(time || clockTheme(new Date(now)));
       return JSON.stringify({
         id: state.id,
         name: state.name ?? null,
@@ -2358,10 +2362,11 @@
         wallH: WALL_H,
         theme: state.theme,
         look: themeLook(state.theme),
-        time: timeOfDay(time || clockTheme(new Date(now))),
+        time: tod,
         kinds,
         items,
-        lights: placedLights(state.items, custom).slice(0, KIND_LIGHTS_MAX),
+        // scene.js updateLampLights: night-only lights are left out by day, then the first KIND_LIGHTS_MAX
+        lights: placedLights(state.items, custom).filter((l) => !l.night || tod.nightNeon > 0).slice(0, KIND_LIGHTS_MAX),
         agents: state.agents.map((a) => ({
           id: a.id,
           name: a.name,

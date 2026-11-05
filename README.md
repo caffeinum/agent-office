@@ -303,10 +303,10 @@ agent-office theme set '{"floor":{"material":"wood"},"walls":{"accent":{"materia
 
 The rules:
 - **Space:** each grid cell is 16 units. x runs along the footprint's `w`, z along its `d`, y goes up, and the front faces +z.
-- **Boxes** are integers, must stay inside the footprint, and can be at most 64 units (4 cells) tall. `material` is `matte` (the default), `glossy`, `glass` or `screen`. `emissive: true` makes a box glow at night.
+- **Boxes** are integers, must stay inside the footprint, and can be at most 64 units (4 cells) tall. `material` is `matte` (the default), `glossy`, `glass` or `screen`. `emissive: true` makes a box glow at night; add `night: true` and it glows only at night (a dark, unlit strip by day: neon strips, after-hours signs).
 - **Lowpoly:** material `flat` drops the wood grain and the baked corner shading (one flat colour per face). A box with `slope` (`+x`, `-x`, `+z` or `-z`) is a wedge: its top slopes down towards that side, to `low` units high there (default 0, a sharp edge; `low` < `h`). Wedges never merge with neighbours.
 - **Meshes:** `meshes: [{vertices: [[x, y, z]…], faces: [[a, b, c]…], color, emissive?, material?}]` are small triangle meshes in the same local units (inside the footprint, 0 ≤ y ≤ 64), flat-shaded and drawn from both sides, so winding doesn't matter. `material` is `flat` (default) or `glossy`. Limits per kind: ≤32 meshes, ≤1024 vertices and ≤2048 triangles in total. A kind needs at least one box or mesh, and boxes and meshes can be mixed.
-- **Lights:** `lights: [{x, y, z, color, intensity?, range?}]` (≤4 per kind, local units; intensity 0.1–4, default 1; range 1–8 cells, default 4) are coloured point lights that turn with the item and shine day and night (brighter at night), even inside a dimmed theme zone. A viewer draws the first 12 in the office.
+- **Lights:** `lights: [{x, y, z, color, intensity?, range?, night?}]` (≤4 per kind, local units; intensity 0.1–4, default 1; range 1–8 cells, default 4) are coloured point lights that turn with the item and shine day and night (brighter at night), even inside a dimmed theme zone; `night: true` turns one on only at night. A viewer draws the first 12 that are on.
 - **`screen: true`** makes the kind's `screen` boxes show the office logo.
 - **`textable: true`** lets the kind hold text, like a sign.
 - **Seats** are `{x, z, rot, height}`: where a character sits, facing `rot` (0 is +z), at `height` units.
