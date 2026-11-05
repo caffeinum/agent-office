@@ -29,7 +29,7 @@ const FILL_Y = 9;
 /** Kind lights drawn at once: each point light costs every lit pixel, so a neon-heavy office keeps the first ones. */
 const KIND_LIGHTS_MAX = 12;
 /** Floor lamps' downlights: strength (× the time of day's point level), reach in cells, half-angle of the cone. */
-const LAMP_SPOT = 2.2, LAMP_REACH = 4.5, LAMP_CONE = 1.05;
+const LAMP_SPOT = 1.4, LAMP_REACH = 4.5, LAMP_CONE = 1.1;
 const POP_MS = 420;
 const FADE_MS = 900;
 
@@ -526,7 +526,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
       const f = footprint(it), cx = f.x + f.w / 2, cz = f.z + f.d / 2;
       // a shaded floor lamp is a downlight: a soft cone from under its shade onto the floor round it
       const pl = it.kind === "lamp"
-        ? new THREE.SpotLight(pal.lamp, th.point * LAMP_SPOT, LAMP_REACH, LAMP_CONE, 0.75, 1.4)
+        ? new THREE.SpotLight(pal.lamp, th.point * LAMP_SPOT, LAMP_REACH, LAMP_CONE, 0.9, 1.4)
         : new THREE.PointLight("#8fb6ff", th.point * 0.4, 7, 1.6);
       pl.userData.lamp = it.kind === "lamp";
       pl.position.set(cx, it.kind === "lamp" ? 1.16 : 1.0, cz);
