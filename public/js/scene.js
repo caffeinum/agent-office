@@ -28,6 +28,8 @@ const WALK_SPEED = 1.7;
 const FILL_Y = 9;
 /** Kind lights drawn at once: each point light costs every lit pixel, so a neon-heavy office keeps the first ones. */
 const KIND_LIGHTS_MAX = 12;
+/** Floor lamps' downlights: strength (× the time of day's point level), reach in cells, half-angle of the cone. */
+const LAMP_SPOT = 2.2, LAMP_REACH = 4.5, LAMP_CONE = 1.05;
 const POP_MS = 420;
 const FADE_MS = 900;
 
@@ -515,16 +517,20 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
   }
 
   function updateLampLights() {
-    for (const l of S.lampLights) scene.remove(l);
+    for (const l of S.lampLights) { scene.remove(l); if (l.isSpotLight) scene.remove(l.target); }
     S.lampLights = [];
     const th = TIMES_OF_DAY[S.theme];
     const pal = S.palette;
     const lamps = S.items.filter((it) => it.kind === "lamp" || it.kind === "tv").slice(0, 6);
     for (const it of lamps) {
-      const f = footprint(it);
-      const pl = new THREE.PointLight(it.kind === "lamp" ? pal.lamp : "#8fb6ff", th.point * (it.kind === "lamp" ? 1.2 : 0.4), it.kind === "lamp" ? 9 : 7, 1.6);
+      const f = footprint(it), cx = f.x + f.w / 2, cz = f.z + f.d / 2;
+      // a shaded floor lamp is a downlight: a soft cone from under its shade onto the floor round it
+      const pl = it.kind === "lamp"
+        ? new THREE.SpotLight(pal.lamp, th.point * LAMP_SPOT, LAMP_REACH, LAMP_CONE, 0.75, 1.4)
+        : new THREE.PointLight("#8fb6ff", th.point * 0.4, 7, 1.6);
       pl.userData.lamp = it.kind === "lamp";
-      pl.position.set(f.x + f.w / 2, it.kind === "lamp" ? 1.4 : 1.0, f.z + f.d / 2);
+      pl.position.set(cx, it.kind === "lamp" ? 1.16 : 1.0, cz);
+      if (pl.isSpotLight) { pl.target.position.set(cx, 0, cz); scene.add(pl.target); }
       pl.visible = th.point > 0;
       scene.add(pl);
       S.lampLights.push(pl);

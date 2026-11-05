@@ -28,6 +28,7 @@ const LIGHT_EDITS = [
   ["getPointLightInfo( pointLight, geometryPosition, directLight );", "getPointLightInfo( pointLight, geometryPosition, directLight );\n\t\tdirectLight.color *= mix( zoneL, vec3( 1.0 ), uPointExempt[ i ] );"],
   ["getDirectionalLightInfo( directionalLight, directLight );", "getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= zoneL;"],
   ["getSunLightInfo( sunLight, directLight );", "getSunLightInfo( sunLight, directLight );\n\t\tdirectLight.color *= zoneL;"],
+  ["getSpotLightInfo( spotLight, geometryPosition, directLight );", "getSpotLightInfo( spotLight, geometryPosition, directLight );\n\t\tdirectLight.color *= zoneL;"],
   ["vec3 irradiance = getAmbientLightIrradiance( ambientLightColor );", "vec3 irradiance = zoneL * getAmbientLightIrradiance( ambientLightColor );"],
   ["irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );", "irradiance += zoneL * getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );"],
 ];

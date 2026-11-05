@@ -116,8 +116,14 @@ export const MODELS = {
   lamp: () => ({
     defaultColor: DARK,
     base: [],
-    accent: [vbox(0, 0, 0, 0.32, 0.05, 0.32, "#cccccc"), vbox(0, 0.05, 0, 0.06, 1.22, 0.06, "#cccccc")],
-    glow: { boxes: [vbox(0, 1.2, 0, 0.42, 0.34, 0.42, WHITE), vbox(0, 1.54, 0, 0.3, 0.04, 0.3, WHITE)], tex: null, color: "#ffe1ad", lamp: true },
+    // an opaque stepped shade hides the bulb: from the room's high camera only a thin warm rim under it glows,
+    // and the light (scene.js) is a downlight onto the floor
+    accent: [
+      vbox(0, 0, 0, 0.32, 0.05, 0.32, "#cccccc"), vbox(0, 0.05, 0, 0.06, 1.2, 0.06, "#cccccc"),
+      vbox(0, 1.2, 0, 0.46, 0.08, 0.46, "#d8d8d8"), vbox(0, 1.28, 0, 0.38, 0.1, 0.38, "#d8d8d8"),
+      vbox(0, 1.38, 0, 0.28, 0.08, 0.28, "#d8d8d8"), vbox(0, 1.46, 0, 0.14, 0.04, 0.14, "#d8d8d8"),
+    ],
+    glow: { boxes: [vbox(0, 1.17, 0, 0.36, 0.03, 0.36, WHITE)], tex: null, color: "#ffd9a0", lamp: false },
   }),
   bookshelf: () => ({
     defaultColor: WOOD_D,

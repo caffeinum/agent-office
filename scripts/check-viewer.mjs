@@ -684,4 +684,20 @@ test("night-only glow: validated, bucketed apart, dark by day, its lights on onl
   assert.equal(at("night").time.nightNeon, TIMES_OF_DAY.night.nightNeon);
 });
 
+test("floor lamp: the bulb hides under an opaque shade, only a thin rim glows, and it isn't a bloom-bright lamp glow", () => {
+  const ctx = vm.createContext({ console });
+  vm.runInContext(readFileSync(new URL("../tvos/AgentOfficeTV/Resources/office-bridge.js", import.meta.url), "utf8"), ctx);
+  ctx.AO.frame(JSON.stringify({ type: "snapshot", state: {
+    id: "lamp", grid: { w: 4, d: 4 }, items: [{ id: "lamp-1", kind: "lamp", x: 1, z: 1, rot: 0 }], agents: [], chat: [], theme: DEFAULT_THEME, customKinds: [], assets: {},
+  } }));
+  const lamp = JSON.parse(ctx.AO.scene(Date.now(), "night")).kinds.lamp;
+  const part = (role) => lamp.parts.find((p) => p.role === role).boxes;
+  const shadeBottom = Math.min(...part("accent").filter((b) => b.at[1] > 1).map((b) => b.at[1]));
+  for (const g of part("glow")) {
+    assert.ok(g.at[1] + g.size[1] <= shadeBottom + 1e-9, "glow sits under the shade");
+    assert.ok(g.size[1] <= 0.04, "only a thin rim");
+  }
+  assert.equal(lamp.glowLamp, false);
+});
+
 process.on("exit", () => { if (!process.exitCode) console.log(`check-viewer: ${passed} checks passed`); });

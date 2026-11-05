@@ -426,10 +426,11 @@ final class OfficeRenderer: NSObject {
             }
         }
         guard t.point > 0 else { return }
-        // lamp and tv light as a glowing pool on the floor: real omni lights cost the TV half its frame rate up close
+        // lamp and tv light as a glowing pool on the floor: real omni lights cost the TV half its frame rate up close.
+        // A floor lamp is a shaded downlight (scene.js LAMP_SPOT): a tighter pool, about its cone's footprint
         for it in s.items.filter({ $0.kind == "lamp" || $0.kind == "tv" }).prefix(Self.poolScale > 0 ? 6 : 0) {
             let lamp = it.kind == "lamp"
-            lampLights.addChildNode(pool(color: lamp ? cssColor(mood.lamp) : cssColor("#8fb6ff"), strength: (lamp ? 1 : 0.4) * Self.poolScale, radius: lamp ? 4 : 2.2,
+            lampLights.addChildNode(pool(color: lamp ? cssColor(mood.lamp) : cssColor("#8fb6ff"), strength: (lamp ? 0.85 : 0.4) * Self.poolScale, radius: lamp ? 2.8 : 2.2,
                                          at: SCNVector3(it.x, 0.015, it.z)))
         }
         let objects = s.items.filter { !["rug", "window", "poster", "whiteboard", "sign"].contains($0.kind) }.count
