@@ -468,7 +468,9 @@ final class OfficeRenderer: NSObject {
             wantDist = homeDistance(s.grid, aspect: aspect) * zoom
         }
         let k = min(1, dt * 4)
-        camTarget = SCNVector3(camTarget.x + (wantTarget.x - camTarget.x) * k, camTarget.y + (wantTarget.y - camTarget.y) * k, camTarget.z + (wantTarget.z - camTarget.z) * k)
+        // a slide follows the finger as closely as turn and zoom do (~50 ms); transitions ease slower
+        let kt = gesture?.panning == true ? min(1, dt * 20) : k
+        camTarget = SCNVector3(camTarget.x + (wantTarget.x - camTarget.x) * kt, camTarget.y + (wantTarget.y - camTarget.y) * kt, camTarget.z + (wantTarget.z - camTarget.z) * kt)
         // while a finger is on the pad the distance follows quickly; transitions (home, switching agents) ease slower
         camDist += (wantDist - camDist) * (touch != nil ? min(1, dt * 20) : k)
         let dir = SCNVector3(sin(polar) * sin(azimuth), cos(polar), sin(polar) * cos(azimuth))
@@ -603,7 +605,7 @@ final class OfficeRenderer: NSObject {
     private func panBy(_ d: SIMD2<Float>) {
         guard let g = last?.grid else { return }
         let right = SIMD2(cos(azimuth), -sin(azimuth)), away = SIMD2(-sin(azimuth), -cos(azimuth))
-        let k = camDist * 0.25
+        let k = camDist / 3
         pan += right * d.x * k + away * d.y * k
         pan = simd_clamp(pan, SIMD2(-Float(g.w) / 2, -Float(g.d) / 2), SIMD2(Float(g.w) / 2, Float(g.d) / 2))
     }
