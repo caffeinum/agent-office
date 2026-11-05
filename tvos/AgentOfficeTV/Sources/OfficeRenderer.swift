@@ -19,6 +19,7 @@ final class OfficeRenderer: NSObject {
     private let overlay = SKScene()
     private var sun: SCNNode!
     private var fill: SCNNode!
+    private var cityLights: SCNNode?
     private let lampLights = SCNNode()
     /// Glow materials and what they light up as at night (scene.js applyGlow).
     private var glows: [(mat: SCNMaterial, lamp: Bool, window: Bool)] = []
@@ -232,6 +233,13 @@ final class OfficeRenderer: NSObject {
         land.geometry?.firstMaterial = voxel.material(map: grain)
         land.castsShadow = false
         room.addChildNode(land)
+        // the city's windows, lit at night (applyTime shows them)
+        let lit = SCNNode(geometry: try voxel.geometry(bd.windows, ao: false, floorY: -99))
+        lit.geometry?.firstMaterial = voxel.glow(map: nil, tint: .white)
+        lit.castsShadow = false
+        lit.isHidden = true
+        cityLights = lit
+        room.addChildNode(lit)
         var clouds: [(SCNNode, Backdrop.Cloud)] = []
         for c in bd.clouds {
             let n = SCNNode(geometry: try voxel.geometry(c.boxes, ao: false, floorY: -99))
@@ -329,6 +337,7 @@ final class OfficeRenderer: NSObject {
             fill.light?.intensity = t.hemi / .pi * 1000 * 0.85
             fill.light?.color = mix(cssColor(t.night ? mood.nightSky : mood.sky), cssColor(t.night ? t.hemiGround : mood.ground))
             scene.fogColor = cssColor(t.fog)
+            cityLights?.isHidden = !t.night
             scene.background.contents = try voxel.texture("sky", t.name)
             let day = try voxel.texture("window"), night = try voxel.texture("nightWindow", s.look.nightWindow ?? "stars")
             for g in glows {

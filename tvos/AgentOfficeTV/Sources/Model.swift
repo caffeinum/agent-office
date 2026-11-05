@@ -74,6 +74,7 @@ struct Backdrop: Decodable {
     struct Water: Decodable { let x, z, size, y: Double; let color: String }
     struct Cloud: Decodable { let boxes: [OfficeScene.Box]; let x, y, z: Double }
     let land: [OfficeScene.Box]
+    let windows: [OfficeScene.Box]
     let water: Water
     let clouds: [Cloud]
     let cloudSpeed: Double

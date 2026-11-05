@@ -297,6 +297,12 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     water.position.set(bd.water.x, bd.water.y, bd.water.z);
     g.add(water);
     g.add(own(new THREE.Mesh(buildGeometry(bd.land, { ao: false, floorY: -99 }), mats.base)));
+    // the city's windows light up at night (setTheme toggles them)
+    const lit = own(new THREE.Mesh(buildGeometry(bd.windows, { ao: false, floorY: -99 }), new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false })));
+    lit.userData.ownMat = true;
+    lit.visible = S.theme === "night";
+    S.cityLights = lit;
+    g.add(lit);
     S.clouds = bd.clouds.map((c) => {
       const m = own(new THREE.Mesh(buildGeometry(c.boxes, { ao: false, floorY: -99 }), mats.base));
       m.position.set(cloudX(c, W / 2, Date.now()), c.y, c.z);
@@ -760,6 +766,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     hemi.intensity = th.hemi;
     sun.intensity = th.sun;
     scene.background = theme === "night" ? tex.skyNight : tex.skyDay;
+    if (S.cityLights) S.cityLights.visible = theme === "night";
     scene.fog.color.set(th.fog);
     bloom.strength = th.bloom; bloom.threshold = th.threshold;
     renderer.toneMappingExposure = th.exposure;

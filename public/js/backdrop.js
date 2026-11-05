@@ -21,7 +21,7 @@ export function backdrop(grid) {
   const W = grid.w, D = grid.d;
   let seed = hashStr(`backdrop:${W}x${D}`);
   const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-  const land = [];
+  const land = [], windows = [];
   const mound = (x, z, w, d, h, c) => {
     const tiers = Math.max(2, Math.round(h / 1.2));
     for (let t = 0; t < tiers; t++) {
@@ -49,6 +49,13 @@ export function backdrop(grid) {
     const h = 1 + rnd() * 1.6 + near * 2.6, w = 0.7 + rnd() * 0.9;
     const c = TOWERS[i % TOWERS.length];
     land.push(vbox(cx + ox, WATER_Y, cz + oz, w, h, w, c));
+    // lit windows for the night, on the two faces the home camera sees (+x, +z)
+    for (let y = WATER_Y + 0.35; y < WATER_Y + h - 0.3; y += 0.45) {
+      for (const f of [-0.25, 0.25]) {
+        if (rnd() < 0.45) windows.push(vbox(cx + ox + f * w, y, cz + oz + w / 2, 0.14, 0.16, 0.04, "#ffd27a"));
+        if (rnd() < 0.45) windows.push(vbox(cx + ox + w / 2, y, cz + oz + f * w, 0.04, 0.16, 0.14, "#ffd27a"));
+      }
+    }
     if (rnd() < 0.35) land.push(vbox(cx + ox, WATER_Y + h, cz + oz, w * 0.55, 0.5 + rnd(), w * 0.55, c));
   }
   for (let t = 0; t < 10; t++) {
@@ -87,7 +94,7 @@ export function backdrop(grid) {
     clouds.push({ boxes, x: (rnd() - 0.5) * CLOUD_BAND, y: 7 + rnd() * 3, z: -12 - rnd() * 14 });
   }
 
-  return { land, clouds, water: { x: W / 2, z: D / 2, size: 400, y: WATER_Y, color: "#6f9fbf" } };
+  return { land, windows, clouds, water: { x: W / 2, z: D / 2, size: 400, y: WATER_Y, color: "#6f9fbf" } };
 }
 
 /** A cloud's x at wall-clock time `ms`: drifting along +x, wrapping round a band centred on the room. */
