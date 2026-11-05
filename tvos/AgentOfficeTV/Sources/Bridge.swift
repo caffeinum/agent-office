@@ -32,6 +32,12 @@ final class Bridge {
         return try JSONDecoder().decode(OfficeScene?.self, from: Data(json.utf8))
     }
 
+    /// radio.js: the station after `id` (nil = off), or nil for off.
+    func nextStation(after id: String?) throws -> RadioStation? {
+        let json = try call("nextStation", [id ?? ""]).toString() ?? "null"
+        return try JSONDecoder().decode(RadioStation?.self, from: Data(json.utf8))
+    }
+
     /// sound-plan.js cues the frames produced since the last call, past its rate limits.
     func cues(now: Date = Date()) throws -> [SoundCue] {
         let json = try call("cues", [now.timeIntervalSince1970 * 1000]).toString() ?? "[]"

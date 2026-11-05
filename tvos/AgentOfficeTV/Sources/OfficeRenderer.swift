@@ -759,10 +759,11 @@ final class OfficeSCNView: SCNView {
     var consumesMenu: (() -> Bool)?
     var onHoldSelect: (() -> Void)?
     var onHoldPlayPause: (() -> Void)?
+    var onHoldUp: (() -> Void)?
     override var canBecomeFocused: Bool { true }
 
     /// Holds fire while the button is still down (after `holdAfter`), and that press then does nothing on release.
-    private static let holdAfter: [UIPress.PressType: Double] = [.playPause: 0.6, .select: 1.2]
+    private static let holdAfter: [UIPress.PressType: Double] = [.playPause: 0.6, .select: 1.2, .upArrow: 0.8]
     private var holds: [UIPress.PressType: DispatchWorkItem] = [:]
     private var held: Set<UIPress.PressType> = []
 
@@ -772,7 +773,11 @@ final class OfficeSCNView: SCNView {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.held.insert(type)
-            if type == .playPause { self.onHoldPlayPause?() } else { self.onHoldSelect?() }
+            switch type {
+            case .playPause: self.onHoldPlayPause?()
+            case .upArrow: self.onHoldUp?()
+            default: self.onHoldSelect?()
+            }
         }
         holds[type]?.cancel()
         holds[type] = work

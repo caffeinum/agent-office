@@ -1853,6 +1853,19 @@
     };
   }
 
+  // public/js/radio.js
+  var STATIONS = Object.freeze([
+    { id: "fluid", name: "SomaFM Fluid", url: "https://ice6.somafm.com/fluid-128-mp3" },
+    { id: "groovesalad", name: "SomaFM Groove Salad", url: "https://ice6.somafm.com/groovesalad-128-mp3" },
+    { id: "lofi", name: "0R Lo-Fi", url: "https://0nlineradio.radioho.st/0r-lo-fi" }
+  ]);
+  function nextStation(id) {
+    if (id == null) return STATIONS[0].id;
+    const i = STATIONS.findIndex((s) => s.id === id);
+    if (i < 0) throw new Error(`unknown radio station ${JSON.stringify(id)}`);
+    return i + 1 < STATIONS.length ? STATIONS[i + 1].id : null;
+  }
+
   // public/js/backdrop.js
   var WATER_Y = -0.85;
   var CLOUD_SPEED = 0.25;
@@ -2127,6 +2140,11 @@
       state = applyFrame(state, f);
       cues.push(...soundCues(before, f, state));
       return f.type;
+    },
+    /** radio.js: the station after `id` ("" = off) as JSON {id, name, url} or null. */
+    nextStation(id) {
+      const next = nextStation(id || null);
+      return JSON.stringify(STATIONS.find((s) => s.id === next) ?? null);
     },
     /** The sound cues frames produced since the last call that pass sound-plan.js's rate limits, as JSON. */
     cues(now) {

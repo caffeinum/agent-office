@@ -17,6 +17,7 @@ export function imageFrom(dt) {
 
 /** One line-icon set for the view controls: 24-unit grid, drawn in the text colour, all the same size. */
 const ICONS = {
+  radio: '<rect x="3.5" y="8" width="17" height="12" rx="2"/><path d="M7 8l9-4"/><circle cx="15" cy="14" r="2.5"/><path d="M7 12.5h3M7 15.5h3"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
   "speaker-on": '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/>',
@@ -37,7 +38,7 @@ function guestName() {
   return `${pick(GUEST_ADJ)}-${pick(GUEST_ANIMAL)}`;
 }
 
-export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom, onSound, soundOn, onEdit, onKick, onDesigner, onImage, onSide }) {
+export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom, onSound, soundOn, onRadio, radioOn, onEdit, onKick, onDesigner, onImage, onSide }) {
   root.insertAdjacentHTML("beforeend", `
     <aside class="side glass">
       <header class="side-head">
@@ -75,6 +76,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
     <div class="ctrls glass">
       <button data-act="theme" title="day / night">${icon("sun", "sun")}${icon("moon", "moon")}</button>
       <button data-act="sound" title="sound on / off">${icon("speaker-on", "snd-on")}${icon("speaker-off", "snd-off")}</button>
+      <button data-act="radio" title="radio: off / next station">${icon("radio")}</button>
       <button data-act="reset" title="reset view">${icon("home")}</button>
       <button data-act="in" title="zoom in">${icon("plus")}</button>
       <button data-act="out" title="zoom out">${icon("minus")}</button>
@@ -118,12 +120,19 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
   }
 
   $('[data-act="sound"]').classList.toggle("sounding", soundOn());
+  $('[data-act="radio"]').classList.toggle("playing", radioOn());
   $(".ctrls").addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b) return;
     const act = b.dataset.act;
     if (act === "theme") onTheme();
     else if (act === "sound") b.classList.toggle("sounding", onSound());
+    else if (act === "radio") {
+      const station = onRadio();
+      b.classList.toggle("playing", !!station);
+      b.title = station ? `radio: ${station.name} (click for the next station)` : "radio: off / next station";
+      toast(station ? `📻 ${station.name}` : "📻 radio off");
+    }
     else if (act === "reset") onReset();
     else if (act === "in") onZoom(0.75);
     else if (act === "out") onZoom(1.33);

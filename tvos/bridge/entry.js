@@ -14,6 +14,7 @@ import { floorTexture, grainTexture, grassTexture, nightWindowTexture, plinthTex
 import { TIMES_OF_DAY, clockTheme, hueColors, themeLook } from "../../public/js/model.js";
 import { buildGeometry } from "../../public/js/voxel.js";
 import { installDocument } from "./pixel-canvas.js";
+import { STATIONS, nextStation } from "../../public/js/radio.js";
 import { CLOUD_BAND, CLOUD_SPEED, backdrop } from "../../public/js/backdrop.js";
 import { cueGate, soundCues } from "../../public/js/sound-plan.js";
 
@@ -170,6 +171,11 @@ globalThis.AO = {
     state = applyFrame(state, f);
     cues.push(...soundCues(before, f, state));
     return f.type;
+  },
+  /** radio.js: the station after `id` ("" = off) as JSON {id, name, url} or null. */
+  nextStation(id) {
+    const next = nextStation(id || null);
+    return JSON.stringify(STATIONS.find((s) => s.id === next) ?? null);
   },
   /** The sound cues frames produced since the last call that pass sound-plan.js's rate limits, as JSON. */
   cues(now) {

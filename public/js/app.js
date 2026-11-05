@@ -4,6 +4,7 @@
 import { applyFrame, clockTheme } from "./model.js";
 import { soundCues } from "./sound-plan.js";
 import { createSound } from "./sound.js";
+import { createRadio } from "./radio-player.js";
 import { kindOf } from "../shared/catalog.js";
 import { createScene } from "./scene.js";
 import { createOverlay } from "./overlay.js";
@@ -79,6 +80,7 @@ function boot() {
   let fitInsets = null;
 
   const sound = createSound();
+  const radio = createRadio();
   /** A cue's place across the screen: the agent's character, or the item's floor spot. */
   const soundPan = (cue) => {
     if (cue.x !== undefined) return scene.panAt(cue.x, cue.z);
@@ -93,6 +95,8 @@ function boot() {
     onReset: () => scene.resetView(),
     onZoom: (f) => scene.zoom(f),
     onSound: () => sound.toggle(),
+    onRadio: () => radio.next(),
+    radioOn: () => radio.station != null,
     soundOn: () => sound.on,
     onEdit: () => { const on = editor.toggle(); ui.setEditing(on); if (on) selectAgent(null); },
     onKick: (id) => { if (!source) throw new Error("not connected"); source.send({ type: "kick", id, as: asName() }); },

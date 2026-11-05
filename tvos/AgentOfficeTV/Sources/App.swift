@@ -82,6 +82,9 @@ final class OfficeModel: ObservableObject {
     enum Panel: Equatable { case none, agents, chat(agent: String?) }
     private var bridge: Bridge?
     private var sound: SoundPlayer?
+    private let radio = RadioPlayer()
+    @Published var toast: String?
+    private var toastWork: DispatchWorkItem?
     private var connection: Connection?
     private var timer: Timer?
 
@@ -101,6 +104,9 @@ final class OfficeModel: ObservableObject {
             return
         }
         renderer.bridge = bridge
+        if let id = UserDefaults.standard.string(forKey: "radio") {
+            do { radio.play(try stationNamed(id)) } catch { failure = error.localizedDescription }
+        }
         renderer.onFollow = { [weak self] id in
             guard let self else { return }
             following = id
@@ -174,6 +180,7 @@ final class OfficeModel: ObservableObject {
         for (i, name) in list.split(separator: "+").enumerated() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 8 + Double(i) * gap) { [weak self] in
                 if name == "hold" { self?.toggleClean(); return }
+                if name == "radio" { self?.nextRadio(); return }
                 guard let t = names[String(name)] else { preconditionFailure("AO_PRESSES: unknown press \(name)") }
                 if t == .menu && self?.consumesMenu() == false { print("AO_PRESSES: back would exit the app now"); return }
                 self?.press(t)
@@ -214,6 +221,33 @@ final class OfficeModel: ObservableObject {
         } catch {
             failure = error.localizedDescription
         }
+    }
+
+    /// Hold ▲: off → first station → … → off (radio.js), remembered.
+    func nextRadio() {
+        do {
+            let s = try bridge?.nextStation(after: radio.station?.id)
+            radio.play(s)
+            UserDefaults.standard.set(s?.id, forKey: "radio")
+            show(s.map { "📻 \($0.name)" } ?? "📻 radio off")
+        } catch {
+            failure = error.localizedDescription
+        }
+    }
+
+    /// The saved station, found by walking radio.js's list.
+    private func stationNamed(_ id: String) throws -> RadioStation? {
+        var s = try bridge?.nextStation(after: nil)
+        while let c = s, c.id != id { s = try bridge?.nextStation(after: c.id) }
+        return s
+    }
+
+    private func show(_ text: String) {
+        toast = text
+        toastWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.toast = nil }
+        toastWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: w)
     }
 
     private func refresh() {
@@ -257,11 +291,16 @@ struct OfficeScreen: View {
                 }
             }
             if model.hints && !model.clean && model.panel == .none && !model.exitHint {
-                Text("touch ↔ turn · touch ↕ zoom · tap tap + drag slide · ◀ ▶ follow · ⏯ agents · ▼ chat · ▲ home · hold ⏯ hide")
+                Text("touch ↔ turn · touch ↕ zoom · tap tap + drag slide · ◀ ▶ follow · ⏯ agents · ▼ chat · ▲ home · hold ▲ radio · hold ⏯ hide")
                     .font(.caption2).foregroundStyle(Color(red: 0.17, green: 0.14, blue: 0.13))
                     .padding(.horizontal, 26).padding(.vertical, 12)
                     .background(Capsule().fill(Color(red: 1, green: 0.99, blue: 0.97, opacity: 0.92)))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom).padding(.bottom, 60)
+            }
+            if let t = model.toast {
+                Text(t).font(.callout).padding(.horizontal, 28).padding(.vertical, 14)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.top, 60)
             }
             if model.exitHint {
                 Text("press back again to exit").font(.callout).padding(.horizontal, 28).padding(.vertical, 14)
@@ -374,6 +413,7 @@ struct SceneView: UIViewRepresentable {
         v.onPress = { [model] in model.press($0) }
         v.consumesMenu = { [model] in model.consumesMenu() }
         v.onHoldPlayPause = { [model] in model.toggleClean() }
+        v.onHoldUp = { [model] in model.nextRadio() }
         v.onHoldSelect = holdSelect
     }
 }

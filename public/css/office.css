@@ -144,6 +144,7 @@ a { color: var(--accent); }
 #app[data-theme="night"] .ctrls .sun { display: none; }
 #app[data-theme="night"] .ctrls .moon { display: block; }
 .ctrls .snd-on { display: none; }
+.ctrls [data-act="radio"]:not(.playing) { opacity: 0.55; }
 .ctrls [data-act="sound"].sounding .snd-on { display: block; }
 .ctrls [data-act="sound"].sounding .snd-off { display: none; }
 
