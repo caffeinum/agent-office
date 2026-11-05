@@ -128,9 +128,21 @@ export function lingering(agent, hasDesk, now) {
   return agent.status === "idle" && hasDesk && agent.workedAt != null && now - agent.workedAt < DESK_LINGER_MS;
 }
 
+/** Of an idle agent's wander slots, how many in LOUNGE_ONE_IN it spends at a seat or station rather than its own desk. */
+export const LOUNGE_ONE_IN = 2;
+
+/**
+ * An idle agent with a desk mostly sits there: right after work, and in most wander slots; in about one slot in
+ * LOUNGE_ONE_IN it goes to a seat or station instead. A calm office, where walking is the exception.
+ */
+export function idleAtDesk(agent, hasDesk, now) {
+  if (agent.status !== "idle" || !hasDesk) return false;
+  return lingering(agent, hasDesk, now) || hashStr(`${agent.id}:desk:${wanderSalt(agent.id, now)}`) % LOUNGE_ONE_IN !== 0;
+}
+
 /** Where an agent should be and what it does there: {pose, place: "desk" | "lounge"}. */
 export function poseFor(agent, hasDesk, now = Date.now()) {
-  if (lingering(agent, hasDesk, now)) return { pose: "sit", place: "desk" };
+  if (idleAtDesk(agent, hasDesk, now)) return { pose: "sit", place: "desk" };
   switch (agent.status) {
     case "working": return hasDesk ? { pose: "type", place: "desk" } : { pose: "stand", place: "lounge" };
     case "waiting": return hasDesk ? { pose: "handup", place: "desk" } : { pose: "wave", place: "lounge" };
@@ -335,7 +347,8 @@ export const SEAT_SECONDS = 50;
 /** An idle agent's wander slot at wall-clock `now`: it moves to another seat or station each time this changes. Every
  *  viewer gets the same slot from the same id and clock, so all of them show the agent in the same place. */
 export function wanderSalt(agentId, now) {
-  const period = 30_000 + (hashStr(`${agentId}:period`) % 20_000);
+  // 80–130 s a slot: a walk takes seconds, so idle agents spend ~90% of their time somewhere, not on the way
+  const period = 80_000 + (hashStr(`${agentId}:period`) % 50_000);
   return Math.floor((now + (hashStr(`${agentId}:phase`) % period)) / period);
 }
 

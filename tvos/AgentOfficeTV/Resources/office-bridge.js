@@ -733,8 +733,13 @@
   function lingering(agent, hasDesk, now) {
     return agent.status === "idle" && hasDesk && agent.workedAt != null && now - agent.workedAt < DESK_LINGER_MS;
   }
+  var LOUNGE_ONE_IN = 2;
+  function idleAtDesk(agent, hasDesk, now) {
+    if (agent.status !== "idle" || !hasDesk) return false;
+    return lingering(agent, hasDesk, now) || hashStr(`${agent.id}:desk:${wanderSalt(agent.id, now)}`) % LOUNGE_ONE_IN !== 0;
+  }
   function poseFor(agent, hasDesk, now = Date.now()) {
-    if (lingering(agent, hasDesk, now)) return { pose: "sit", place: "desk" };
+    if (idleAtDesk(agent, hasDesk, now)) return { pose: "sit", place: "desk" };
     switch (agent.status) {
       case "working":
         return hasDesk ? { pose: "type", place: "desk" } : { pose: "stand", place: "lounge" };
@@ -912,7 +917,7 @@
   }
   var SEAT_SECONDS = 50;
   function wanderSalt(agentId, now) {
-    const period = 3e4 + hashStr(`${agentId}:period`) % 2e4;
+    const period = 8e4 + hashStr(`${agentId}:period`) % 5e4;
     return Math.floor((now + hashStr(`${agentId}:phase`) % period) / period);
   }
   function pickSpot(agentId, spots, taken, salt = 0, avoid = null) {
