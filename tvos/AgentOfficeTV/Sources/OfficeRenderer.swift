@@ -603,7 +603,7 @@ final class OfficeRenderer: NSObject {
     private func panBy(_ d: SIMD2<Float>) {
         guard let g = last?.grid else { return }
         let right = SIMD2(cos(azimuth), -sin(azimuth)), away = SIMD2(-sin(azimuth), -cos(azimuth))
-        let k = camDist * 0.5
+        let k = camDist * 0.25
         pan += right * d.x * k + away * d.y * k
         pan = simd_clamp(pan, SIMD2(-Float(g.w) / 2, -Float(g.d) / 2), SIMD2(Float(g.w) / 2, Float(g.d) / 2))
     }
