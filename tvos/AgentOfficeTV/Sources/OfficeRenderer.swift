@@ -279,16 +279,32 @@ final class OfficeRenderer: NSObject {
         let dt = lastTick == 0 ? 0 : min(0.05, now - lastTick)
         lastTick = now
         clock += dt
+        let t0 = CACurrentMediaTime()
         stepTour(now: now, dt: Float(dt))
         let list = Array(agents.values)
         for n in list { n.step(dt: Float(dt)) }
+        let t1 = CACurrentMediaTime()
         if let angles = try? bridge?.limbs(list.map { ($0.pose, $0.agent.phase) }, t: clock), angles.count == list.count {
             for (n, a) in zip(list, angles) { n.apply(a, clock: clock) }
         }
+        let t2 = CACurrentMediaTime()
         placeCamera(dt: Float(dt))
         updateCutaway()
+        let t3 = CACurrentMediaTime()
         placePills()
+        let t4 = CACurrentMediaTime()
+        if Self.stats {
+            perf.n += 1; perf.step += t1 - t0; perf.limbs += t2 - t1; perf.cam += t3 - t2; perf.pills += t4 - t3
+            if now - perf.since > 2 {
+                let ms = { (v: Double) in String(format: "%.1f", v / Double(self.perf.n) * 1000) }
+                print("AO_STATS ticks/s \(Int(Double(perf.n) / (now - perf.since))) step \(ms(perf.step))ms limbs \(ms(perf.limbs))ms cam \(ms(perf.cam))ms pills \(ms(perf.pills))ms")
+                perf = (now, 0, 0, 0, 0, 0)
+            }
+        }
     }
+
+    private static let stats = ProcessInfo.processInfo.environment["AO_STATS"] != nil
+    private var perf: (since: Double, n: Int, step: Double, limbs: Double, cam: Double, pills: Double) = (0, 0, 0, 0, 0, 0)
 
     // MARK: camera
 
@@ -439,11 +455,11 @@ final class OfficeRenderer: NSObject {
                 self.zoom = min(2.2, max(0.25, self.zoom * exp(-dy * 0.9)))
             case .pan:
                 if self.follow != nil {
-                    self.azimuth -= dx * 1.6
+                    self.azimuth += dx * 1.6
                 } else {
                     // screen-right on the floor, from the camera's spin
                     let right = SIMD2<Float>(cos(self.azimuth), -sin(self.azimuth))
-                    self.pan -= right * dx * 0.6 * self.camDist * 0.25
+                    self.pan += right * dx * 0.6 * self.camDist * 0.25
                 }
             case .undecided:
                 return

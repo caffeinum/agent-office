@@ -42,6 +42,6 @@ The horizon never tilts. After 2 minutes without input the camera tours: it spin
 spoke or started working, 20 s each; any input ends the tour.
 
 Testing headless in the simulator: `AO_PRESSES="playPause+right+down+menu"` replays presses (one per `AO_PRESS_GAP`
-seconds, from 8 s after launch) and `AO_TOUR_AFTER=6` starts the tour sooner, both via `SIMCTL_CHILD_…`. Separate presses
+seconds, from 8 s after launch), `AO_TOUR_AFTER=6` starts the tour sooner and `AO_STATS=1` shows SceneKit statistics and logs tick timings, via `SIMCTL_CHILD_…` (or `devicectl … --environment-variables` on the TV). Separate presses
 with `+`: a comma in the value breaks `simctl launch`. With `--terminate-running-process` every other launch can land
 on the home screen; launch again.

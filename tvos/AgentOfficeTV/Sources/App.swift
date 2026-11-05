@@ -217,6 +217,7 @@ struct OfficeScreen: View {
                 Text(f).font(.caption).foregroundStyle(.red).padding(48).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
         }
+        .environment(\.colorScheme, .light)
         .onAppear { model.start(link); model.replayPresses() }
         .onDisappear { model.stop() }
     }
@@ -226,39 +227,51 @@ private let statusDot: [String: Color] = ["working": Color(red: 0.31, green: 0.7
                                           "waiting": Color(red: 0.95, green: 0.70, blue: 0.24), "away": Color(red: 0.71, green: 0.67, blue: 0.64)]
 
 /// The web sidebar's roster: office name, live state, who is here with their status. The followed agent is marked.
+/// It always fits the screen: rows flow into as many columns as the height needs (the remote can't scroll it).
 struct AgentsPanel: View {
     let title: String
     let status: String
     let agents: [OfficeScene.Agent]
     let following: String?
+    private static let rowH: CGFloat = 58, colW: CGFloat = 420
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title).font(.headline)
-                Spacer()
-                Text(status).font(.caption2).foregroundStyle(.secondary)
-            }
-            ForEach(agents, id: \.id) { a in
-                HStack(spacing: 14) {
-                    Text(a.emoji ?? String(a.name.prefix(1)).uppercased()).font(.callout.bold()).foregroundStyle(.white)
-                        .frame(width: 44, height: 44).background(RoundedRectangle(cornerRadius: 12).fill(Color(uiColor: cssColor(a.css))))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(a.name).font(.caption.bold()).lineLimit(1)
-                        Text(a.status == "working" ? (a.activity ?? "working") : a.status == "waiting" ? (a.activity ?? "needs input") : a.status)
-                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    Spacer()
-                    Circle().fill(statusDot[a.status] ?? .gray).frame(width: 14, height: 14)
+        GeometryReader { geo in
+            let perCol = max(1, Int((geo.size.height - 96 - 160) / Self.rowH))
+            let cols = stride(from: 0, to: agents.count, by: perCol).map { Array(agents[$0..<min($0 + perCol, agents.count)]) }
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(title).font(.headline)
+                    Text("\(agents.count) here · \(status)").font(.caption2).foregroundStyle(.secondary)
                 }
-                .padding(6)
-                .background(RoundedRectangle(cornerRadius: 14).stroke(Color(uiColor: cssColor(a.css)), lineWidth: following == a.id ? 3 : 0))
+                HStack(alignment: .top, spacing: 24) {
+                    ForEach(Array(cols.enumerated()), id: \.offset) { _, col in
+                        VStack(alignment: .leading, spacing: 4) { ForEach(col, id: \.id) { row($0) } }.frame(width: Self.colW)
+                    }
+                }
+                Text("◀ ▶ follow · ⏯ list · ▼ chat · ▲ home · ring: spin · swipe ↕ zoom ↔ pan").font(.caption2).foregroundStyle(.tertiary)
             }
-            Text("◀ ▶ follow · ⏯ list · ▼ chat · ▲ home · ring: spin · swipe ↕ zoom ↔ pan").font(.caption2).foregroundStyle(.tertiary)
+            .padding(28)
+            .background(RoundedRectangle(cornerRadius: 28).fill(Color(red: 1, green: 0.99, blue: 0.97, opacity: 0.95)))
+            .padding(48)
         }
-        .padding(28)
-        .frame(width: 560, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28))
-        .padding(48)
+    }
+
+    private func row(_ a: OfficeScene.Agent) -> some View {
+        HStack(spacing: 12) {
+            Text(a.emoji ?? String(a.name.prefix(1)).uppercased()).font(.caption.bold()).foregroundStyle(.white)
+                .frame(width: 40, height: 40).background(RoundedRectangle(cornerRadius: 10).fill(Color(uiColor: cssColor(a.css))))
+            VStack(alignment: .leading, spacing: 0) {
+                Text(a.name).font(.caption.bold()).lineLimit(1)
+                Text(a.status == "working" ? (a.activity ?? "working") : a.status == "waiting" ? (a.activity ?? "needs input") : a.status)
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Circle().fill(statusDot[a.status] ?? .gray).frame(width: 12, height: 12)
+        }
+        .frame(height: Self.rowH - 6)
+        .padding(.horizontal, 6)
+        .background(RoundedRectangle(cornerRadius: 12).stroke(Color(uiColor: cssColor(a.css)), lineWidth: following == a.id ? 3 : 0))
     }
 }
 
@@ -277,7 +290,7 @@ struct ChatPanel: View {
         }
         .padding(28)
         .frame(width: 620, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28))
+        .background(RoundedRectangle(cornerRadius: 28).fill(Color(red: 1, green: 0.99, blue: 0.97, opacity: 0.95)))
         .padding(48)
     }
 }
@@ -291,6 +304,7 @@ struct SceneView: UIViewRepresentable {
         v.antialiasingMode = .multisampling4X
         v.backgroundColor = .clear
         v.isPlaying = true
+        v.showsStatistics = ProcessInfo.processInfo.environment["AO_STATS"] != nil
         wire(v)
         renderer.attach(v)
         return v
