@@ -26,9 +26,8 @@ Remote (Siri Remote clickpad):
 
 | input | overview | following an agent |
 | --- | --- | --- |
-| circle the outer ring | spin 360° around the room | spin around the agent |
-| swipe up / down | zoom | zoom |
-| swipe left / right | pan across the room | spin around the agent |
+| move a finger left / right | turn around the room, by how far the finger moved | turn around the agent |
+| move a finger up / down | zoom | zoom |
 | click ◀ ▶ | follow previous / next agent | previous / next agent |
 | click select | follow the first agent | stop following |
 | click ▲ | home view | home view |
@@ -38,7 +37,8 @@ Remote (Siri Remote clickpad):
 | back | agent chat → room chat → closed, then "press back again to exit" | same, then stop following |
 | hold select | forget the office link | forget the office link |
 
-A circle and a swipe are told apart by how much the finger's heading turns. The horizon never tilts. Holds fire
+Touch is relative and two-axis at once: only finger movement counts, never where it lands; the pad's centre dead
+zone (which reads as (0, 0), like a lift) is debounced, and the camera eases toward its goal. The horizon never tilts. Holds fire
 while the button is still down. A controls strip shows for a while after launch and after ▲. After 2 minutes without input the camera tours: it spins slowly and visits whoever just
 spoke or started working, 20 s each; any input ends the tour.
 

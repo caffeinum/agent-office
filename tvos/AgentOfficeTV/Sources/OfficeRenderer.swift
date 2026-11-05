@@ -25,19 +25,20 @@ final class OfficeRenderer: NSObject {
     private var clock: Double = 0
 
     // camera: the web's homeView() angles (azimuth π/4.6, polar 0.93 rad, 30° vertical fov), orbited by the remote's wheel
-    // The horizon never tilts: the polar angle stays at the web's home view; only spin, zoom and pan move the camera.
+    // The horizon never tilts: the polar angle stays at the web's home view; only spin and zoom move the camera.
     private static let homeAzimuth: Float = .pi / 4.6
     private let polar: Float = 0.93
     private var azimuth: Float = OfficeRenderer.homeAzimuth
     private var zoom: Float = 1
-    private var pan = SIMD2<Float>(0, 0)
+    // input moves the goals; the camera eases toward them, so a jittery finger doesn't shake the picture
+    private var azimuthGoal: Float = OfficeRenderer.homeAzimuth
+    private var zoomGoal: Float = 1
+    private var liftWork: DispatchWorkItem?
     private var camTarget = SCNVector3Zero
     private var camDist: Float = 30
     private(set) var follow: String? { didSet { if follow != oldValue { onFollow?(follow); refreshPills() } } }
     var onFollow: ((String?) -> Void)?
-    private var touch: (mode: TouchMode, x: Float, y: Float, angle: Float)?
-    enum TouchMode { case undecided, wheel, zoom, pan }
-    private var path: [SIMD2<Float>] = []
+    private var touch: SIMD2<Float>?
 
     // Auto-tour: after `tourAfter` seconds without input the camera spins slowly and visits whoever just spoke or
     // started working, for `tourVisit` seconds each.
@@ -329,15 +330,16 @@ final class OfficeRenderer: NSObject {
     private func placeCamera(dt: Float) {
         guard let s = last, let v = view, v.bounds.height > 0 else { return }
         let aspect = Float(v.bounds.width / v.bounds.height)
+        let ease = min(1, dt * 10)
+        azimuth += (azimuthGoal - azimuth) * ease
+        zoom += (zoomGoal - zoom) * ease
         var wantTarget: SCNVector3
         var wantDist: Float
         if let id = follow, let n = agents[id] {
             wantTarget = SCNVector3(n.node.position.x, 0.8, n.node.position.z)
             wantDist = 9 * zoom
         } else {
-            pan.x = min(Float(s.grid.w) / 2, max(-Float(s.grid.w) / 2, pan.x))
-            pan.y = min(Float(s.grid.d) / 2, max(-Float(s.grid.d) / 2, pan.y))
-            wantTarget = SCNVector3(Float(s.grid.w) / 2 + pan.x, 0, Float(s.grid.d) / 2 + pan.y)
+            wantTarget = SCNVector3(Float(s.grid.w) / 2, 0, Float(s.grid.d) / 2)
             wantDist = homeDistance(s.grid, aspect: aspect) * zoom
         }
         let k = min(1, dt * 4)
@@ -416,9 +418,11 @@ final class OfficeRenderer: NSObject {
     /// Back to the web's home view of the whole room.
     func home() {
         follow = nil
-        zoom = 1
-        pan = .zero
-        azimuth = Self.homeAzimuth
+        zoomGoal = 1
+        // the shortest way back round to the home angle
+        var d = (Self.homeAzimuth - azimuthGoal).truncatingRemainder(dividingBy: 2 * .pi)
+        if d > .pi { d -= 2 * .pi } else if d < -.pi { d += 2 * .pi }
+        azimuthGoal += d
     }
 
     private func refreshPills() {
@@ -428,12 +432,11 @@ final class OfficeRenderer: NSObject {
     private func stepTour(now: Double, dt: Float) {
         if !touring, now - lastInput > Self.tourAfter, touch == nil {
             touring = true
-            zoom = 1
-            pan = .zero
-            _ = last.map(newsworthy)
+            zoomGoal = 1
+                _ = last.map(newsworthy)
         }
         guard touring else { return }
-        azimuth += dt * 0.06
+        azimuthGoal += dt * 0.06
         if follow != nil, now > tourUntil { follow = nil }
     }
 
@@ -447,74 +450,31 @@ final class OfficeRenderer: NSObject {
     private func listen(_ c: GCController) {
         guard let pad = c.microGamepad else { return }
         pad.reportsAbsoluteDpadValues = true
-        // Three gestures on one clickpad: circling spins the camera around the room (or the followed agent); a vertical
-        // swipe zooms; a horizontal swipe pans across the room (spins while following). The gesture is told apart by
-        // its path: once the finger has travelled far enough, a path that turns around the pad's centre is a circle,
-        // a straight one is a swipe along its main axis. Lifting the finger reports (0, 0).
+        // The clickpad as a plain 2D touch: moving the finger left/right turns the camera by how far it moved, up/down
+        // zooms, both at once. The pad snaps to (0, 0) in its centre dead zone as well as on lift, so a lift only
+        // counts after 0.15 s of zeros, and the jump across the dead zone is skipped.
         pad.dpad.valueChangedHandler = { [weak self] _, x, y in
             guard let self else { return }
-            if x == 0 && y == 0 { self.touch = nil; self.path = []; return }
-            self.noteInput()
-            let a = atan2(y, x)
-            guard var t = self.touch else {
-                self.touch = (.undecided, x, y, a)
-                self.path = [SIMD2(x, y)]
-                return
-            }
-            let dx = x - t.x, dy = y - t.y
-            if t.mode == .undecided {
-                self.path.append(SIMD2(x, y))
-                guard let mode = Self.classify(self.path) else { self.touch = (t.mode, x, y, a); return }
-                t.mode = mode
-            }
-            switch t.mode {
-            case .wheel:
-                var d = a - t.angle
-                while d > .pi { d -= 2 * .pi }
-                while d < -.pi { d += 2 * .pi }
-                self.azimuth -= d
-            case .zoom:
-                self.zoom = min(2.2, max(0.25, self.zoom * exp(-dy * 0.9)))
-            case .pan:
-                if self.follow != nil {
-                    self.azimuth -= dx * 1.6
-                } else {
-                    // screen-right on the floor, from the camera's spin
-                    let right = SIMD2<Float>(cos(self.azimuth), -sin(self.azimuth))
-                    self.pan -= right * dx * 0.6 * self.camDist * 0.25
+            if x == 0 && y == 0 {
+                guard self.touch != nil, self.liftWork == nil else { return }
+                let work = DispatchWorkItem { [weak self] in
+                    self?.touch = nil
+                    self?.liftWork = nil
                 }
-            case .undecided:
+                self.liftWork = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
                 return
             }
-            self.touch = (t.mode, x, y, a)
+            let crossedDeadZone = self.liftWork != nil
+            self.liftWork?.cancel()
+            self.liftWork = nil
+            self.noteInput()
+            defer { self.touch = SIMD2(x, y) }
+            guard let t = self.touch, !crossedDeadZone else { return }
+            let dx = x - t.x, dy = y - t.y
+            self.azimuthGoal -= dx * 2.2
+            self.zoomGoal = min(2.2, max(0.25, self.zoomGoal * exp(-dy * 1.1)))
         }
-    }
-
-    /// Circle or swipe, once the finger has moved far enough to tell: a circle keeps turning its heading the same way
-    /// (about 1/radius per unit of travel), a swipe keeps its heading. Headings are taken over steps of at least 0.06
-    /// so finger jitter doesn't count as turning.
-    static func classify(_ path: [SIMD2<Float>]) -> TouchMode? {
-        guard let first = path.first, let last = path.last else { return nil }
-        var points = [first]
-        var length: Float = 0
-        for p in path.dropFirst() where simd_length(p - points.last!) >= 0.06 {
-            length += simd_length(p - points.last!)
-            points.append(p)
-        }
-        var turn: Float = 0
-        if points.count >= 3 {
-            for i in 2..<points.count {
-                let h0 = points[i - 1] - points[i - 2], h1 = points[i] - points[i - 1]
-                var d = atan2(h1.y, h1.x) - atan2(h0.y, h0.x)
-                while d > .pi { d -= 2 * .pi }
-                while d < -.pi { d += 2 * .pi }
-                turn += d
-            }
-        }
-        if abs(turn) > 0.5 { return .wheel }
-        guard length > 0.45 && abs(turn) < 0.3 || length > 0.9 else { return nil }
-        let chord = last - first
-        return abs(chord.y) > abs(chord.x) ? .zoom : .pan
     }
 }
 
