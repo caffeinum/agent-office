@@ -150,6 +150,7 @@ final class OfficeRenderer: NSObject {
         room.childNodes.forEach { $0.removeFromParentNode() }
         walls = []
         renderWalls.withLock { $0 = [] }
+        renderClouds.withLock { $0 = nil }
         guard let bridge, let voxel else { preconditionFailure("renderer has no bridge") }
         do {
             try buildRoom(s, plan: bridge.room(s.grid), voxel: voxel)
@@ -215,6 +216,33 @@ final class OfficeRenderer: NSObject {
         let posts = SCNNode(geometry: try voxel.geometry(plan.posts))
         posts.geometry?.firstMaterial = trim
         room.addChildNode(posts)
+
+        // the bay around the island (backdrop.js): water, hills / downtown / bridge in one mesh, drifting clouds
+        let bd = plan.backdrop
+        let water = SCNNode(geometry: SCNPlane(width: bd.water.size, height: bd.water.size))
+        let wm = SCNMaterial()
+        wm.lightingModel = .lambert
+        wm.diffuse.contents = cssColor(bd.water.color)
+        water.geometry?.firstMaterial = wm
+        water.eulerAngles.x = -.pi / 2
+        water.position = SCNVector3(bd.water.x, bd.water.y, bd.water.z)
+        water.castsShadow = false
+        room.addChildNode(water)
+        let land = SCNNode(geometry: try voxel.geometry(bd.land, ao: false, floorY: -99))
+        land.geometry?.firstMaterial = voxel.material(map: grain)
+        land.castsShadow = false
+        room.addChildNode(land)
+        var clouds: [(SCNNode, Backdrop.Cloud)] = []
+        for c in bd.clouds {
+            let n = SCNNode(geometry: try voxel.geometry(c.boxes, ao: false, floorY: -99))
+            n.geometry?.firstMaterial = voxel.material(map: grain)
+            n.castsShadow = false
+            n.position = SCNVector3(bd.cloudX(c, cx: w / 2, t: Date().timeIntervalSince1970), c.y, c.z)
+            room.addChildNode(n)
+            clouds.append((n, c))
+        }
+        let cx = w / 2
+        renderClouds.withLock { $0 = (bd, cx, clouds) }
     }
 
     /// room.js cutaway(): walls the camera stands behind drop to their stubs. Render thread.
@@ -451,6 +479,7 @@ final class OfficeRenderer: NSObject {
         var grid: SIMD2<Float>; var touching: Bool; var panning: Bool; var following: Bool
     }
     private let camInput = OSAllocatedUnfairLock<CamInput?>(initialState: nil)
+    private let renderClouds = OSAllocatedUnfairLock<(backdrop: Backdrop, cx: Double, nodes: [(SCNNode, Backdrop.Cloud)])?>(initialState: nil)
     private let renderWalls = OSAllocatedUnfairLock<[(name: String, full: SCNNode, stub: SCNNode)]>(initialState: [])
 
     /// Home: the whole room (walls included) fits the screen, as homeView() frames it on the web. Following: close behind the agent.
@@ -493,6 +522,10 @@ final class OfficeRenderer: NSObject {
         // world up, every frame: plain look(at:) keeps the node's current up, so roll would creep in while orbiting
         camera.look(at: camTarget, up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 0, -1))
         updateCutaway(grid: input.grid)
+        if let c = renderClouds.withLock({ $0 }) {
+            let t = Date().timeIntervalSince1970
+            for (n, cloud) in c.nodes { n.position.x = Float(c.backdrop.cloudX(cloud, cx: c.cx, t: t)) }
+        }
         placePills()
     }
 

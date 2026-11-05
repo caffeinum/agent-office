@@ -20,6 +20,7 @@ import { buildGeometry, buildMeshGeometry, vbox } from "./voxel.js";
 import { CROWN, applyLimbs, applyProps, awayMaterial, baseMaterial, blink, buildCharacter, characterMaterials } from "./character.js";
 import { POINT_LIGHTS_GL, setPointExempt, setZones, withZones } from "./zone-shader.js";
 import * as T from "./textures.js";
+import { backdrop, cloudX } from "./backdrop.js";
 import { GARDEN_BORDER as BORDER, cornerPosts, cutaway, gardenBoxes, roomWalls, wallBoxes } from "./room.js";
 
 const WALK_SPEED = 1.7;
@@ -140,7 +141,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
 
   const S = {
     theme: "day", grid: null, items: [], agents: [], seating: new Map(), spots: [], blocked: null, entry: { x: 0, z: 0 },
-    room: null, walls: {}, furniture: new THREE.Group(), batches: new Map(), texts: new Map(), itemAnim: new Map(), leavingItems: new Map(),
+    room: null, clouds: [], walls: {}, furniture: new THREE.Group(), batches: new Map(), texts: new Map(), itemAnim: new Map(), leavingItems: new Map(),
     chars: new Map(), lampLights: [], glowMats: new Map(), selectedItem: null, ghost: null, hidden: new Set(), follow: null, drag: null,
     camAnim: null, insets: { left: 0, right: 0 }, clock: 0, last: performance.now(), size: { w: 1, h: 1 }, frameCbs: [], raf: 0, raycaster: new THREE.Raycaster(),
     custom: {}, look: themeLook(DEFAULT_THEME), palette: null, fade: null, kindColor: new Map(), assign: new Map(),
@@ -287,6 +288,21 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
       dm.castShadow = true; dm.receiveShadow = true;
       g.add(dm);
     }
+
+    // the bay around the island: water, hills, skyline, bridge, drifting clouds (backdrop.js)
+    const bd = backdrop(grid);
+    const water = own(new THREE.Mesh(new THREE.PlaneGeometry(bd.water.size, bd.water.size), new THREE.MeshStandardMaterial({ color: bd.water.color, roughness: 0.55 })));
+    water.userData.ownMat = true;
+    water.rotation.x = -Math.PI / 2;
+    water.position.set(bd.water.x, bd.water.y, bd.water.z);
+    g.add(water);
+    g.add(own(new THREE.Mesh(buildGeometry(bd.land, { ao: false, floorY: -99 }), mats.base)));
+    S.clouds = bd.clouds.map((c) => {
+      const m = own(new THREE.Mesh(buildGeometry(c.boxes, { ao: false, floorY: -99 }), mats.base));
+      m.position.set(cloudX(c, W / 2, Date.now()), c.y, c.z);
+      g.add(m);
+      return { mesh: m, cloud: c, cx: W / 2 };
+    });
 
     // walls: full + low stub each, the camera-side ones swap to the stub (cutaway). The body is white
     // boxes on a themed material (plaster / brick / wood panels × wall colour); cap, baseboard and posts
@@ -1201,6 +1217,8 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     controls.update();
     clampTarget();
     updateCutaway();
+
+    for (const c of S.clouds) c.mesh.position.x = cloudX(c.cloud, c.cx, Date.now());
 
     // fog follows zoom so the garden softly fades, the office never does
     const dist = camera.position.distanceTo(controls.target);

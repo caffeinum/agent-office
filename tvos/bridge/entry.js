@@ -14,6 +14,7 @@ import { floorTexture, grainTexture, grassTexture, nightWindowTexture, plinthTex
 import { TIMES_OF_DAY, clockTheme, hueColors, themeLook } from "../../public/js/model.js";
 import { buildGeometry } from "../../public/js/voxel.js";
 import { installDocument } from "./pixel-canvas.js";
+import { CLOUD_BAND, CLOUD_SPEED, backdrop } from "../../public/js/backdrop.js";
 import { cueGate, soundCues } from "../../public/js/sound-plan.js";
 
 installDocument();
@@ -158,6 +159,7 @@ globalThis.AO = {
       garden: gardenBoxes(grid),
       walls: roomWalls(grid).map((wall) => ({ ...wall, ...wallBoxes(wall.len, wall.doorAt) })),
       posts: cornerPosts(grid),
+      backdrop: { ...backdrop(grid), cloudSpeed: CLOUD_SPEED, cloudBand: CLOUD_BAND },
     });
   },
   /** One WebSocket frame (JSON text); returns its type. */

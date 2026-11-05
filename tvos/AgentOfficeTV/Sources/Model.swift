@@ -66,6 +66,25 @@ struct RoomPlan: Decodable {
     let garden: [OfficeScene.Box]
     let walls: [Wall]
     let posts: [OfficeScene.Box]
+    let backdrop: Backdrop
+}
+
+/// backdrop.js: the bay around the island (hills, downtown, bridge as one box list), the water, and drifting clouds.
+struct Backdrop: Decodable {
+    struct Water: Decodable { let x, z, size, y: Double; let color: String }
+    struct Cloud: Decodable { let boxes: [OfficeScene.Box]; let x, y, z: Double }
+    let land: [OfficeScene.Box]
+    let water: Water
+    let clouds: [Cloud]
+    let cloudSpeed: Double
+    let cloudBand: Double
+
+    /// cloudX(): a cloud's x at wall-clock seconds `t`, drifting along +x and wrapping round a band centred on `cx`.
+    func cloudX(_ c: Cloud, cx: Double, t: Double) -> Double {
+        var d = (c.x + t * cloudSpeed + cloudBand / 2).truncatingRemainder(dividingBy: cloudBand)
+        if d < 0 { d += cloudBand }
+        return cx + d - cloudBand / 2
+    }
 }
 
 /// voxel.js buildGeometry output: positions, normals, linear vertex colours, world-scaled UVs, triangle indices.
