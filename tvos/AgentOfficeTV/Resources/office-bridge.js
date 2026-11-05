@@ -4,17 +4,17 @@
   var toLinear = (c) => c < 0.04045 ? c * 0.0773993808 : Math.pow(c * 0.9478672986 + 0.0521327014, 2.4);
   var toSRGB = (c) => c < 31308e-7 ? c * 12.92 : 1.055 * Math.pow(c, 0.41666) - 0.055;
   var Color = class {
-    constructor(hex) {
+    constructor(hex2) {
       this.r = 0;
       this.g = 0;
       this.b = 0;
-      if (hex !== void 0) this.set(hex);
+      if (hex2 !== void 0) this.set(hex2);
     }
-    set(hex) {
-      const hsl = /^hsl\(\s*(\d*\.?\d+)\s*,\s*(\d*\.?\d+)%\s*,\s*(\d*\.?\d+)%\s*\)$/.exec(hex);
+    set(hex2) {
+      const hsl = /^hsl\(\s*(\d*\.?\d+)\s*,\s*(\d*\.?\d+)%\s*,\s*(\d*\.?\d+)%\s*\)$/.exec(hex2);
       if (hsl) return this.setHSL(+hsl[1] / 360, +hsl[2] / 100, +hsl[3] / 100);
-      const m = /^#([0-9a-f]{6})$/i.exec(hex);
-      if (!m) throw new Error(`three-stub Color: only #rrggbb and hsl(h, s%, l%) are supported, got ${JSON.stringify(hex)}`);
+      const m = /^#([0-9a-f]{6})$/i.exec(hex2);
+      if (!m) throw new Error(`three-stub Color: only #rrggbb and hsl(h, s%, l%) are supported, got ${JSON.stringify(hex2)}`);
       const n = parseInt(m[1], 16);
       this.r = toLinear((n >> 16) / 255);
       this.g = toLinear((n >> 8 & 255) / 255);
@@ -632,9 +632,9 @@
       zones: t.zones.map((z, i) => validateZone(z, `theme.zones[${i}]`))
     };
   }
-  function hexToRgb(hex) {
-    color(hex, "colour");
-    const n = parseInt(hex.slice(1), 16);
+  function hexToRgb(hex2) {
+    color(hex2, "colour");
+    const n = parseInt(hex2.slice(1), 16);
     return [n >> 16 & 255, n >> 8 & 255, n & 255];
   }
   function rgbToHex([r, g, b]) {
@@ -645,8 +645,8 @@
     const pa = hexToRgb(a), pb = hexToRgb(b);
     return rgbToHex(pa.map((v, i) => v + (pb[i] - v) * t));
   }
-  function hexToHsl(hex) {
-    const [r, g, b] = hexToRgb(hex).map((v) => v / 255);
+  function hexToHsl(hex2) {
+    const [r, g, b] = hexToRgb(hex2).map((v) => v / 255);
     const max = Math.max(r, g, b), min = Math.min(r, g, b);
     const l = (max + min) / 2;
     if (max === min) return [0, 0, l];
@@ -670,8 +670,8 @@
     };
     return rgbToHex([ch(hue + 1 / 3) * 255, ch(hue) * 255, ch(hue - 1 / 3) * 255]);
   }
-  function luminance(hex) {
-    const lin = hexToRgb(hex).map((v) => {
+  function luminance(hex2) {
+    const lin = hexToRgb(hex2).map((v) => {
       const c = v / 255;
       return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
     });
@@ -1287,10 +1287,6 @@
     day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.28, threshold: 0.92, glow: 1, lamp: 0.95, point: 0, neon: 3, nightNeon: 0, nightGlow: 0.1, exposure: 1 },
     night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.22, sun: 0.15, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 1, glow: 1.2, lamp: 2.4, point: 9, neon: 8, nightNeon: 8, nightGlow: 1.5, exposure: 1.05 }
   });
-  function clockTheme(date = /* @__PURE__ */ new Date()) {
-    const h = date.getHours();
-    return h >= 19 || h < 7 ? "night" : "day";
-  }
   var MOODS = Object.freeze({
     warm: { sun: "#ffe4bd", sky: "#d7ecff", ground: "#e3c39d", lamp: "#ffc27a", fill: "#ffd9a8", nightSky: "#41508f" },
     neutral: { sun: "#fff3e4", sky: "#e2ecf8", ground: "#d6cfc6", lamp: "#ffe0b8", fill: "#ffe9cf", nightSky: "#45507f" },
@@ -1303,8 +1299,8 @@
     const t = validateTheme(theme);
     const classic = sameList(t.accents, DEFAULT_THEME.accents);
     const a = (i) => t.accents[i % t.accents.length];
-    const soft = (hex, l = 0.62) => {
-      const [h, s] = hexToHsl(hex);
+    const soft = (hex2, l = 0.62) => {
+      const [h, s] = hexToHsl(hex2);
       return hslToHex([h, Math.min(s, 0.55), l]);
     };
     const darkest = [...t.accents].sort((x, y) => luminance(x) - luminance(y))[0];
@@ -1532,8 +1528,8 @@
     t.anisotropy = 4;
     return t;
   }
-  var shade = (hex, f) => {
-    const c = new Color(hex);
+  var shade = (hex2, f) => {
+    const c = new Color(hex2);
     c.multiplyScalar(f);
     return `#${c.getHexString()}`;
   };
@@ -1829,6 +1825,69 @@
       g.fillRect(0, 0, 32, 16);
     }
     return tex(c);
+  }
+
+  // public/js/sun.js
+  var SF = Object.freeze({ lat: 37.7749, lon: -122.4194 });
+  var RAD = Math.PI / 180;
+  function sunPosition(date, { lat, lon } = SF) {
+    const d = date.getTime() / 864e5 - 10957.5;
+    const g = (357.529 + 0.98560028 * d) * RAD;
+    const q = 280.459 + 0.98564736 * d;
+    const L = (q + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)) * RAD;
+    const e = (23.439 - 36e-8 * d) * RAD;
+    const ra = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L));
+    const dec = Math.asin(Math.sin(e) * Math.sin(L));
+    const gmst = (18.697374558 + 24.06570982441908 * d) * 15;
+    const ha = (gmst + lon) * RAD - ra;
+    const la = lat * RAD;
+    const el = Math.asin(Math.sin(la) * Math.sin(dec) + Math.cos(la) * Math.cos(dec) * Math.cos(ha));
+    const az = Math.atan2(-Math.sin(ha), Math.tan(dec) * Math.cos(la) - Math.sin(la) * Math.cos(ha));
+    return { elevation: el / RAD, azimuth: (az / RAD + 360) % 360 };
+  }
+  var GOLDEN = { sun: "#ffa863", sky: "#f3c6a3", fog: "#efc4a6" };
+  var MOON_DIR = [-0.55, 1, 0.75];
+  var DUSK_START = 6;
+  var NIGHT_AT = -6;
+  var SHADOW_MIN = 12;
+  var smooth2 = (a, b, x) => {
+    const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  };
+  var hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  function mix(a, b, k2) {
+    const x = hex(a), y = hex(b);
+    return "#" + x.map((v, i) => Math.round(v + (y[i] - v) * k2).toString(16).padStart(2, "0")).join("");
+  }
+  function lightFor(dark, golden, sunDir, mood) {
+    const D = TIMES_OF_DAY.day, N = TIMES_OF_DAY.night;
+    const out = { name: dark > 0.5 ? "night" : "day", dark, golden };
+    for (const k2 of Object.keys(D)) if (typeof D[k2] === "number") out[k2] = D[k2] + (N[k2] - D[k2]) * dark;
+    const g = golden * (1 - dark);
+    out.sunColor = mix(mix(mood.sun, GOLDEN.sun, g), N.sunColor, dark);
+    out.hemiSky = mix(mix(mood.sky, GOLDEN.sky, g * 0.6), mood.nightSky, dark);
+    out.hemiGround = mix(mood.ground, N.hemiGround, dark);
+    out.fog = mix(mix(D.fog, GOLDEN.fog, g), N.fog, dark);
+    out.sunDir = sunDir;
+    return out;
+  }
+  function fixedLight(name, mood) {
+    if (name !== "day" && name !== "night") throw new Error(`unknown time of day ${JSON.stringify(name)}`);
+    return lightFor(name === "night" ? 1 : 0, 0, unit(name === "night" ? MOON_DIR : MOON_DIR), mood);
+  }
+  function lightAt(date, mood) {
+    const { elevation, azimuth } = sunPosition(date);
+    const dark = smooth2(DUSK_START, NIGHT_AT, elevation);
+    const golden = 1 - smooth2(4, 16, elevation);
+    const el = Math.max(SHADOW_MIN, elevation) * RAD, az = azimuth * RAD;
+    const sunDir = [Math.cos(el) * Math.sin(az), Math.sin(el), -Math.cos(el) * Math.cos(az)];
+    const moon = unit(MOON_DIR);
+    const dir = unit(sunDir.map((v, i) => v + (moon[i] - v) * dark));
+    return lightFor(dark, golden, dir, mood);
+  }
+  function unit(v) {
+    const l = Math.hypot(...v);
+    return v.map((x) => x / l);
   }
 
   // tvos/bridge/pixel-canvas.js
@@ -2281,9 +2340,8 @@
       };
     });
   }
-  function timeOfDay(name) {
-    if (!TIMES_OF_DAY[name]) throw new Error(`unknown time of day ${JSON.stringify(name)}`);
-    return { name, ...TIMES_OF_DAY[name] };
+  function timeOfDay(time, now, mood) {
+    return time ? fixedLight(time, mood) : lightAt(new Date(Math.floor(now / 3e4) * 3e4), mood);
   }
   function nameOf(ref) {
     if (ref.startsWith("human:")) return ref.slice(6);
@@ -2364,7 +2422,7 @@
       for (const it of items) if (!kinds[it.kind]) kinds[it.kind] = kindParts(it.kind, custom);
       const t = targets(now);
       walk = { blocked: blockedCells(state.items, state.grid, custom), grid: state.grid };
-      const tod = timeOfDay(time || clockTheme(new Date(now)));
+      const tod = timeOfDay(time, now, themeLook(state.theme).mood);
       return JSON.stringify({
         id: state.id,
         name: state.name ?? null,

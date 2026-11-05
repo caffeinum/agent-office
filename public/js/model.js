@@ -685,11 +685,6 @@ export const TIMES_OF_DAY = Object.freeze({
   night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.22, sun: 0.15, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 1.0, glow: 1.2, lamp: 2.4, point: 9, neon: 8, nightNeon: 8, nightGlow: 1.5, exposure: 1.05 },
 });
 
-/** Day or night from a local clock: night runs 19:00–07:00. */
-export function clockTheme(date = new Date()) {
-  const h = date.getHours();
-  return h >= 19 || h < 7 ? "night" : "day";
-}
 
 /* ── theme → look ───────────────────────────────────────────────────────────────────────────── */
 

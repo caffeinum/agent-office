@@ -1,7 +1,8 @@
 // Entry: route (/ = landing, /o/:office = the office), connect the data source, and wire the scene,
 // overlay, sidebar and editor together. State only ever changes through applyFrame().
 
-import { applyFrame, clockTheme } from "./model.js";
+import { MOODS, applyFrame } from "./model.js";
+import { lightAt } from "./sun.js";
 import { soundCues } from "./sound-plan.js";
 import { createSound } from "./sound.js";
 import { createRadio } from "./radio-player.js";
@@ -46,14 +47,18 @@ function forgetKey(office) {
   try { sessionStorage.removeItem(keySlot(office)); } catch { /* nothing stored */ }
 }
 
-/** ?theme= wins; a manual toggle sticks only until the clock's day/night phase changes. */
+/** Day or night over San Francisco right now (sun.js). */
+const sunPhase = () => lightAt(new Date(), MOODS.warm).name;
+
+/** ?theme= wins; a manual day/night toggle sticks only until the sun's phase changes; otherwise "auto" follows the sun. */
 function initialTheme() {
   if (params.get("theme") === "night" || params.get("theme") === "day") return params.get("theme");
+  if (params.has("at")) return "auto";
   try {
     const saved = JSON.parse(localStorage.getItem("office.theme") ?? "null");
-    if (saved && (saved.theme === "day" || saved.theme === "night") && saved.phase === clockTheme()) return saved.theme;
-  } catch { /* old plain-string value or no storage: follow the clock */ }
-  return clockTheme();
+    if (saved && (saved.theme === "day" || saved.theme === "night") && saved.phase === sunPhase()) return saved.theme;
+  } catch { /* old plain-string value or no storage: follow the sun */ }
+  return "auto";
 }
 
 function boot() {
@@ -167,15 +172,20 @@ function boot() {
     return v;
   }
 
-  function setTheme(t, remember = true) {
-    scene.setTheme(t);
-    ui.setTheme(t);
+  let themeMode = null;
+  function setTheme(mode, remember = true) {
+    themeMode = mode;
+    scene.setTheme(mode);
+    ui.setTheme(scene.theme);
     if (!remember) return;
-    try { localStorage.setItem("office.theme", JSON.stringify({ theme: t, phase: clockTheme() })); } catch { /* fine */ }
+    try { localStorage.setItem("office.theme", JSON.stringify({ theme: mode, phase: sunPhase() })); } catch { /* fine */ }
   }
+  // ?at=HH:MM shows the office's light at that time of day today (checking dusk and dawn)
+  const at = /^(\d{1,2}):(\d{2})$/.exec(params.get("at") ?? "");
+  if (at) { const d = new Date(); d.setHours(+at[1], +at[2], 0, 0); scene.setClockOffset(d.getTime() - Date.now()); }
   setTheme(initialTheme(), false);
   if (!params.has("theme")) {
-    setInterval(() => { const t = initialTheme(); if (t !== scene.theme) setTheme(t, false); }, 60_000);
+    setInterval(() => { const m = initialTheme(); if (m !== themeMode) setTheme(m, false); else ui.setTheme(scene.theme); }, 30_000);
   }
 
   function selectAgent(id) {

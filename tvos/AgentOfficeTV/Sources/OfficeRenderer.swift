@@ -171,9 +171,8 @@ final class OfficeRenderer: NSObject {
         // scene.js buildRoom: the sun sits along (-0.55, 1, 0.75) from the room's centre, R × 2.4 away
         let R = Float(hypot(w, d) / 2 + plan.border + 1)
         let c = SIMD3<Float>(Float(w / 2), 0, Float(d / 2))
-        let at = c + simd_normalize(SIMD3<Float>(-0.55, 1, 0.75)) * R * 2.4
-        sun.position = SCNVector3(at.x, at.y, at.z)
-        sun.look(at: SCNVector3(c.x, c.y, c.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 0, -1))
+        sunRig = (c, R)
+        placeSun(s.time.sunDir)
         sun.light?.orthographicScale = CGFloat(R)
         sun.light?.zNear = 0.5
         sun.light?.zFar = CGFloat(R * 5)
@@ -413,6 +412,17 @@ final class OfficeRenderer: NSObject {
 
     // MARK: time of day
 
+    private var sunRig: (c: SIMD3<Float>, R: Float)?
+
+    /// The sun (or moon) along the light's direction from the room's centre, aimed at it: sun.js moves it over the day.
+    private func placeSun(_ dir: [Double]) {
+        guard let rig = sunRig else { return }
+        guard dir.count == 3 else { preconditionFailure("sunDir needs 3 components, got \(dir)") }
+        let at = rig.c + simd_normalize(SIMD3<Float>(Float(dir[0]), Float(dir[1]), Float(dir[2]))) * rig.R * 2.4
+        sun.position = SCNVector3(at.x, at.y, at.z)
+        sun.look(at: SCNVector3(rig.c.x, rig.c.y, rig.c.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 0, -1))
+    }
+
     /// scene.js setTheme/applyLights/applyGlow/updateLampLights for SceneKit: sun, hemisphere (as ambient), fog, sky,
     /// window glass and glow strength, and at night the lamp and ceiling-fill point lights.
     private func applyTime(_ s: OfficeScene) {
@@ -420,10 +430,11 @@ final class OfficeRenderer: NSObject {
         let t = s.time, mood = s.look.mood
         do {
             sun.light?.intensity = t.sun / .pi * 1000
-            sun.light?.color = cssColor(t.night ? t.sunColor : mood.sun)
+            sun.light?.color = cssColor(t.sunColor)
+            placeSun(t.sunDir)
             // a hemisphere light lit from sky above and ground below; ambient takes their mean
             fill.light?.intensity = t.hemi / .pi * 1000 * 0.85
-            fill.light?.color = mix(cssColor(t.night ? mood.nightSky : mood.sky), cssColor(t.night ? t.hemiGround : mood.ground))
+            fill.light?.color = mix(cssColor(t.hemiSky), cssColor(t.hemiGround))
             scene.fogColor = cssColor(t.fog)
             cityLights?.isHidden = !t.night
             scene.background.contents = try voxel.texture("sky", t.name)

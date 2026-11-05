@@ -25,7 +25,9 @@ struct OfficeScene: Decodable, Equatable {
     /// model.js TIMES_OF_DAY for the local clock (or AO_TIME): three.js light levels.
     struct TimeOfDay: Decodable, Equatable {
         let name: String
-        let hemiGround: String; let hemi: Double; let sun: Double; let sunColor: String; let fog: String
+        /// sun.js lightFor(): final colours (mood, golden hour and night blended) and the light's direction (unit, to it).
+        let hemiSky: String; let hemiGround: String; let hemi: Double; let sun: Double; let sunColor: String; let fog: String
+        let sunDir: [Double]
         let glow: Double; let lamp: Double; let point: Double; let neon: Double; let nightNeon: Double; let nightGlow: Double
         var night: Bool { name == "night" }
     }

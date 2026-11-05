@@ -45,7 +45,7 @@ while the button is still down. A controls strip shows for a while after launch 
 spoke or started working, 20 s each; any input ends the tour.
 
 Testing headless in the simulator: `AO_PRESSES="playPause+right+down+menu"` replays presses (one per `AO_PRESS_GAP`
-seconds, from 8 s after launch), `AO_TOUR_AFTER=6` starts the tour sooner and `AO_STATS=1` shows SceneKit statistics and logs tick timings, `AO_SOUND=0` mutes the foley (on by default; `AO_VOLUME` sets the master, 0.32), `AO_TIME=night|day` overrides the local clock (night 19:00–07:00, like the web), `AO_SHADOW_SAMPLES`/`AO_SHADOW_MAP` tune the sun shadow (default 4 samples, 2048 map: 8 and 4096 halved the frame rate up close), AO_STATS also logs frames drawn per second, via `SIMCTL_CHILD_…` (or `devicectl … --environment-variables` on the TV). Separate presses
+seconds, from 8 s after launch), `AO_TOUR_AFTER=6` starts the tour sooner and `AO_STATS=1` shows SceneKit statistics and logs tick timings, `AO_SOUND=0` mutes the foley (on by default; `AO_VOLUME` sets the master, 0.32), `AO_TIME=night|day` holds day or night (otherwise the light follows the sun over San Francisco, sun.js, like the web), `AO_SHADOW_SAMPLES`/`AO_SHADOW_MAP` tune the sun shadow (default 4 samples, 2048 map: 8 and 4096 halved the frame rate up close), AO_STATS also logs frames drawn per second, via `SIMCTL_CHILD_…` (or `devicectl … --environment-variables` on the TV). Separate presses
 with `+`: a comma in the value breaks `simctl launch`. With `--terminate-running-process` every other launch can land
 on the home screen; launch again.
 

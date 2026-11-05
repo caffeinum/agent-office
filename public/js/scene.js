@@ -13,7 +13,7 @@ import { footprint, kindOf } from "../shared/catalog.js";
 import { DEFAULT_THEME } from "../shared/theme.js";
 import {
   SEATED, wanderSalt, assignSpots, blockedCells, deskSeating, entryPoint, hashStr, idleSpots, kindGeometryPlan, layoutBatches, limbAngles, poseFor,
-  hueColors, itemPoint, placedLights, route, seatOf, themeLook, TIMES_OF_DAY, usableSpots,
+  hueColors, itemPoint, placedLights, route, seatOf, themeLook, usableSpots,
 } from "./model.js";
 import { DESK_SCREEN, MODELS, SEAT_Y, WALL_H } from "./furniture.js";
 import { buildGeometry, buildMeshGeometry, vbox } from "./voxel.js";
@@ -21,6 +21,7 @@ import { CROWN, applyLimbs, applyProps, awayMaterial, baseMaterial, blink, build
 import { POINT_LIGHTS_GL, setPointExempt, setZones, withZones } from "./zone-shader.js";
 import * as T from "./textures.js";
 import { backdrop, cloudX } from "./backdrop.js";
+import { fixedLight, lightAt, lightKey } from "./sun.js";
 import { screenKey, screenSpec, screenStyle } from "./screen.js";
 import { GARDEN_BORDER as BORDER, cornerPosts, cutaway, gardenBoxes, roomWalls, wallBoxes } from "./room.js";
 
@@ -148,7 +149,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
   zoneCharacters();
 
   const S = {
-    theme: "day", grid: null, items: [], agents: [], seating: new Map(), spots: [], blocked: null, entry: { x: 0, z: 0 },
+    theme: "day", light: null, lightMode: "day", lightKey: null, clockOffset: 0, grid: null, items: [], agents: [], seating: new Map(), spots: [], blocked: null, entry: { x: 0, z: 0 },
     room: null, clouds: [], screens: new Map(), walls: {}, furniture: new THREE.Group(), batches: new Map(), texts: new Map(), itemAnim: new Map(), leavingItems: new Map(),
     chars: new Map(), lampLights: [], glowMats: new Map(), selectedItem: null, ghost: null, hidden: new Set(), follow: null, drag: null,
     camAnim: null, insets: { left: 0, right: 0 }, clock: 0, last: performance.now(), size: { w: 1, h: 1 }, frameCbs: [], raf: 0, raycaster: new THREE.Raycaster(),
@@ -366,7 +367,8 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     // sun + shadow frustum
     const c = new THREE.Vector3(W / 2, 0, D / 2);
     const R = Math.hypot(W, D) / 2 + BORDER + 1;
-    sun.position.copy(c).add(new THREE.Vector3(-0.55, 1, 0.75).normalize().multiplyScalar(R * 2.4));
+    S.sunRig = { c, R };
+    placeSun();
     sun.target.position.copy(c);
     const sc = sun.shadow.camera;
     sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = 0.5; sc.far = R * 5;
@@ -519,7 +521,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
   function updateLampLights() {
     for (const l of S.lampLights) { scene.remove(l); if (l.isSpotLight) scene.remove(l.target); }
     S.lampLights = [];
-    const th = TIMES_OF_DAY[S.theme];
+    const th = S.light;
     const pal = S.palette;
     const lamps = S.items.filter((it) => it.kind === "lamp" || it.kind === "tv").slice(0, 6);
     for (const it of lamps) {
@@ -529,6 +531,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
         ? new THREE.SpotLight(pal.lamp, th.point * LAMP_SPOT, LAMP_REACH, LAMP_CONE, 0.9, 1.4)
         : new THREE.PointLight("#8fb6ff", th.point * 0.4, 7, 1.6);
       pl.userData.lamp = it.kind === "lamp";
+      pl.userData.base = it.kind === "lamp" ? LAMP_SPOT : 0.4;
       pl.position.set(cx, it.kind === "lamp" ? 1.16 : 1.0, cz);
       if (pl.isSpotLight) { pl.target.position.set(cx, 0, cz); scene.add(pl.target); }
       pl.visible = th.point > 0;
@@ -543,6 +546,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     fill.position.set(S.grid.w / 2, FILL_Y, S.grid.d / 2);
     fill.visible = th.point > 0;
     fill.userData.fill = true;
+    fill.userData.base = 2.2 + 1.6 * density;
     scene.add(fill);
     S.lampLights.push(fill);
     // custom kinds' coloured lights: neon spill, on day and night, and not dimmed by theme zones
@@ -869,27 +873,51 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
 
   /* ── theme ─────────────────────────────────────────────────────────────────────────────────── */
 
-  /** Time of day: "day" | "night" (the office theme — palette and materials — is applyLook). */
-  function setTheme(theme) {
-    if (!TIMES_OF_DAY[theme]) throw new Error(`unknown theme ${theme}`);
-    S.theme = theme;
-    const th = TIMES_OF_DAY[theme];
+  /**
+   * Time of day: "auto" follows the sun over San Francisco (sun.js: dusk and dawn blend, the sun moves), "day" and
+   * "night" hold one (the office theme — palette and materials — is applyLook).
+   */
+  function setTheme(mode) {
+    if (!["auto", "day", "night"].includes(mode)) throw new Error(`unknown theme ${mode}`);
+    S.lightMode = mode;
+    S.lightKey = null;
+    relight();
+  }
+
+  /** Recomputes the light for the mode (and, in auto, the moment) and applies it. */
+  function relight() {
+    const mood = S.look.mood;
+    const light = S.lightMode === "auto" ? lightAt(new Date(Date.now() + S.clockOffset), mood) : fixedLight(S.lightMode, mood);
+    const nameChanged = !S.light || S.light.name !== light.name;
+    const lampsChanged = !S.light || (S.light.point > 0) !== (light.point > 0) || Math.abs(S.light.point - light.point) > 0.5 || S.light.nightNeon !== light.nightNeon;
+    S.light = light;
+    S.theme = light.name;
+    const th = light;
     hemi.intensity = th.hemi;
     sun.intensity = th.sun;
-    scene.background = theme === "night" ? tex.skyNight : tex.skyDay;
-    if (S.cityLights) S.cityLights.visible = theme === "night";
+    scene.background = th.name === "night" ? tex.skyNight : tex.skyDay;
+    if (S.cityLights) S.cityLights.visible = th.name === "night";
     scene.fog.color.set(th.fog);
     bloom.strength = th.bloom; bloom.threshold = th.threshold;
     renderer.toneMappingExposure = th.exposure;
     for (const m of S.glowMats.values()) applyGlow(m);
-    for (const sc of S.screens.values()) { applyGlow(sc.mesh.material); sc.spill.visible = sc.lit && theme === "night"; }
+    for (const sc of S.screens.values()) { applyGlow(sc.mesh.material); sc.spill.visible = sc.lit && th.name === "night"; }
+    placeSun();
     applyLights();
-    if (S.grid) updateLampLights();
+    if (S.grid && (nameChanged || lampsChanged)) updateLampLights();
+    else for (const l of S.lampLights) if (!l.userData.kindLight) l.intensity = l.userData.base * (l.userData.fill ? th.point * 0.42 : th.point);
+  }
+
+  /** The sun (or moon) along the light's direction from the room's centre, far enough to cover the island's shadows. */
+  function placeSun() {
+    if (!S.sunRig || !S.light) return;
+    const [x, y, z] = S.light.sunDir;
+    sun.position.copy(S.sunRig.c).add(new THREE.Vector3(x, y, z).multiplyScalar(S.sunRig.R * 2.4));
   }
 
   function applyGlow(m) {
-    const th = TIMES_OF_DAY[S.theme];
-    const night = S.theme === "night";
+    const th = S.light;
+    const night = th.name === "night";
     m.color.copy(m.userData.baseColor).multiplyScalar(m.userData.night ? th.nightGlow : m.userData.lamp ? th.lamp : th.glow);
     if (m.userData.window) {
       const map = night ? nightWindowTex(S.look.nightWindow) : tex.windowDay;
@@ -900,12 +928,11 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
 
   /** Sun / sky / lamp tints: the lighting mood of the theme over the time of day. */
   function applyLights() {
-    const th = TIMES_OF_DAY[S.theme], p = S.palette;
-    if (!p) return;
-    const night = S.theme === "night";
-    hemi.color.copy(night ? p.nightSky : p.sky);
-    hemi.groundColor.copy(night ? tmpC.set(th.hemiGround) : p.ground);
-    sun.color.copy(night ? tmpC.set(th.sunColor) : p.sun);
+    const th = S.light, p = S.palette;
+    if (!p || !th) return;
+    hemi.color.set(th.hemiSky);
+    hemi.groundColor.set(th.hemiGround);
+    sun.color.set(th.sunColor);
     for (const l of S.lampLights) if (!l.userData.kindLight) l.color.copy(l.userData.fill ? p.fill : l.userData.lamp ? p.lamp : l.color);
   }
 
@@ -1338,6 +1365,8 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     updateCutaway();
 
     for (const c of S.clouds) c.mesh.position.x = cloudX(c.cloud, c.cx, Date.now());
+    // the sun moves on: re-light every half minute while following the clock
+    if (S.lightMode === "auto") { const k = lightKey(new Date(Date.now() + S.clockOffset)); if (k !== S.lightKey) { S.lightKey = k; relight(); } }
 
     // fog follows zoom so the garden softly fades, the office never does
     const dist = camera.position.distanceTo(controls.target);
@@ -1369,11 +1398,13 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     for (const cb of S.frameCbs) cb(now);
   }
   paintPalette(paletteFor(S.look));
-  setTheme("day");
+  setTheme("auto");
   frame();
 
   return {
     setInsets(left, right) { S.insets = { left, right }; applyInsets(); },
+    /** Shift the sun's clock (ms; ?at= for checking dusk and dawn). */
+    setClockOffset(ms) { S.clockOffset = ms; S.lightKey = null; relight(); },
     setState, setTheme, resetView, zoom, focusAgent, unfollow, anchors, panAt, pickAt, floorAt, setGhost, selectItem, hideItems, thumbnail,
     /** Where everyone is and what they're doing (for ?debug and tests in the browser). */
     debug() {

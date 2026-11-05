@@ -11,7 +11,8 @@ import { kindOf } from "../../public/shared/catalog.js";
 import { characterRig } from "../../public/js/character.js";
 import { GARDEN_BORDER, cornerPosts, gardenBoxes, roomWalls, wallBoxes } from "../../public/js/room.js";
 import { floorTexture, grainTexture, grassTexture, nightWindowTexture, plinthTexture, rackTexture, rugTexture, screenOffTexture, screenTexture, skyTexture, tvTexture, wallTexture, windowTexture } from "../../public/js/textures.js";
-import { TIMES_OF_DAY, clockTheme, hueColors, themeLook } from "../../public/js/model.js";
+import { hueColors, themeLook } from "../../public/js/model.js";
+import { fixedLight, lightAt } from "../../public/js/sun.js";
 import { buildGeometry, buildMeshGeometry } from "../../public/js/voxel.js";
 import { installDocument } from "./pixel-canvas.js";
 import { screenKey, screenSpec, screenStyle } from "../../public/js/screen.js";
@@ -148,9 +149,9 @@ function deskScreens() {
   });
 }
 
-function timeOfDay(name) {
-  if (!TIMES_OF_DAY[name]) throw new Error(`unknown time of day ${JSON.stringify(name)}`);
-  return { name, ...TIMES_OF_DAY[name] };
+/** The light now (sun.js, SF; to the half minute so the TV re-lights only when it changes), or a forced day/night. */
+function timeOfDay(time, now, mood) {
+  return time ? fixedLight(time, mood) : lightAt(new Date(Math.floor(now / 30_000) * 30_000), mood);
 }
 
 /** A chat ref as people read it: an agent's display name, a human's name, or the office. */
@@ -235,7 +236,7 @@ globalThis.AO = {
     for (const it of items) if (!kinds[it.kind]) kinds[it.kind] = kindParts(it.kind, custom);
     const t = targets(now);
     walk = { blocked: blockedCells(state.items, state.grid, custom), grid: state.grid };
-    const tod = timeOfDay(time || clockTheme(new Date(now)));
+    const tod = timeOfDay(time, now, themeLook(state.theme).mood);
     return JSON.stringify({
       id: state.id,
       name: state.name ?? null,

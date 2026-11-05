@@ -14,6 +14,7 @@ import {
   themeLook, CLASSIC_COLORS, MOODS, mergeBoxes, overlapLayers, kindGeometryPlan, usableSpots, placedLights, TIMES_OF_DAY,
 } from "../public/js/model.js";
 import { screenSpec, screenStyle } from "../public/js/screen.js";
+import { fixedLight, lightAt, sunPosition } from "../public/js/sun.js";
 import { arcadeDef, brickWallDef, coffeeBarDef, huddleDef } from "../public/js/demo-design.js";
 
 let passed = 0;
@@ -81,6 +82,26 @@ test("pickSpot: idle agents mostly take a seat, a station about one slot in SEAT
   // every seat taken: a station, not nothing
   assert.equal(pickSpot("a", spots, new Set(["sofa:s0", "sofa:s1", "chair:s0"]), 0).pose, "coffee");
   assert.equal(poseFor(agent("a", { status: "idle" }), true).place, "lounge");
+});
+
+test("sun.js: SF daylight, a golden dusk, night after sunset, and fixed day/night", () => {
+  const mood = MOODS.warm;
+  const at = (iso) => lightAt(new Date(iso), mood);
+  assert.ok(Math.abs(sunPosition(new Date("2026-11-04T12:00:00-08:00")).elevation - 36.6) < 1.5, "SF noon in November");
+  assert.equal(at("2026-11-04T12:00:00-08:00").name, "day");
+  assert.equal(at("2026-11-04T12:00:00-08:00").dark, 0);
+  assert.ok(at("2026-11-04T16:30:00-08:00").golden > 0.5, "golden hour before sunset");
+  // sunset ~17:00 in SF on Nov 4: the light turns over within ten minutes of it
+  assert.equal(at("2026-11-04T16:45:00-08:00").name, "day");
+  assert.equal(at("2026-11-04T17:15:00-08:00").name, "night");
+  assert.equal(at("2026-11-04T23:00:00-08:00").dark, 1);
+  const dusk = at("2026-11-04T17:00:00-08:00");
+  assert.ok(dusk.hemi < 1.25 && dusk.hemi > 0.22, `hemisphere blends between day and night (${dusk.hemi})`);
+  // the sun moves: morning light from the east (+x), evening from the west
+  assert.ok(at("2026-11-04T08:30:00-08:00").sunDir[0] > 0.3 && at("2026-11-04T15:30:00-08:00").sunDir[0] < -0.3);
+  assert.equal(fixedLight("night", mood).name, "night");
+  assert.equal(fixedLight("day", mood).hemi, 1.25);
+  assert.throws(() => fixedLight("noon", mood), /unknown time of day/);
 });
 
 test("limbAngles: seated poses sit, walking swings, hand up raises the right arm", () => {
