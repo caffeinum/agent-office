@@ -109,14 +109,14 @@ function targets(now) {
   }
   const free = spots.filter((s) => ![...chosen.values()].includes(s));
   const wanters = state.agents
-    .filter((a) => !chosen.has(a.id) && poseFor(a, seating.has(a.id)).place === "lounge")
+    .filter((a) => !chosen.has(a.id) && poseFor(a, seating.has(a.id), now).place === "lounge")
     .map((a) => ({ id: a.id, joinedAt: a.joinedAt, salt: wanderSalt(a.id, now), current: null, restless: false }));
   const assign = assignSpots(wanters, free);
   const out = new Map();
   for (const a of state.agents) {
     const desk = seating.get(a.id);
     const pick = chosen.get(a.id);
-    const { pose, place } = poseFor(a, !!desk);
+    const { pose, place } = poseFor(a, !!desk, now);
     if (pick === "desk" || (place === "desk" && desk && !pick)) {
       const s = seatOf(desk);
       out.set(a.id, { key: `desk:${desk.id}`, x: s.x, z: s.z, yaw: s.yaw, pose: pick === "desk" && a.status === "idle" ? "sit" : pose, seatY: SEAT_Y });

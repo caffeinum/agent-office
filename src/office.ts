@@ -90,6 +90,8 @@ export interface Agent {
   /** Where the agent chose to be (office_status at): a seat or station id from office_look, or "desk". Absent: the office picks. */
   at?: string;
   deskId?: string;
+  /** When it last went working or waiting: viewers keep it at its desk a moment after (model.js DESK_SETTLE_MS). */
+  workedAt?: number;
   joinedAt: number;
   lastSeen: number;
   says?: { text: string; ts: number };
@@ -1134,6 +1136,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
         if (at) agent.at = this.checkSpot(agent, at);
         else delete agent.at;
         agent.status = status;
+        if (status === "working" || status === "waiting") agent.workedAt = Date.now();
         if (activity?.trim()) agent.activity = defangTags(activity.trim().slice(0, ACTIVITY_MAX));
         else delete agent.activity;
         await this.saveAgent(agent);

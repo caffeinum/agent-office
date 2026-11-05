@@ -9,7 +9,7 @@ import { ACTIVITIES, LIGHTS_MAX, MESH_VERTICES_MAX, summarizeKind, validateKindD
 import { cornerPoint, meshTriangles, quadNormal } from "../public/js/shape.js";
 import { POINT_LIGHTS_GL, ZONES_GL, zonedLightsChunk } from "../public/js/zone-glsl.js";
 import {
-  applyFrame, poseFor, SEAT_ONE_IN, limbAngles, deskSeating, idleSpots, pickSpot, assignSpots, blockedCells, route, entryPoint, layoutBatches,
+  applyFrame, poseFor, DESK_SETTLE_MS, SEAT_ONE_IN, limbAngles, deskSeating, idleSpots, pickSpot, assignSpots, blockedCells, route, entryPoint, layoutBatches,
   wallOf, cullLabels, labelPriority, chatWith, roomChat, lastLineOf, speakerName, activeSay, CHAT_KEEP, SAY_MS, SEATED,
   themeLook, CLASSIC_COLORS, MOODS, mergeBoxes, overlapLayers, kindGeometryPlan, usableSpots, placedLights, TIMES_OF_DAY,
 } from "../public/js/model.js";
@@ -68,6 +68,15 @@ test("poseFor: status → pose and place", () => {
   assert.deepEqual(poseFor(agent("a", { status: "idle" }), false), { pose: "lounge", place: "lounge" });
   assert.equal(poseFor(agent("a", { status: "working" }), false).place, "lounge");
   assert.throws(() => poseFor(agent("a", { status: "dancing" }), true), /unknown status/);
+});
+
+test("poseFor: idle right after work stays at the desk (between turns), then lounges", () => {
+  const now = 1_000_000_000;
+  const just = agent("a", { status: "idle", workedAt: now - 5_000 });
+  assert.deepEqual(poseFor(just, true, now), { pose: "sit", place: "desk" });
+  assert.equal(poseFor(just, false, now).place, "lounge");
+  assert.equal(poseFor(agent("a", { status: "idle", workedAt: now - DESK_SETTLE_MS }), true, now).place, "lounge");
+  assert.equal(poseFor(agent("a", { status: "idle" }), true, now).place, "lounge");
 });
 
 test("pickSpot: idle agents mostly take a seat, a station about one slot in SEAT_ONE_IN", () => {

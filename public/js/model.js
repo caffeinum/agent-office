@@ -121,8 +121,18 @@ export function applyFrame(state, frame) {
 
 /* ── poses ──────────────────────────────────────────────────────────────────────────────────── */
 
+/** How long an agent stays at its desk after it was last working or waiting: agents go idle between turns, and
+ *  without this a busy one walks to the sofa and back every few seconds. */
+export const DESK_SETTLE_MS = 90_000;
+
+/** Idle, but only for a moment: it was working or waiting within DESK_SETTLE_MS, so it stays sitting at its desk. */
+export function settling(agent, hasDesk, now) {
+  return agent.status === "idle" && hasDesk && agent.workedAt != null && now - agent.workedAt < DESK_SETTLE_MS;
+}
+
 /** Where an agent should be and what it does there: {pose, place: "desk" | "lounge"}. */
-export function poseFor(agent, hasDesk) {
+export function poseFor(agent, hasDesk, now = Date.now()) {
+  if (settling(agent, hasDesk, now)) return { pose: "sit", place: "desk" };
   switch (agent.status) {
     case "working": return hasDesk ? { pose: "type", place: "desk" } : { pose: "stand", place: "lounge" };
     case "waiting": return hasDesk ? { pose: "handup", place: "desk" } : { pose: "wave", place: "lounge" };

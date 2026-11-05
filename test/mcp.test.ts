@@ -89,6 +89,7 @@ describe("MCP over Streamable HTTP", () => {
     expect((await tool(client, "office_kinds")).body.kinds.sofa).toMatchObject({ w: 3, d: 1 });
     const working = (await tool(client, "office_status", { status: "working", activity: "writing docs" })).body.agent;
     expect(working.activity).toBe("writing docs");
+    expect(Date.now() - working.workedAt).toBeLessThan(60_000);
     expect((await tool(client, "office_chat", { op: "say", text: "hi all" })).body.msg.from).toBe(me);
     expect((await tool(client, "office_chat", { op: "send", text: "room msg" })).body.msg.to).toBeNull();
     const read = await tool(client, "office_chat", { op: "read", since: 0 });

@@ -12,7 +12,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { footprint, kindOf } from "../shared/catalog.js";
 import { DEFAULT_THEME } from "../shared/theme.js";
 import {
-  SEATED, wanderSalt, assignSpots, blockedCells, deskSeating, entryPoint, hashStr, idleSpots, kindGeometryPlan, layoutBatches, limbAngles, poseFor,
+  SEATED, settling, wanderSalt, assignSpots, blockedCells, deskSeating, entryPoint, hashStr, idleSpots, kindGeometryPlan, layoutBatches, limbAngles, poseFor,
   hueColors, itemPoint, placedLights, route, seatOf, themeLook, usableSpots,
 } from "./model.js";
 import { DESK_SCREEN, MODELS, SEAT_Y, WALL_H } from "./furniture.js";
@@ -656,13 +656,16 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     }
   }
 
-  /** Moves idle agents on when their wander slot turns over; the slot comes from the wall clock, shared by every viewer. */
+  /** Moves idle agents on when their wander slot turns over or they leave their desk after work; both come from the
+   *  wall clock, shared by every viewer. */
   function wander() {
     const t = Date.now();
     let changed = false;
     for (const c of S.chars.values()) {
       const salt = wanderSalt(c.id, t);
       if (salt !== c.salt) { c.salt = salt; changed = true; }
+      const settle = settling(c.agent, S.seating.has(c.id), t);
+      if (settle !== c.settle) { c.settle = settle; changed = true; }
     }
     if (changed) retarget();
   }
