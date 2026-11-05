@@ -61,7 +61,7 @@ final class AgentNode {
     private func mesh(_ boxes: [OfficeScene.Box], ao: Bool) -> SCNNode {
         do {
             let g = try voxel.geometry(boxes, ao: ao, floorY: -99)
-            g.firstMaterial = voxel.material(map: try voxel.texture("grain"))
+            g.firstMaterial = voxel.material(map: try voxel.texture("grain"), roughness: 0.85)
             return SCNNode(geometry: g)
         } catch {
             preconditionFailure("character mesh failed: \(error)")

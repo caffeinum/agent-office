@@ -20,8 +20,8 @@ final class Voxel {
             SCNGeometrySource(data: a.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: semantic, vectorCount: n, usesFloatComponents: true,
                               componentsPerVector: 3, bytesPerComponent: 4, dataOffset: 0, dataStride: 12)
         }
-        // three's v grows upward; SceneKit's texture v grows downward
-        let uv = stride(from: 0, to: m.uv.count, by: 2).flatMap { [m.uv[$0], -m.uv[$0 + 1]] }
+        // three's v grows upward; SceneKit's texture v grows downward (1 - v keeps 0…1 screen UVs inside the texture)
+        let uv = stride(from: 0, to: m.uv.count, by: 2).flatMap { [m.uv[$0], 1 - m.uv[$0 + 1]] }
         let uvs = SCNGeometrySource(data: uv.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .texcoord, vectorCount: n, usesFloatComponents: true,
                                     componentsPerVector: 2, bytesPerComponent: 4, dataOffset: 0, dataStride: 8)
         let el = SCNGeometryElement(indices: m.idx, primitiveType: .triangles)
@@ -52,10 +52,13 @@ final class Voxel {
         return img
     }
 
-    /// A lit material like the web's MeshStandardMaterial({vertexColors, map}): texture × vertex colour × tint, chunky pixels.
-    func material(map: UIImage?, tint: UIColor = .white, repeat r: CGSize? = nil) -> SCNMaterial {
+    /// A lit material like the web's MeshStandardMaterial({vertexColors, map, roughness, metalness: 0}): physically
+    /// based, texture × vertex colour × tint, chunky pixels.
+    func material(map: UIImage?, tint: UIColor = .white, repeat r: CGSize? = nil, roughness: Double = 0.86) -> SCNMaterial {
         let m = SCNMaterial()
+        // lambert: physically based rendered the same colours here but cost a third of the frame rate on the TV
         m.lightingModel = .lambert
+        _ = roughness
         m.diffuse.contents = map ?? UIColor.white
         m.diffuse.wrapS = .repeat
         m.diffuse.wrapT = .repeat

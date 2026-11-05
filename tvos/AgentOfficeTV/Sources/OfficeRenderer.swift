@@ -63,6 +63,7 @@ final class OfficeRenderer: NSObject {
         camera.camera?.exposureOffset = CGFloat(Double(ProcessInfo.processInfo.environment["AO_EXPOSURE"] ?? "0.35") ?? 0.35)
         camera.camera?.saturation = CGFloat(Double(ProcessInfo.processInfo.environment["AO_SATURATION"] ?? "0.8") ?? 0.8)
         camera.camera?.contrast = CGFloat(Double(ProcessInfo.processInfo.environment["AO_CONTRAST"] ?? "0") ?? 0)
+        // no bloom: with the exposure lift it catches the pale horizon of the sky and washes it white
         camera.camera?.bloomIntensity = 0
         scene.rootNode.addChildNode(camera)
         let sun = SCNNode()
@@ -74,7 +75,8 @@ final class OfficeRenderer: NSObject {
         sun.light?.color = cssColor("#ffe4bd")
         sun.light?.castsShadow = true
         sun.light?.shadowMode = .forward
-        sun.light?.shadowRadius = 3
+        // the web's soft PCF shadows (radius 5, 12 samples on a 2048 map)
+        sun.light?.shadowRadius = 6
         sun.light?.shadowSampleCount = 8
         sun.light?.shadowMapSize = CGSize(width: 4096, height: 4096)
         sun.light?.shadowBias = 0.05
@@ -155,7 +157,7 @@ final class OfficeRenderer: NSObject {
         scene.background.contents = try voxel.texture("sky")
 
         let floor = SCNNode(geometry: SCNPlane(width: w, height: d))
-        floor.geometry?.firstMaterial = voxel.material(map: try voxel.texture("floor", look.floor.material), tint: cssColor(look.floor.color), repeat: CGSize(width: w, height: d))
+        floor.geometry?.firstMaterial = voxel.material(map: try voxel.texture("floor", look.floor.material), tint: cssColor(look.floor.color), repeat: CGSize(width: w, height: d), roughness: look.floor.roughness)
         floor.eulerAngles.x = -.pi / 2
         floor.position = SCNVector3(w / 2, 0, d / 2)
         room.addChildNode(floor)
@@ -163,9 +165,9 @@ final class OfficeRenderer: NSObject {
         let gw = w + plan.border * 2, gd = d + plan.border * 2
         let slab = SCNNode(geometry: SCNBox(width: gw, height: 1, length: gd, chamferRadius: 0))
         let plinth = try voxel.texture("plinth"), grass = try voxel.texture("grass")
-        let alongX = voxel.material(map: plinth, repeat: CGSize(width: gw, height: 1)), alongZ = voxel.material(map: plinth, repeat: CGSize(width: gd, height: 1))
+        let alongX = voxel.material(map: plinth, repeat: CGSize(width: gw, height: 1), roughness: 1), alongZ = voxel.material(map: plinth, repeat: CGSize(width: gd, height: 1), roughness: 1)
         // SCNBox faces: front (+z), right (+x), back (-z), left (-x), top, bottom
-        slab.geometry?.materials = [alongX, alongZ, alongX, alongZ, voxel.material(map: grass, repeat: CGSize(width: gw, height: gd)), alongX]
+        slab.geometry?.materials = [alongX, alongZ, alongX, alongZ, voxel.material(map: grass, repeat: CGSize(width: gw, height: gd), roughness: 1), alongX]
         slab.position = SCNVector3(w / 2, -0.505, d / 2)
         room.addChildNode(slab)
 
@@ -174,10 +176,10 @@ final class OfficeRenderer: NSObject {
         garden.geometry?.firstMaterial = voxel.material(map: grain)
         room.addChildNode(garden)
 
-        let trim = voxel.material(map: grain, tint: cssColor(look.walls.trim))
+        let trim = voxel.material(map: grain, tint: cssColor(look.walls.trim), roughness: 0.8)
         for wall in plan.walls {
             let accent = look.walls.accent.flatMap { $0.wall == wall.name ? $0 : nil }
-            let body = voxel.material(map: try voxel.texture("wall", accent?.material ?? "plaster"), tint: cssColor(accent?.color ?? look.walls.color))
+            let body = voxel.material(map: try voxel.texture("wall", accent?.material ?? "plaster"), tint: cssColor(accent?.color ?? look.walls.color), roughness: 0.95)
             let frame = SCNNode()
             frame.position = SCNVector3(wall.at[0], wall.at[1], wall.at[2])
             frame.eulerAngles.y = Float(wall.yaw)
@@ -253,11 +255,11 @@ final class OfficeRenderer: NSObject {
         let grain = try voxel.texture("grain")
         for p in parts {
             let mat: SCNMaterial = switch p.role {
-            case "accent": voxel.material(map: try voxel.texture(p.map ?? "grain"), tint: accent)
-            case "finish": voxel.material(map: grain, tint: cssColor(look.desk.wood))
-            case "rail": voxel.material(map: grain, tint: cssColor(look.desk.rail))
+            case "accent": voxel.material(map: try voxel.texture(p.map ?? "grain"), tint: accent, roughness: p.map == "rug" ? 1 : 0.82)
+            case "finish": voxel.material(map: grain, tint: cssColor(look.desk.wood), roughness: 0.7)
+            case "rail": voxel.material(map: grain, tint: cssColor(look.desk.rail), roughness: 0.6)
             case "glow": voxel.glow(map: try p.map.map { try voxel.texture($0) }, tint: kind.glowColor.map(cssColor) ?? .white)
-            case "glass": voxel.material(map: nil)
+            case "glass": voxel.material(map: nil, roughness: 0.08)
             default: voxel.material(map: grain)
             }
             if p.role == "glass" { mat.transparency = 0.38; mat.writesToDepthBuffer = false }
