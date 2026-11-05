@@ -6,7 +6,7 @@ import { activeSay, clip, cullLabels, hueColors, labelPriority } from "./model.j
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-export function createOverlay(layer, { onClick, onMenu }) {
+export function createOverlay(layer, { onPress, onMenu }) {
   const nodes = new Map();
   let agents = new Map();
   let selected = null;
@@ -35,7 +35,9 @@ export function createOverlay(layer, { onClick, onMenu }) {
       if (!n) {
         const el = document.createElement("div");
         el.className = "pill";
-        el.addEventListener("click", () => onClick(a.id));
+        // a press on a label goes to the canvas, so dragging from it orbits like anywhere else; a press that barely
+        // moves selects this agent (app.js reads agentId on pointerup)
+        el.addEventListener("pointerdown", (e) => { if (e.button === 0) { e.preventDefault(); onPress(a.id, e); } });
         el.addEventListener("contextmenu", (e) => { e.preventDefault(); onMenu?.(a.id, e.clientX, e.clientY); });
         layer.appendChild(el);
         n = { el, sig: "", size: null };

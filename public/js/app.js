@@ -139,7 +139,8 @@ function boot() {
     ui.screen(`<div class="card"><div class="big">🧊</div><h1>The office needs WebGL</h1><p>${esc(e.message)}</p></div>`);
     return;
   }
-  const overlay = createOverlay(root.querySelector(".labels"), { onClick: (id) => selectAgent(id), onMenu: (id, x, y) => ui.agentMenu(id, x, y) });
+  const overlay = createOverlay(root.querySelector(".labels"), {
+    onPress: (id, e) => { const fwd = new PointerEvent("pointerdown", e); fwd.agentId = id; scene.canvas.dispatchEvent(fwd); }, onMenu: (id, x, y) => ui.agentMenu(id, x, y) });
   const editor = createEditor(root, {
     scene, send: (m) => source.send({ ...m, as: asName() }), getState: () => state, toast: ui.toast,
     uploadLogo: (file) => uploadLogo(file).catch((e) => ui.toast(e.message, "err")),
@@ -233,7 +234,7 @@ function boot() {
   // clicks vs. orbit drags: only a press that barely moved is a click
   const canvas = scene.canvas;
   let down = null;
-  canvas.addEventListener("pointerdown", (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+  canvas.addEventListener("pointerdown", (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now(), agent: e.agentId ?? null }; });
   canvas.addEventListener("pointermove", (e) => {
     editor.move(e.clientX, e.clientY);
     if (!editor.on) {
@@ -244,8 +245,10 @@ function boot() {
   canvas.addEventListener("pointerup", (e) => {
     if (!down) return;
     const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+    const label = down.agent;
     down = null;
     if (moved > 5 || e.button !== 0) return;
+    if (label) return selectAgent(label);
     if (editor.click(e.clientX, e.clientY)) return;
     const hit = scene.pickAt(e.clientX, e.clientY, { items: false });
     selectAgent(hit?.type === "agent" ? hit.id : null);
