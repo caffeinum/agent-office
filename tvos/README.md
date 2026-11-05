@@ -28,7 +28,7 @@ Remote (Siri Remote clickpad):
 | --- | --- | --- |
 | move a finger left / right | turn around the room, by how far the finger moved | turn around the agent |
 | move a finger up / down | zoom | zoom |
-| double tap, keep the finger down and move | slide the camera over the floor (no turn or zoom) | stop following and slide from there |
+| double tap, keep the finger down and move | move the camera over the floor the way the finger goes, up = forward (no turn or zoom) | stop following and slide from there |
 | click ◀ ▶ | follow previous / next agent | previous / next agent |
 | click select | follow the first agent | stop following |
 | click ▲ | home view (also undoes a slide) | home view |

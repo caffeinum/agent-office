@@ -598,12 +598,13 @@ final class OfficeRenderer: NSObject {
         }
     }
 
-    /// Drags the floor with the finger, along the screen's axes as the camera faces now; farther out moves faster.
+    /// Moves the camera the way the finger goes (up = forward, right = right), along the screen's axes as the camera
+    /// faces now; farther out moves faster.
     private func panBy(_ d: SIMD2<Float>) {
         guard let g = last?.grid else { return }
         let right = SIMD2(cos(azimuth), -sin(azimuth)), away = SIMD2(-sin(azimuth), -cos(azimuth))
         let k = camDist * 0.5
-        pan -= right * d.x * k + away * d.y * k
+        pan += right * d.x * k + away * d.y * k
         pan = simd_clamp(pan, SIMD2(-Float(g.w) / 2, -Float(g.d) / 2), SIMD2(Float(g.w) / 2, Float(g.d) / 2))
     }
 
