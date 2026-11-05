@@ -1828,6 +1828,61 @@
     };
   }
 
+  // public/js/sound-plan.js
+  var SOUND_GAP_MS = 300;
+  var BABBLE_GAP_MS = 4e3;
+  var BABBLE_MAX_SYLLABLES = 8;
+  function soundCues(prev, frame, next) {
+    if (!prev || frame.type === "snapshot") return [];
+    switch (frame.type) {
+      case "agent": {
+        const a = frame.agent;
+        const before = prev.agents.find((x) => x.id === a.id);
+        if (!before) return [{ sound: "join", agent: a.id }];
+        const cues2 = [];
+        if (a.status === "waiting" && before.status !== "waiting") cues2.push({ sound: "ding", agent: a.id });
+        const said = a.says?.text;
+        if (said && (said !== before.says?.text || a.says.ts !== before.says?.ts)) {
+          cues2.push({
+            sound: "babble",
+            agent: a.id,
+            voice: hashStr(a.id) % 1e3,
+            syllables: Math.max(1, Math.min(BABBLE_MAX_SYLLABLES, Math.ceil(said.length / 2))),
+            question: said.trim().endsWith("?")
+          });
+        }
+        return cues2;
+      }
+      case "agent-left":
+        return prev.agents.some((x) => x.id === frame.id) ? [{ sound: "leave", agent: frame.id }] : [];
+      case "item": {
+        const it = frame.item;
+        const before = prev.items.find((x) => x.id === it.id);
+        if (before && before.x === it.x && before.z === it.z && before.rot === it.rot) return [];
+        return [{ sound: "place", x: it.x, z: it.z }];
+      }
+      case "item-removed": {
+        const it = prev.items.find((x) => x.id === frame.id);
+        return it ? [{ sound: "break", x: it.x, z: it.z }] : [];
+      }
+      default:
+        return [];
+    }
+  }
+  function cueGate() {
+    const lastBySound = /* @__PURE__ */ new Map(), lastBabble = /* @__PURE__ */ new Map();
+    return (cue, now) => {
+      if (cue.sound === "babble") {
+        if (now - (lastBabble.get(cue.agent) ?? -Infinity) < BABBLE_GAP_MS) return false;
+        lastBabble.set(cue.agent, now);
+        return true;
+      }
+      if (now - (lastBySound.get(cue.sound) ?? -Infinity) < SOUND_GAP_MS) return false;
+      lastBySound.set(cue.sound, now);
+      return true;
+    };
+  }
+
   // tvos/bridge/entry.js
   installDocument();
   var TEXTURES = {
@@ -1845,6 +1900,8 @@
     nightWindow: (style) => nightWindowTexture(style)
   };
   var state = null;
+  var cues = [];
+  var gate = cueGate();
   var walk = null;
   var boxesOf = (list2) => (list2 ?? []).map((b) => ({ at: b.at, size: b.size, color: b.color, faces: b.faces ?? null, unitUV: !!b.unitUV }));
   function kindParts(kind, custom) {
@@ -1969,8 +2026,16 @@
     frame(text) {
       const f = JSON.parse(text);
       if (f.type === "pong" || f.type === "error") return f.type;
+      const before = state;
       state = applyFrame(state, f);
+      cues.push(...soundCues(before, f, state));
       return f.type;
+    },
+    /** The sound cues frames produced since the last call that pass sound-plan.js's rate limits, as JSON. */
+    cues(now) {
+      const out = cues.filter((c) => gate(c, now));
+      cues = [];
+      return JSON.stringify(out);
     },
     /** Everything the renderer needs, as JSON. `time` forces "day" or "night"; empty follows the local clock like the web. */
     scene(now, time) {

@@ -549,6 +549,15 @@ final class OfficeRenderer: NSObject {
         for (id, pill) in pills { pill.setKept(keep.contains(id)) }
     }
 
+    /// Where a sound comes from, -1 (left) … 1 (right): the agent's label, or the floor spot an item was placed on.
+    func soundPan(_ cue: SoundCue) -> Float {
+        guard let v = view, v.bounds.width > 0 else { return 0 }
+        let w = Float(v.bounds.width)
+        if let id = cue.agent, let p = pillScreen.withLock({ $0[id] }) { return p.x / w * 2 - 1 }
+        if let x = cue.x, let z = cue.z, let p = projection(v.bounds.size)([Float(x), 0, Float(z)]) { return p.x / w * 2 - 1 }
+        return 0
+    }
+
     /// Render thread: pills follow the camera of the very frame being drawn, so they never lag the scene.
     private func placePills() {
         let (size, jobs) = pillJobs.withLock { $0 }

@@ -14,6 +14,7 @@ import { floorTexture, grainTexture, grassTexture, nightWindowTexture, plinthTex
 import { TIMES_OF_DAY, clockTheme, hueColors, themeLook } from "../../public/js/model.js";
 import { buildGeometry } from "../../public/js/voxel.js";
 import { installDocument } from "./pixel-canvas.js";
+import { cueGate, soundCues } from "../../public/js/sound-plan.js";
 
 installDocument();
 
@@ -25,6 +26,8 @@ const TEXTURES = {
 };
 
 let state = null;
+let cues = [];
+const gate = cueGate();
 let walk = null; // {blocked, grid} of the last scene, for route()
 
 const boxesOf = (list) => (list ?? []).map((b) => ({ at: b.at, size: b.size, color: b.color, faces: b.faces ?? null, unitUV: !!b.unitUV }));
@@ -161,8 +164,16 @@ globalThis.AO = {
   frame(text) {
     const f = JSON.parse(text);
     if (f.type === "pong" || f.type === "error") return f.type;
+    const before = state;
     state = applyFrame(state, f);
+    cues.push(...soundCues(before, f, state));
     return f.type;
+  },
+  /** The sound cues frames produced since the last call that pass sound-plan.js's rate limits, as JSON. */
+  cues(now) {
+    const out = cues.filter((c) => gate(c, now));
+    cues = [];
+    return JSON.stringify(out);
   },
   /** Everything the renderer needs, as JSON. `time` forces "day" or "night"; empty follows the local clock like the web. */
   scene(now, time) {

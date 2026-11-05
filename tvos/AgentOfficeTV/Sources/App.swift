@@ -81,11 +81,16 @@ final class OfficeModel: ObservableObject {
 
     enum Panel: Equatable { case none, agents, chat(agent: String?) }
     private var bridge: Bridge?
+    private var sound: SoundPlayer?
     private var connection: Connection?
     private var timer: Timer?
 
     func start(_ link: OfficeLink) {
         Watchdog.start()
+        // sound is part of the ambience: on, unless AO_SOUND=0; a TV without audio out just stays quiet
+        if ProcessInfo.processInfo.environment["AO_SOUND"] != "0" {
+            do { sound = try SoundPlayer() } catch { print("AO_SOUND off: \(error)") }
+        }
         // a live office is meant to be left on screen, like a fish tank: no screensaver while the app is open
         UIApplication.shared.isIdleTimerDisabled = true
         showHints(14)
@@ -202,6 +207,10 @@ final class OfficeModel: ObservableObject {
             let type = try bridge?.frame(text)
             if type == "snapshot" { status = "live" }
             refresh()
+            if let cues = try bridge?.cues(), !cues.isEmpty {
+                if ProcessInfo.processInfo.environment["AO_STATS"] != nil { print("AO_SOUND \(cues.map(\.sound).joined(separator: " "))") }
+                sound?.play(cues, pan: renderer.soundPan)
+            }
         } catch {
             failure = error.localizedDescription
         }

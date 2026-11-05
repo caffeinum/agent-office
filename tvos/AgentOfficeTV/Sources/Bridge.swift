@@ -32,6 +32,12 @@ final class Bridge {
         return try JSONDecoder().decode(OfficeScene?.self, from: Data(json.utf8))
     }
 
+    /// sound-plan.js cues the frames produced since the last call, past its rate limits.
+    func cues(now: Date = Date()) throws -> [SoundCue] {
+        let json = try call("cues", [now.timeIntervalSince1970 * 1000]).toString() ?? "[]"
+        return try JSONDecoder().decode([SoundCue].self, from: Data(json.utf8))
+    }
+
     /// The web's A* walk between two floor points.
     func route(from: (Double, Double), to: (Double, Double)) throws -> [(Double, Double)] {
         let json = try call("route", [from.0, from.1, to.0, to.1]).toString() ?? "[]"
