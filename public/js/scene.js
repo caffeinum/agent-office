@@ -19,10 +19,10 @@ import { MODELS, SEAT_Y, WALL_H } from "./furniture.js";
 import { buildGeometry, vbox } from "./voxel.js";
 import { CROWN, applyLimbs, applyProps, awayMaterial, baseMaterial, blink, buildCharacter } from "./character.js";
 import * as T from "./textures.js";
+import { GARDEN_BORDER as BORDER, cornerPosts, cutaway, gardenBoxes, roomWalls, wallBoxes } from "./room.js";
 
 const WALK_SPEED = 1.7;
 const POP_MS = 420;
-const BORDER = 2.5;
 const FADE_MS = 900;
 const THEMES = {
   day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.28, threshold: 0.92, glow: 1.0, lamp: 0.95, point: 0, exposure: 1.0 },
@@ -261,29 +261,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     slab.receiveShadow = true;
     g.add(slab);
 
-    // garden dressing: trees, bushes, flowers, a stone path to the door — all voxels, all seeded
-    const deco = [];
-    let seed = hashStr(`${W}x${D}`);
-    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    const tree = (x, z, s) => {
-      deco.push(vbox(x, -0.01, z, 0.3 * s, 1.1 * s, 0.3 * s, "#8a5a3a"));
-      deco.push(vbox(x, 0.9 * s, z, 1.2 * s, 0.8 * s, 1.2 * s, "#4f9c43"));
-      deco.push(vbox(x + 0.1 * s, 1.55 * s, z - 0.05 * s, 0.8 * s, 0.5 * s, 0.8 * s, "#5fae4e"));
-      deco.push(vbox(x - 0.25 * s, 1.2 * s, z + 0.3 * s, 0.5 * s, 0.4 * s, 0.5 * s, "#72c05a"));
-    };
-    const bush = (x, z) => { deco.push(vbox(x, -0.01, z, 0.7, 0.45, 0.6, "#5aa64a")); deco.push(vbox(x + 0.1, 0.35, z, 0.4, 0.25, 0.4, "#6cba57")); };
-    const flower = (x, z, c) => { deco.push(vbox(x, -0.01, z, 0.04, 0.2, 0.04, "#3f8a3a")); deco.push(vbox(x, 0.19, z, 0.12, 0.1, 0.12, c)); };
-    const ring = [];
-    for (let x = -1.6; x < W + 1.6; x += 1.4) { ring.push([x, -1.4], [x, D + 1.4]); }
-    for (let z = 0; z < D; z += 1.4) { ring.push([-1.4, z], [W + 1.4, z]); }
-    for (const [x, z] of ring) {
-      const r = rnd();
-      if (Math.abs(x - W / 2) < 1.6 && z > D) continue;
-      if (r < 0.16) tree(x + (rnd() - 0.5) * 0.4, z + (rnd() - 0.5) * 0.4, 0.8 + rnd() * 0.5);
-      else if (r < 0.38) bush(x, z);
-      else if (r < 0.62) flower(x + rnd() * 0.6, z + rnd() * 0.6, ["#ff8fa8", "#ffd45c", "#ffffff", "#b99bff"][Math.floor(rnd() * 4)]);
-    }
-    for (let z = D + 0.3; z < D + BORDER; z += 0.7) deco.push(vbox(W / 2 + (rnd() - 0.5) * 0.2, -0.04, z, 0.9, 0.06, 0.5, "#c9c2b4"));
+    const deco = gardenBoxes(grid);
     if (deco.length) {
       const dm = own(new THREE.Mesh(buildGeometry(deco, { floorY: 0 }), mats.base));
       dm.castShadow = true; dm.receiveShadow = true;
@@ -293,20 +271,6 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     // walls: full + low stub each, the camera-side ones swap to the stub (cutaway). The body is white
     // boxes on a themed material (plaster / brick / wood panels × wall colour); cap, baseboard and posts
     // are white/grey boxes on the trim material.
-    const wallBoxes = (len, doorAt) => {
-      const segs = doorAt == null ? [[0, len]] : [[0, doorAt - 1], [doorAt + 1, len]];
-      const body = [], trim = [], stubBody = [], stubTrim = [];
-      for (const [a, b] of segs) {
-        const L = b - a, c = (a + b) / 2;
-        body.push(vbox(c, 0, -0.12, L, WALL_H, 0.24, "#ffffff"));
-        trim.push(vbox(c, WALL_H, -0.12, L + 0.02, 0.1, 0.3, "#ffffff"));
-        trim.push(vbox(c, 0, 0.015, L, 0.14, 0.03, "#d8d8d8"));
-        stubBody.push(vbox(c, 0, -0.12, L, 0.32, 0.24, "#ffffff"));
-        stubTrim.push(vbox(c, 0.32, -0.12, L + 0.02, 0.06, 0.3, "#ffffff"));
-      }
-      if (doorAt != null) body.push(vbox(doorAt, 2.1, -0.12, 2, WALL_H - 2.1, 0.24, "#ffffff"));
-      return { body, trim, stubBody, stubTrim };
-    };
     const mkWall = (len, doorAt, bodyMat) => {
       const wb = wallBoxes(len, doorAt);
       const grp = new THREE.Group();
@@ -326,20 +290,17 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
       grp.add(full, stub);
       return { grp, full, stub };
     };
-    const back = mkWall(W, null, mats.wallBack); // along +x at z = 0, inner face +z
-    const front = mkWall(W, W / 2, mats.wallPlain);
-    front.grp.rotation.y = Math.PI; front.grp.position.set(W, 0, D);
-    const left = mkWall(D, null, mats.wallLeft); // along +z at x = 0, inner face +x
-    left.grp.rotation.y = Math.PI / 2; left.grp.position.set(0, 0, D);
-    const right = mkWall(D, null, mats.wallPlain);
-    right.grp.rotation.y = -Math.PI / 2; right.grp.position.set(W, 0, 0);
-    // corner posts
-    const posts = [];
-    for (const [x, z] of [[0, 0], [W, 0], [0, D], [W, D]]) posts.push(vbox(x, 0, z, 0.3, WALL_H + 0.12, 0.3, "#ffffff"));
-    const postMesh = own(new THREE.Mesh(buildGeometry(posts), mats.trim));
+    const walls = {};
+    for (const w of roomWalls(grid)) {
+      const wall = mkWall(w.len, w.doorAt, mats[w.surface]);
+      wall.grp.rotation.y = w.yaw;
+      wall.grp.position.set(...w.at);
+      walls[w.name] = wall;
+    }
+    const postMesh = own(new THREE.Mesh(buildGeometry(cornerPosts(grid)), mats.trim));
     postMesh.castShadow = true;
-    g.add(back.grp, front.grp, left.grp, right.grp, postMesh);
-    S.walls = { back, front, left, right, posts: postMesh };
+    g.add(walls.back.grp, walls.front.grp, walls.left.grp, walls.right.grp, postMesh);
+    S.walls = { ...walls, posts: postMesh };
 
     // sun + shadow frustum
     const c = new THREE.Vector3(W / 2, 0, D / 2);
@@ -357,12 +318,8 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
 
   function updateCutaway() {
     if (!S.grid || !S.walls.back) return;
-    const p = camera.position, { w: W, d: D } = S.grid;
-    const set = (wall, hide) => { wall.full.visible = !hide; wall.stub.visible = hide; };
-    set(S.walls.back, p.z < 0.5);
-    set(S.walls.front, p.z > D - 0.5);
-    set(S.walls.left, p.x < 0.5);
-    set(S.walls.right, p.x > W - 0.5);
+    const hide = cutaway(S.grid, camera.position);
+    for (const name of ["back", "front", "left", "right"]) { S.walls[name].full.visible = !hide[name]; S.walls[name].stub.visible = hide[name]; }
   }
 
   /* ── furniture ─────────────────────────────────────────────────────────────────────────────── */

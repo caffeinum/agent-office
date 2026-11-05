@@ -549,7 +549,7 @@ export function activeSay(agent, now = Date.now()) {
 /** Shirt / accent colours from a persona hue. */
 export function hueColors(hue) {
   const h = ((Math.round(hue) % 360) + 360) % 360;
-  return { shirt: `hsl(${h} 62% 58%)`, shirtDark: `hsl(${h} 52% 44%)`, accent: `hsl(${h} 80% 72%)`, css: `hsl(${h} 70% 60%)` };
+  return { shirt: `hsl(${h}, 62%, 58%)`, shirtDark: `hsl(${h}, 52%, 44%)`, accent: `hsl(${h}, 80%, 72%)`, css: `hsl(${h}, 70%, 60%)` };
 }
 
 /* ── custom voxel kinds ─────────────────────────────────────────────────────────────────────── */
