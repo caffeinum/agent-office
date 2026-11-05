@@ -468,8 +468,9 @@ final class OfficeRenderer: NSObject {
             wantDist = homeDistance(s.grid, aspect: aspect) * zoom
         }
         let k = min(1, dt * 4)
-        // a slide follows the finger as closely as turn and zoom do (~50 ms); transitions ease slower
-        let kt = gesture?.panning == true ? min(1, dt * 20) : k
+        // a slide follows the finger within ~100 ms: the pad reports in uneven steps, and a camera that moves sideways
+        // shows every step as a jerk (turning hides them better), so it gets a little more smoothing than turn and zoom
+        let kt = gesture?.panning == true ? min(1, dt * 10) : k
         camTarget = SCNVector3(camTarget.x + (wantTarget.x - camTarget.x) * kt, camTarget.y + (wantTarget.y - camTarget.y) * kt, camTarget.z + (wantTarget.z - camTarget.z) * kt)
         // while a finger is on the pad the distance follows quickly; transitions (home, switching agents) ease slower
         camDist += (wantDist - camDist) * (touch != nil ? min(1, dt * 20) : k)
