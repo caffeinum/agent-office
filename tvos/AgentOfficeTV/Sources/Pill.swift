@@ -28,6 +28,8 @@ final class Pill {
     /// A culled pill disappears, except a working agent's, which shrinks to a hue dot (office.css .pill.culled.working).
     func setKept(_ k: Bool) {
         kept = k
+        // the clean view keeps only speech bubbles: no bubble, nothing at all (not even the working dot)
+        if full == nil { node.texture = nil; node.size = CGSize(width: 1, height: 1); node.alpha = 0; dotNode.isHidden = true; return }
         node.texture = k ? full?.texture : nil
         node.color = .clear
         node.size = k ? (full?.size ?? .zero) : CGSize(width: 1, height: 1)
@@ -36,14 +38,22 @@ final class Pill {
         if k || working { node.alpha = node.alpha == 0 ? 1 : node.alpha }
     }
 
-    func update(_ a: OfficeScene.Agent, selected: Bool) {
+    /// `bubbleOnly`: the clean view (UI hidden) shows just speech bubbles, no names or activities.
+    func update(_ a: OfficeScene.Agent, selected: Bool, bubbleOnly: Bool = false) {
         let act: String? = a.status == "working" ? a.activity.map { clip($0, 48) } : a.status == "waiting" ? clip(a.activity ?? "needs input", 48) : nil
         let say = a.says.map { clip($0, 140) }
-        let s = "\(a.name)|\(a.emoji ?? "")|\(a.status)|\(act ?? "")|\(say ?? "")|\(a.css)|\(selected)"
+        let s = "\(a.name)|\(a.emoji ?? "")|\(a.status)|\(act ?? "")|\(say ?? "")|\(a.css)|\(selected)|\(bubbleOnly)"
         guard s != sig else { return }
         sig = s
-        let img = Self.draw(name: a.name, emoji: a.emoji, status: a.status, act: act, say: say, hue: cssColor(a.css), selected: selected)
         if let old = full?.texture { Graveyard.keep(old) }
+        if bubbleOnly && say == nil {
+            full = nil
+            labelSize = .zero
+            working = false
+            setKept(kept)
+            return
+        }
+        let img = Self.draw(name: a.name, emoji: a.emoji, status: a.status, act: bubbleOnly ? nil : act, say: say, hue: cssColor(a.css), selected: selected, tag: !bubbleOnly)
         full = (SKTexture(image: img), img.size)
         labelSize = CGSize(width: img.size.width - 16 * Self.scale, height: img.size.height - 16 * Self.scale)
         working = a.status == "working"
@@ -52,7 +62,7 @@ final class Pill {
         setKept(kept)
     }
 
-    private static func draw(name: String, emoji: String?, status: String, act: String?, say: String?, hue: UIColor, selected: Bool) -> UIImage {
+    private static func draw(name: String, emoji: String?, status: String, act: String?, say: String?, hue: UIColor, selected: Bool, tag drawTag: Bool) -> UIImage {
         let k = scale
         let ink = UIColor(red: 0x2b / 255, green: 0x24 / 255, blue: 0x20 / 255, alpha: 1)
         let nameFont = UIFont.systemFont(ofSize: 12 * k, weight: .bold), actFont = UIFont.systemFont(ofSize: 11 * k, weight: .regular)
@@ -65,8 +75,8 @@ final class Pill {
         let sayRect = say.map { ($0 as NSString).boundingRect(with: CGSize(width: 208 * k, height: .greatestFiniteMagnitude), options: .usesLineFragmentOrigin, attributes: [.font: sayFont], context: nil) }
         let bubbleW = sayRect.map { $0.width + 22 * k } ?? 0, bubbleH = sayRect.map { $0.height + 14 * k } ?? 0
         let gap = 3 * k, pad = 8 * k
-        let w = max(tagW, actW, bubbleW) + pad * 2
-        let h = (say == nil ? 0 : bubbleH + 6 * k + gap) + tagH + (act == nil ? 0 : gap + actH) + pad * 2
+        let w = max(drawTag ? tagW : 0, actW, bubbleW) + pad * 2
+        let h = (say == nil ? 0 : bubbleH + 6 * k + gap) + (drawTag ? tagH : 0) + (act == nil ? 0 : gap + actH) + pad * 2
         let r = UIGraphicsImageRenderer(size: CGSize(width: w, height: h))
         return r.image { ctx in
             let g = ctx.cgContext
@@ -86,6 +96,7 @@ final class Pill {
                                        options: .usesLineFragmentOrigin, attributes: [.font: sayFont, .foregroundColor: ink], context: nil)
                 y += bubbleH + 6 * k + gap
             }
+            guard drawTag else { return }
             let tag = CGRect(x: (w - tagW) / 2, y: y, width: tagW, height: tagH)
             g.setShadow(offset: CGSize(width: 0, height: 2 * k), blur: 8 * k, color: UIColor(red: 0.24, green: 0.16, blue: 0.08, alpha: 0.18).cgColor)
             hue.setFill()

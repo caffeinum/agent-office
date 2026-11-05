@@ -153,7 +153,7 @@ final class OfficeModel: ObservableObject {
             panel = panel == want ? .none : want
             if panel == .agents { cursor = following.flatMap { id in agents.firstIndex { $0.id == id } } ?? 0 }
         case .menu:
-            if clean { clean = false }
+            if clean { clean = false; renderer.bubblesOnly = false }
             else if case .chat(_?) = panel { panel = .chat(agent: nil) }
             else if panel != .none { panel = .none }
             else if following != nil { renderer.unfollow() }
@@ -205,6 +205,7 @@ final class OfficeModel: ObservableObject {
     func toggleClean() {
         renderer.noteInput()
         clean.toggle()
+        renderer.bubblesOnly = clean
     }
 
     private func receive(_ text: String) {

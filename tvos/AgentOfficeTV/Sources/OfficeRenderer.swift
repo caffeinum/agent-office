@@ -486,7 +486,7 @@ final class OfficeRenderer: NSObject {
             }
             let pill = pills[a.id] ?? Pill()
             if pills[a.id] == nil { overlay.addChild(pill.node); pills[a.id] = pill }
-            pill.update(a, selected: follow == a.id)
+            pill.update(a, selected: follow == a.id, bubbleOnly: bubblesOnly)
         }
     }
 
@@ -717,8 +717,11 @@ final class OfficeRenderer: NSObject {
         azimuthGoal += d
     }
 
+    /// The clean view (UI hidden): labels show only speech bubbles.
+    var bubblesOnly = false { didSet { if bubblesOnly != oldValue { refreshPills() } } }
+
     private func refreshPills() {
-        if let s = last { for a in s.agents { pills[a.id]?.update(a, selected: follow == a.id) } }
+        if let s = last { for a in s.agents { pills[a.id]?.update(a, selected: follow == a.id, bubbleOnly: bubblesOnly) } }
     }
 
     private func stepTour(now: Double, dt: Float) {
