@@ -34,7 +34,6 @@ final class OfficeRenderer: NSObject {
     private var azimuthGoal: Float = OfficeRenderer.homeAzimuth
     private var zoomGoal: Float = 1
     private var liftWork: DispatchWorkItem?
-    private var lastWantDist: Float = 1
     private var camTarget = SCNVector3Zero
     private var camDist: Float = 30
     private(set) var follow: String? { didSet { if follow != oldValue { onFollow?(follow); refreshPills() } } }
@@ -344,7 +343,8 @@ final class OfficeRenderer: NSObject {
     private func placeCamera(dt: Float) {
         guard let s = last, let v = view, v.bounds.height > 0 else { return }
         let aspect = Float(v.bounds.width / v.bounds.height)
-        let ease = min(1, dt * 10)
+        // short smoothing (~50 ms) on finger input; ▲ home and agent switches use the slower `k` below
+        let ease = min(1, dt * 20)
         azimuth += (azimuthGoal - azimuth) * ease
         zoom += (zoomGoal - zoom) * ease
         var wantTarget: SCNVector3
@@ -358,9 +358,8 @@ final class OfficeRenderer: NSObject {
         }
         let k = min(1, dt * 4)
         camTarget = SCNVector3(camTarget.x + (wantTarget.x - camTarget.x) * k, camTarget.y + (wantTarget.y - camTarget.y) * k, camTarget.z + (wantTarget.z - camTarget.z) * k)
-        // a finger on the pad drives the distance directly; transitions (home, switching agents) ease
-        camDist = touch != nil ? camDist * (wantDist / max(0.001, lastWantDist)) : camDist + (wantDist - camDist) * k
-        lastWantDist = wantDist
+        // while a finger is on the pad the distance follows quickly; transitions (home, switching agents) ease slower
+        camDist += (wantDist - camDist) * (touch != nil ? min(1, dt * 20) : k)
         let dir = SCNVector3(sin(polar) * sin(azimuth), cos(polar), sin(polar) * cos(azimuth))
         camera.position = SCNVector3(camTarget.x + dir.x * camDist, camTarget.y + dir.y * camDist, camTarget.z + dir.z * camDist)
         // world up, every frame: plain look(at:) keeps the node's current up, so roll would creep in while orbiting
@@ -488,7 +487,7 @@ final class OfficeRenderer: NSObject {
     private func listen(_ c: GCController) {
         guard let pad = c.microGamepad else { return }
         pad.reportsAbsoluteDpadValues = true
-        // The clickpad as a trackpad: only finger movement counts, applied straight away (no easing, so no lag):
+        // The clickpad as a trackpad: only finger movement counts, lightly smoothed (~50 ms):
         // left/right turns, up/down zooms, both at once. The pad reports (0, 0) on lift and in its centre dead zone,
         // and while lifting one axis can snap to 0 before the other: samples with a 0 axis are skipped, a lift only
         // counts after 0.15 s of zeros, and a jump too big for one sample re-anchors instead of moving the camera.
@@ -512,10 +511,8 @@ final class OfficeRenderer: NSObject {
             defer { self.touch = now }
             guard let t = self.touch, simd_length(now - t) < 0.3 else { return }
             let d = now - t
-            self.azimuth -= d.x * 2.2
-            self.zoom = min(2.2, max(0.25, self.zoom * exp(-d.y * 1.1)))
-            self.azimuthGoal = self.azimuth
-            self.zoomGoal = self.zoom
+            self.azimuthGoal -= d.x * 2.2
+            self.zoomGoal = min(2.2, max(0.25, self.zoomGoal * exp(-d.y * 1.1)))
         }
     }
 }
