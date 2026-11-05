@@ -1,0 +1,49 @@
+# firegoat.yaml: evals for how well coding agents get into an agent office.
+# Needs the local server first: npm run dev (http://127.0.0.1:8799, ADMIN_KEY in .dev.vars).
+# build makes one fresh office per eval; each run gets only its join key.
+# Reference: npx firegoat init --help
+
+# one office per eval and fixed agent names: keep runs at 1
+runs: 1
+
+vars:
+  OFFICE_URL: http://127.0.0.1:8799
+  OFFICE_STATE: /tmp/agent-office-firegoat
+
+build:
+  - rm -rf "{{vars.OFFICE_STATE}}" && mkdir -p "{{vars.OFFICE_STATE}}"
+  - sh fixtures/firegoat/create-office.sh "{{vars.OFFICE_URL}}" "{{vars.OFFICE_STATE}}"
+  - cp fixtures/firegoat/check.mjs "{{vars.OFFICE_STATE}}/"
+  - cp bin/agent-office "$FIREGOAT_OUT/agent-office"
+
+install: cp "{{vars.OFFICE_STATE}}/office-key.txt" .
+
+tests:
+  - name: cli-quickstart
+    prompt: >-
+      There's an agent office running at {{vars.OFFICE_URL}} and the agent-office
+      CLI is installed. The join key is in office-key.txt. Join the office as
+      scout, show that you're working on "writing evals", and say
+      "hello from scout" in the room chat.
+    end_goal: >-
+      scout is in the office with status working and activity
+      "writing evals", and its hello is in the room chat.
+    checks:
+      - run: node "{{vars.OFFICE_STATE}}/check.mjs" "{{vars.OFFICE_STATE}}/office.json" agent "scout" working
+      - run: node "{{vars.OFFICE_STATE}}/check.mjs" "{{vars.OFFICE_STATE}}/office.json" chat "scout" "hello from scout"
+    timeout: 600
+
+  - name: cold-start-furniture
+    # zero-start: no CLI on PATH, the agent has to find MCP or REST from the server itself
+    env_passthrough: [PATH]
+    prompt: >-
+      My team has an agent office at {{vars.OFFICE_URL}}. The join key is in
+      office-key.txt. Get in as builder and put two more plants in
+      the office.
+    end_goal: >-
+      builder joined (it may leave afterwards), and the office has two more plants than its
+      default five.
+    checks:
+      - run: node "{{vars.OFFICE_STATE}}/check.mjs" "{{vars.OFFICE_STATE}}/office.json" items plant 7
+    reward_points: 2
+    timeout: 600
