@@ -135,16 +135,17 @@ a { color: var(--accent); }
 /* ── controls ────────────────────────────────────────────────────────────────────── */
 
 .ctrls { position: absolute; right: 14px; bottom: 14px; display: flex; gap: 4px; padding: 5px; border-radius: 14px; z-index: 6; }
-.ctrls button { width: 38px; height: 38px; border: 0; border-radius: 10px; background: transparent; font-size: 17px; font-weight: 700; }
+.ctrls button { width: 38px; height: 38px; border: 0; border-radius: 10px; background: transparent; display: grid; place-items: center; color: inherit; }
+.ctrls .ico { width: 20px; height: 20px; display: block; }
 .ctrls button[hidden] { display: none; }
 .ctrls button:hover { background: var(--chip); }
 .ctrls button.on { background: var(--accent); color: #fff; }
 .ctrls .moon { display: none; }
 #app[data-theme="night"] .ctrls .sun { display: none; }
-#app[data-theme="night"] .ctrls .moon { display: inline; }
+#app[data-theme="night"] .ctrls .moon { display: block; }
 .ctrls .snd-on { display: none; }
-.ctrls [data-act="sound"].on .snd-on { display: inline; }
-.ctrls [data-act="sound"].on .snd-off { display: none; }
+.ctrls [data-act="sound"].sounding .snd-on { display: block; }
+.ctrls [data-act="sound"].sounding .snd-off { display: none; }
 
 /* ── edit mode ───────────────────────────────────────────────────────────────────── */
 
