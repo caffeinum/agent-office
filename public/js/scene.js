@@ -533,7 +533,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     // a crowded floor (lots of desks) swallows light, so the fill grows with the furniture count
     const density = Math.min(1, S.items.filter((it) => kindOf(it.kind, S.custom)?.layer === "object").length / (S.grid.w * S.grid.d * 0.12));
     // hung high (FILL_Y) so it lights the room evenly: lower, it burned whatever stood right under it into bloom
-    const fill = new THREE.PointLight(pal.fill, th.point * (2.2 + 1.6 * density) * 0.6, Math.hypot(S.grid.w, S.grid.d) + FILL_Y, 1.2);
+    const fill = new THREE.PointLight(pal.fill, th.point * (2.2 + 1.6 * density) * 0.42, Math.hypot(S.grid.w, S.grid.d) + FILL_Y, 1.2);
     fill.position.set(S.grid.w / 2, FILL_Y, S.grid.d / 2);
     fill.visible = th.point > 0;
     fill.userData.fill = true;
@@ -710,7 +710,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     }
   }
 
-  const spillGeo = new THREE.PlaneGeometry(1.4, 1.0);
+  const spillGeo = new THREE.PlaneGeometry(1.8, 1.3), floorSpillGeo = new THREE.PlaneGeometry(3.2, 3.2);
   let spillMap = null;
   /** A soft white radial glow, tinted per screen. */
   function spillTex() {
@@ -758,10 +758,18 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
         mesh.rotation.y = p.yaw;
         scene.add(mesh);
         // at night the screen's light spills over the desk top in front of it
-        const spill = new THREE.Mesh(spillGeo, new THREE.MeshBasicMaterial({ map: spillTex(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.55 }));
-        const q = itemPoint(desk, DESK_SCREEN.x, DESK_SCREEN.z + 0.45, S.custom);
-        spill.rotation.set(-Math.PI / 2, 0, p.yaw);
-        spill.position.set(q.x, 0.757, q.z);
+        // at night the screen lights the desk top and, softer and wider, the floor round the chair
+        const spillMat = new THREE.MeshBasicMaterial({ map: spillTex(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.9 });
+        const spill = new THREE.Group();
+        const top = new THREE.Mesh(spillGeo, spillMat), floor = new THREE.Mesh(floorSpillGeo, spillMat);
+        const q = itemPoint(desk, DESK_SCREEN.x, DESK_SCREEN.z + 0.5, S.custom), r = itemPoint(desk, DESK_SCREEN.x, DESK_SCREEN.z + 1.2, S.custom);
+        top.rotation.set(-Math.PI / 2, 0, p.yaw);
+        top.position.set(q.x, 0.757, q.z);
+        floor.rotation.set(-Math.PI / 2, 0, p.yaw);
+        floor.position.set(r.x, 0.015, r.z);
+        floor.scale.setScalar(1);
+        spill.add(top, floor);
+        spill.material = spillMat;
         scene.add(spill);
         sc = { mesh, tex, cv, key: "", deskId: desk.id, desk, spill, lit: false };
         S.screens.set(id, sc);

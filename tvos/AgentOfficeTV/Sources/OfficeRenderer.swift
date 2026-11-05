@@ -139,7 +139,8 @@ final class OfficeRenderer: NSObject {
         let joined = s.agents.contains { agents[$0.id] == nil }
         syncAgents(s)
         syncScreens(s)
-        stampZones(s.look.zones, force: (furnished || joined) && !s.look.zones.isEmpty)
+        if Self.zoneShaders { stampZones(s.look.zones, force: (furnished || joined) && !s.look.zones.isEmpty) }
+        else { shadeZones(s.look.zones) }
         if follow.map({ id in !s.agents.contains { $0.id == id } }) == true { follow = nil }
         if touring, let id = newsworthy(s) {
             follow = id
@@ -220,6 +221,7 @@ final class OfficeRenderer: NSObject {
         let posts = SCNNode(geometry: try voxel.geometry(plan.posts))
         posts.geometry?.firstMaterial = trim
         room.addChildNode(posts)
+        if !Self.zoneShaders { addZoneFloors(look.zones) }
 
         // the bay around the island (backdrop.js): water, hills / downtown / bridge in one mesh, drifting clouds
         let bd = plan.backdrop
@@ -355,7 +357,10 @@ final class OfficeRenderer: NSObject {
                 n.eulerAngles.y = Float(sc.yaw)
                 n.castsShadow = false
                 furniture.parent?.addChildNode(n)
-                let spill = pool(color: cssColor(sc.spill.color), strength: Self.spillScale, radius: 0.6, at: SCNVector3(sc.spill.x, 0.757, sc.spill.z))
+                // the desk top, and softer and wider the floor round the chair
+                let spill = SCNNode()
+                spill.addChildNode(pool(color: cssColor(sc.spill.color), strength: Self.spillScale, radius: 0.85, at: SCNVector3(sc.spill.x, 0.757, sc.spill.z)))
+                spill.addChildNode(pool(color: cssColor(sc.spill.color), strength: Self.spillScale * 0.6, radius: 1.6, at: SCNVector3(sc.spill.fx, 0.015, sc.spill.fz)))
                 spill.isHidden = true
                 furniture.parent?.addChildNode(spill)
                 return (n, "", spill, false)
@@ -369,7 +374,7 @@ final class OfficeRenderer: NSObject {
                     preconditionFailure("screen for \(sc.agent): \(error)")
                 }
                 entry.key = sc.key
-                entry.spill.geometry?.firstMaterial?.multiply.contents = cssColor(sc.spill.color)
+                for n in entry.spill.childNodes { n.geometry?.firstMaterial?.multiply.contents = cssColor(sc.spill.color) }
                 entry.lit = sc.spill.lit
             }
             entry.spill.isHidden = !(entry.lit && (last?.time.night ?? s.time.night))
@@ -408,9 +413,17 @@ final class OfficeRenderer: NSObject {
         lampLights.childNodes.forEach { $0.removeFromParentNode() }
         // custom kinds' coloured lights: neon spill, day and night. Zones dim every lit pixel here (zoneModifier), so a
         // light inside one is boosted by the zone's dimming, standing in for the web's zone-exempt kind lights.
+        // Drawn as additive pools on the floor by default: real omni lights cost the TV ~15 fps (AO_KIND_OMNI=1 for those).
         for l in s.lights {
-            lampLights.addChildNode(omni(color: cssColor(l.color), intensity: l.intensity * (l.night ? t.nightNeon : t.neon) * Self.kindLightScale / Self.zoneDim(s.look.zones, x: l.x, z: l.z),
-                                         reach: l.range, at: SCNVector3(l.x, l.y, l.z)))
+            let boost = 1 / Self.zoneDim(s.look.zones, x: l.x, z: l.z), level = l.night ? t.nightNeon : t.neon
+            guard level > 0 else { continue }
+            if Self.kindOmni {
+                lampLights.addChildNode(omni(color: cssColor(l.color), intensity: l.intensity * level * Self.kindLightScale * boost,
+                                             reach: l.range, at: SCNVector3(l.x, l.y, l.z)))
+            } else {
+                lampLights.addChildNode(pool(color: cssColor(l.color), strength: min(1.6, l.intensity * level / 8 * boost) * Self.kindPoolScale,
+                                             radius: max(1, min(6, l.range * 0.7)), at: SCNVector3(l.x, 0.016, l.z)))
+            }
         }
         guard t.point > 0 else { return }
         // lamp and tv light as a glowing pool on the floor: real omni lights cost the TV half its frame rate up close
@@ -438,6 +451,8 @@ final class OfficeRenderer: NSObject {
         n.position = p
         return n
     }
+    private static let kindOmni = ProcessInfo.processInfo.environment["AO_KIND_OMNI"] == "1"
+    private static let kindPoolScale = Double(ProcessInfo.processInfo.environment["AO_KIND_POOL"] ?? "0.6") ?? 0.6
     private static let kindLightScale = Double(ProcessInfo.processInfo.environment["AO_KIND_LIGHT"] ?? "30") ?? 30
 
     // MARK: theme zones
@@ -474,6 +489,40 @@ final class OfficeRenderer: NSObject {
     private var zoneShader: String?
 
     /// Puts the zone modifier on every lit material in the scene (constant ones — glow, screens, light pools — stay bright).
+    /// Zones as per-object dimming (the default): a per-pixel shader modifier on every material dropped a close follow
+    /// view to 15–45 fps on the TV. Each furniture item and character is dimmed by the zone its centre stands in; the
+    /// floor gets a tinted multiply sheet per zone. AO_ZONES=shader uses zoneModifier instead.
+    private static let zoneShaders = ProcessInfo.processInfo.environment["AO_ZONES"] == "shader"
+
+    private func shadeZones(_ zones: [OfficeScene.Zone]) {
+        guard !zones.isEmpty else { return }
+        for n in furniture.childNodes + agents.values.map(\.node) {
+            let k = CGFloat(Self.zoneDim(zones, x: Double(n.position.x), z: Double(n.position.z)))
+            n.enumerateHierarchy { c, _ in
+                for m in c.geometry?.materials ?? [] where m.lightingModel != .constant && m.diffuse.intensity != k { m.diffuse.intensity = k }
+            }
+        }
+    }
+
+    private func addZoneFloors(_ zones: [OfficeScene.Zone]) {
+        for z in zones {
+            var (r, g, b, a): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+            guard cssColor(z.tint).getRed(&r, green: &g, blue: &b, alpha: &a) else { preconditionFailure("zone tint \(z.tint) is not RGB") }
+            let k = CGFloat(1 - z.dim)
+            let sheet = SCNNode(geometry: SCNPlane(width: z.w, height: z.d))
+            let m = SCNMaterial()
+            m.lightingModel = .constant
+            m.diffuse.contents = UIColor(red: r * k, green: g * k, blue: b * k, alpha: 1)
+            m.blendMode = .multiply
+            m.writesToDepthBuffer = false
+            sheet.geometry?.firstMaterial = m
+            sheet.eulerAngles.x = -.pi / 2
+            sheet.position = SCNVector3(z.x + z.w / 2, 0.004, z.z + z.d / 2)
+            sheet.castsShadow = false
+            room.addChildNode(sheet)
+        }
+    }
+
     private func stampZones(_ zones: [OfficeScene.Zone], force: Bool) {
         let shader = Self.zoneModifier(zones)
         guard force || shader != zoneShader else { return }
@@ -488,7 +537,7 @@ final class OfficeRenderer: NSObject {
 
     // three's physical point-light falloff and SceneKit's linear fade differ; this scale matches the web by eye
     private static let poolScale = Double(ProcessInfo.processInfo.environment["AO_POOL"] ?? "1.1") ?? 1.1
-    private static let spillScale = 0.7
+    private static let spillScale = 1.1
 
     /// A soft additive disc of light on the floor.
     private func pool(color: UIColor, strength: Double, radius: Double, at p: SCNVector3) -> SCNNode {
@@ -518,7 +567,7 @@ final class OfficeRenderer: NSObject {
             ctx.cgContext.drawRadialGradient(g, startCenter: CGPoint(x: 64, y: 64), startRadius: 0, endCenter: CGPoint(x: 64, y: 64), endRadius: 64, options: [])
         }
     }()
-    private static let fillScale = Double(ProcessInfo.processInfo.environment["AO_FILL"] ?? "15") ?? 15
+    private static let fillScale = Double(ProcessInfo.processInfo.environment["AO_FILL"] ?? "10") ?? 10
 
     private func mix(_ a: UIColor, _ b: UIColor) -> UIColor {
         var (ar, ag, ab, aa, br, bg, bb, ba): (CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0, 0, 0, 0, 0)

@@ -138,11 +138,12 @@ function deskScreens() {
   const seating = deskSeating(state.agents, state.items);
   return state.agents.filter((a) => seating.has(a.id)).map((a) => {
     const desk = seating.get(a.id), css = hueColors(a.hue ?? 0).css;
-    const p = itemPoint(desk, DESK_SCREEN.x, DESK_SCREEN.z + 0.008, custom), q = itemPoint(desk, DESK_SCREEN.x, DESK_SCREEN.z + 0.45, custom);
+    const p = itemPoint(desk, DESK_SCREEN.x, DESK_SCREEN.z + 0.008, custom), q = itemPoint(desk, DESK_SCREEN.x, DESK_SCREEN.z + 0.5, custom);
+    const r = itemPoint(desk, DESK_SCREEN.x, DESK_SCREEN.z + 1.2, custom);
     return {
       agent: a.id, key: screenKey(a, css), x: p.x, y: DESK_SCREEN.y + DESK_SCREEN.h / 2, z: p.z, yaw: p.yaw, w: DESK_SCREEN.w, h: DESK_SCREEN.h,
       // the light it spills on the desk top at night
-      spill: { x: q.x, z: q.z, color: screenStyle(a.client, css).accent, lit: a.status === "working" || a.status === "waiting" },
+      spill: { x: q.x, z: q.z, fx: r.x, fz: r.z, color: screenStyle(a.client, css).accent, lit: a.status === "working" || a.status === "waiting" },
     };
   });
 }
