@@ -1102,6 +1102,14 @@
     }
     return plan;
   }
+  var TIMES_OF_DAY = Object.freeze({
+    day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.28, threshold: 0.92, glow: 1, lamp: 0.95, point: 0, exposure: 1 },
+    night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.5, sun: 0.35, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 0.72, glow: 1.2, lamp: 2.4, point: 9, exposure: 1.05 }
+  });
+  function clockTheme(date = /* @__PURE__ */ new Date()) {
+    const h = date.getHours();
+    return h >= 19 || h < 7 ? "night" : "day";
+  }
   var MOODS = Object.freeze({
     warm: { sun: "#ffe4bd", sky: "#d7ecff", ground: "#e3c39d", lamp: "#ffc27a", fill: "#ffd9a8", nightSky: "#41508f" },
     neutral: { sun: "#fff3e4", sky: "#e2ecf8", ground: "#d6cfc6", lamp: "#ffe0b8", fill: "#ffe9cf", nightSky: "#45507f" },
@@ -1570,6 +1578,68 @@
     } else throw new Error(`wallTexture: unknown material ${JSON.stringify(material)}`);
     return tex(c, { repeat: true });
   }
+  function nightWindowTexture(style) {
+    if (style === "stars" || !style) return windowTexture(true);
+    const [c, g] = canvas(32, 16);
+    const r = rng({ city: 79, aurora: 83, rain: 89 }[style] ?? 97);
+    const grad = g.createLinearGradient(0, 0, 0, 16);
+    if (style === "city") {
+      grad.addColorStop(0, "#151a36");
+      grad.addColorStop(1, "#3b2f58");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 32, 16);
+      let x = 0;
+      while (x < 32) {
+        const w = 3 + Math.floor(r() * 4), h = 5 + Math.floor(r() * 9);
+        g.fillStyle = r() < 0.5 ? "#232849" : "#1b1f3c";
+        g.fillRect(x, 16 - h, w, h);
+        for (let wy = 17 - h; wy < 15; wy += 2) for (let wx = x + 1; wx < x + w - 1; wx += 2) if (r() < 0.45) {
+          g.fillStyle = r() < 0.7 ? "#ffd27a" : "#9fd0ff";
+          g.fillRect(wx, wy, 1, 1);
+        }
+        x += w;
+      }
+    } else if (style === "aurora") {
+      grad.addColorStop(0, "#0b1430");
+      grad.addColorStop(1, "#16284a");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 32, 16);
+      for (let x = 0; x < 32; x++) {
+        const y = 5 + Math.round(Math.sin(x * 0.4) * 2 + Math.sin(x * 0.13) * 1.5);
+        g.fillStyle = "#4fe3a8";
+        g.fillRect(x, y, 1, 2);
+        g.fillStyle = "rgba(140, 120, 255, 0.7)";
+        g.fillRect(x, y - 2, 1, 2);
+      }
+      for (let i = 0; i < 10; i++) {
+        g.fillStyle = "#cfd8ff";
+        g.fillRect(Math.floor(r() * 32), Math.floor(r() * 4), 1, 1);
+      }
+      g.fillStyle = "#1d2b3d";
+      g.fillRect(0, 13, 32, 3);
+    } else if (style === "rain") {
+      grad.addColorStop(0, "#1a2236");
+      grad.addColorStop(1, "#2c3650");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 32, 16);
+      g.fillStyle = "#232c44";
+      g.fillRect(0, 11, 32, 5);
+      for (let x = 1; x < 32; x += 5) if (r() < 0.7) {
+        g.fillStyle = "#ffd27a";
+        g.fillRect(x, 12 + Math.floor(r() * 3), 1, 1);
+      }
+      for (let i = 0; i < 26; i++) {
+        g.fillStyle = r() < 0.5 ? "rgba(170, 200, 240, 0.75)" : "rgba(120, 150, 200, 0.6)";
+        g.fillRect(Math.floor(r() * 32), Math.floor(r() * 15), 1, 2);
+      }
+    } else {
+      grad.addColorStop(0, "#141a3a");
+      grad.addColorStop(1, "#2b2f5e");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 32, 16);
+    }
+    return tex(c);
+  }
 
   // tvos/bridge/pixel-canvas.js
   function parse(style) {
@@ -1578,8 +1648,8 @@
       const n = parseInt(m[1], 16);
       return [n >> 16, n >> 8 & 255, n & 255];
     }
-    m = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(style);
-    if (m) return [+m[1], +m[2], +m[3]];
+    m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d*\.?\d+))?\)$/.exec(style);
+    if (m) return m[4] === void 0 ? [+m[1], +m[2], +m[3]] : [+m[1], +m[2], +m[3], +m[4]];
     throw new Error(`pixel-canvas: unsupported fillStyle ${JSON.stringify(style)}`);
   }
   function verticalGradient(y0, y1) {
@@ -1620,7 +1690,11 @@
       fillRect(x, y, rw, rh) {
         for (let j = Math.max(0, y); j < Math.min(h, y + rh); j++) {
           const c = Array.isArray(fill) ? fill : fill.at(j);
-          for (let i = Math.max(0, x); i < Math.min(w, x + rw); i++) px.set(c, (j * w + i) * 3);
+          for (let i = Math.max(0, x); i < Math.min(w, x + rw); i++) {
+            const o = (j * w + i) * 3;
+            if (c.length === 4) for (let k2 = 0; k2 < 3; k2++) px[o + k2] = Math.round(px[o + k2] + (c[k2] - px[o + k2]) * c[3]);
+            else px.set(c, o);
+          }
         }
       }
     };
@@ -1674,7 +1748,8 @@
     tv: () => tvTexture(),
     rack: () => rackTexture(),
     window: () => windowTexture(false),
-    sky: () => skyTexture(false)
+    sky: (time) => skyTexture(time === "night"),
+    nightWindow: (style) => nightWindowTexture(style)
   };
   var state = null;
   var walk = null;
@@ -1685,6 +1760,7 @@
       return {
         defaultColor: m.defaultColor ?? null,
         glowColor: m.glow?.color ?? null,
+        glowLamp: !!m.glow?.lamp,
         parts: [
           { role: "base", boxes: boxesOf(m.base) },
           { role: "accent", boxes: boxesOf(m.accent), map: m.accentMap === "rug" ? "rug" : "grain" },
@@ -1701,6 +1777,7 @@
     return {
       defaultColor: null,
       glowColor: null,
+      glowLamp: false,
       parts: [
         { role: "base", boxes: [...plan.matte, ...plan.glossy].map((b) => toBox(b)) },
         { role: "glass", boxes: plan.glass.map((b) => toBox(b)) },
@@ -1745,6 +1822,10 @@
       out.set(a.id, { key: `mill:${h % 97}`, x: entry.x + (h % 5 - 2) * 0.9, z: Math.max(0.5, entry.z - 1 - (h >> 3) % 3 * 0.9), yaw: Math.PI, pose: "stand", seatY: SEAT_Y });
     }
     return out;
+  }
+  function timeOfDay(name) {
+    if (!TIMES_OF_DAY[name]) throw new Error(`unknown time of day ${JSON.stringify(name)}`);
+    return { name, ...TIMES_OF_DAY[name] };
   }
   function nameOf(ref) {
     if (ref.startsWith("human:")) return ref.slice(6);
@@ -1798,8 +1879,8 @@
       state = applyFrame(state, f);
       return f.type;
     },
-    /** Everything the renderer needs, as JSON. */
-    scene(now) {
+    /** Everything the renderer needs, as JSON. `time` forces "day" or "night"; empty follows the local clock like the web. */
+    scene(now, time) {
       if (!state) return JSON.stringify(null);
       const custom = state.customKinds ?? {};
       const { batches } = layoutBatches(state.items, custom);
@@ -1815,6 +1896,7 @@
         wallH: WALL_H,
         theme: state.theme,
         look: themeLook(state.theme),
+        time: timeOfDay(time || clockTheme(new Date(now))),
         kinds,
         items,
         agents: state.agents.map((a) => ({

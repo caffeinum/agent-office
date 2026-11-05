@@ -27,7 +27,8 @@ final class Bridge {
 
     /// The scene for this moment, or nil before the first snapshot.
     func scene(now: Date = Date()) throws -> OfficeScene? {
-        let json = try call("scene", [now.timeIntervalSince1970 * 1000]).toString() ?? "null"
+        let time = ProcessInfo.processInfo.environment["AO_TIME"] ?? ""
+        let json = try call("scene", [now.timeIntervalSince1970 * 1000, time]).toString() ?? "null"
         return try JSONDecoder().decode(OfficeScene?.self, from: Data(json.utf8))
     }
 

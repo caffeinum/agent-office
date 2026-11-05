@@ -15,10 +15,18 @@ struct OfficeScene: Decodable, Equatable {
         let kindColors: [String: String]
         let mood: Mood
         let screenBg: String
+        let nightWindow: String?
+    }
+    /// model.js TIMES_OF_DAY for the local clock (or AO_TIME): three.js light levels.
+    struct TimeOfDay: Decodable, Equatable {
+        let name: String
+        let hemiGround: String; let hemi: Double; let sun: Double; let sunColor: String; let fog: String
+        let glow: Double; let lamp: Double; let point: Double
+        var night: Bool { name == "night" }
     }
     struct Box: Codable, Equatable { let at: [Double]; let size: [Double]; let color: String?; let faces: [Int]?; let unitUV: Bool? }
     struct Part: Decodable, Equatable { let role: String; let boxes: [Box]; let map: String? }
-    struct Kind: Decodable, Equatable { let defaultColor: String?; let glowColor: String?; let parts: [Part] }
+    struct Kind: Decodable, Equatable { let defaultColor: String?; let glowColor: String?; let glowLamp: Bool; let parts: [Part] }
     struct Item: Decodable, Equatable { let id: String; let kind: String; let x: Double; let z: Double; let yaw: Double; let color: String? }
     struct Target: Decodable, Equatable { let key: String; let x: Double; let z: Double; let yaw: Double; let pose: String; let seatY: Double }
     struct RigPart: Decodable, Equatable { let parent: String?; let at: [Double]; let boxes: [Box]; let face: [Box]? }
@@ -35,6 +43,7 @@ struct OfficeScene: Decodable, Equatable {
     let grid: Grid
     let wallH: Double
     let look: Look
+    let time: TimeOfDay
     let kinds: [String: Kind]
     let items: [Item]
     let agents: [Agent]

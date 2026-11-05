@@ -13,7 +13,7 @@ import { footprint, kindOf } from "../shared/catalog.js";
 import { DEFAULT_THEME } from "../shared/theme.js";
 import {
   SEATED, wanderSalt, assignSpots, blockedCells, deskSeating, entryPoint, hashStr, idleSpots, kindGeometryPlan, layoutBatches, limbAngles, poseFor,
-  route, seatOf, themeLook, usableSpots,
+  route, seatOf, themeLook, TIMES_OF_DAY, usableSpots,
 } from "./model.js";
 import { MODELS, SEAT_Y, WALL_H } from "./furniture.js";
 import { buildGeometry, vbox } from "./voxel.js";
@@ -24,10 +24,6 @@ import { GARDEN_BORDER as BORDER, cornerPosts, cutaway, gardenBoxes, roomWalls, 
 const WALK_SPEED = 1.7;
 const POP_MS = 420;
 const FADE_MS = 900;
-const THEMES = {
-  day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.28, threshold: 0.92, glow: 1.0, lamp: 0.95, point: 0, exposure: 1.0 },
-  night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.5, sun: 0.35, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 0.72, glow: 1.2, lamp: 2.4, point: 9, exposure: 1.05 },
-};
 
 const easeOutBack = (t) => { const c = 1.6; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
 const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
@@ -458,7 +454,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
   function updateLampLights() {
     for (const l of S.lampLights) scene.remove(l);
     S.lampLights = [];
-    const th = THEMES[S.theme];
+    const th = TIMES_OF_DAY[S.theme];
     const pal = S.palette;
     const lamps = S.items.filter((it) => it.kind === "lamp" || it.kind === "tv").slice(0, 6);
     for (const it of lamps) {
@@ -700,9 +696,9 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
 
   /** Time of day: "day" | "night" (the office theme — palette and materials — is applyLook). */
   function setTheme(theme) {
-    if (!THEMES[theme]) throw new Error(`unknown theme ${theme}`);
+    if (!TIMES_OF_DAY[theme]) throw new Error(`unknown theme ${theme}`);
     S.theme = theme;
-    const th = THEMES[theme];
+    const th = TIMES_OF_DAY[theme];
     hemi.intensity = th.hemi;
     sun.intensity = th.sun;
     scene.background = theme === "night" ? tex.skyNight : tex.skyDay;
@@ -715,7 +711,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
   }
 
   function applyGlow(m) {
-    const th = THEMES[S.theme];
+    const th = TIMES_OF_DAY[S.theme];
     const night = S.theme === "night";
     m.color.copy(m.userData.baseColor).multiplyScalar(m.userData.lamp ? th.lamp : th.glow);
     if (m.userData.window) {
@@ -727,7 +723,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
 
   /** Sun / sky / lamp tints: the lighting mood of the theme over the time of day. */
   function applyLights() {
-    const th = THEMES[S.theme], p = S.palette;
+    const th = TIMES_OF_DAY[S.theme], p = S.palette;
     if (!p) return;
     const night = S.theme === "night";
     hemi.color.copy(night ? p.nightSky : p.sky);

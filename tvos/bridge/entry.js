@@ -10,8 +10,8 @@ import { blockedCells } from "../../public/shared/kinds.js";
 import { kindOf } from "../../public/shared/catalog.js";
 import { characterRig } from "../../public/js/character.js";
 import { GARDEN_BORDER, cornerPosts, gardenBoxes, roomWalls, wallBoxes } from "../../public/js/room.js";
-import { floorTexture, grainTexture, grassTexture, plinthTexture, rackTexture, rugTexture, screenTexture, skyTexture, tvTexture, wallTexture, windowTexture } from "../../public/js/textures.js";
-import { hueColors, themeLook } from "../../public/js/model.js";
+import { floorTexture, grainTexture, grassTexture, nightWindowTexture, plinthTexture, rackTexture, rugTexture, screenTexture, skyTexture, tvTexture, wallTexture, windowTexture } from "../../public/js/textures.js";
+import { TIMES_OF_DAY, clockTheme, hueColors, themeLook } from "../../public/js/model.js";
 import { buildGeometry } from "../../public/js/voxel.js";
 import { installDocument } from "./pixel-canvas.js";
 
@@ -20,7 +20,8 @@ installDocument();
 const TEXTURES = {
   grain: () => grainTexture(), grass: () => grassTexture(), plinth: () => plinthTexture(), rug: () => rugTexture(),
   floor: (m) => floorTexture(m), wall: (m) => wallTexture(m),
-  screen: () => screenTexture(), tv: () => tvTexture(), rack: () => rackTexture(), window: () => windowTexture(false), sky: () => skyTexture(false),
+  screen: () => screenTexture(), tv: () => tvTexture(), rack: () => rackTexture(), window: () => windowTexture(false), sky: (time) => skyTexture(time === "night"),
+  nightWindow: (style) => nightWindowTexture(style),
 };
 
 let state = null;
@@ -35,6 +36,7 @@ function kindParts(kind, custom) {
     return {
       defaultColor: m.defaultColor ?? null,
       glowColor: m.glow?.color ?? null,
+      glowLamp: !!m.glow?.lamp,
       parts: [
         { role: "base", boxes: boxesOf(m.base) },
         { role: "accent", boxes: boxesOf(m.accent), map: m.accentMap === "rug" ? "rug" : "grain" },
@@ -51,6 +53,7 @@ function kindParts(kind, custom) {
   return {
     defaultColor: null,
     glowColor: null,
+    glowLamp: false,
     parts: [
       { role: "base", boxes: [...plan.matte, ...plan.glossy].map((b) => toBox(b)) },
       { role: "glass", boxes: plan.glass.map((b) => toBox(b)) },
@@ -99,6 +102,11 @@ function targets(now) {
     out.set(a.id, { key: `mill:${h % 97}`, x: entry.x + ((h % 5) - 2) * 0.9, z: Math.max(0.5, entry.z - 1 - ((h >> 3) % 3) * 0.9), yaw: Math.PI, pose: "stand", seatY: SEAT_Y });
   }
   return out;
+}
+
+function timeOfDay(name) {
+  if (!TIMES_OF_DAY[name]) throw new Error(`unknown time of day ${JSON.stringify(name)}`);
+  return { name, ...TIMES_OF_DAY[name] };
 }
 
 /** A chat ref as people read it: an agent's display name, a human's name, or the office. */
@@ -156,8 +164,8 @@ globalThis.AO = {
     state = applyFrame(state, f);
     return f.type;
   },
-  /** Everything the renderer needs, as JSON. */
-  scene(now) {
+  /** Everything the renderer needs, as JSON. `time` forces "day" or "night"; empty follows the local clock like the web. */
+  scene(now, time) {
     if (!state) return JSON.stringify(null);
     const custom = state.customKinds ?? {};
     const { batches } = layoutBatches(state.items, custom);
@@ -173,6 +181,7 @@ globalThis.AO = {
       wallH: WALL_H,
       theme: state.theme,
       look: themeLook(state.theme),
+      time: timeOfDay(time || clockTheme(new Date(now))),
       kinds,
       items,
       agents: state.agents.map((a) => ({

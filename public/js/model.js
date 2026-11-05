@@ -599,6 +599,20 @@ export function kindGeometryPlan(def) {
   return plan;
 }
 
+/* ── time of day ────────────────────────────────────────────────────────────────────────────── */
+
+/** Light levels per time of day (three.js units): hemisphere, sun, fog, bloom, glow multipliers, lamp point lights, exposure. */
+export const TIMES_OF_DAY = Object.freeze({
+  day: { hemiSky: "#d7ecff", hemiGround: "#e3c39d", hemi: 1.25, sun: 2.7, sunColor: "#ffe4bd", fog: "#e8eef2", bloom: 0.28, threshold: 0.92, glow: 1.0, lamp: 0.95, point: 0, exposure: 1.0 },
+  night: { hemiSky: "#41508f", hemiGround: "#2b2236", hemi: 0.5, sun: 0.35, sunColor: "#9fb3ff", fog: "#1d2147", bloom: 0.7, threshold: 0.72, glow: 1.2, lamp: 2.4, point: 9, exposure: 1.05 },
+});
+
+/** Day or night from a local clock: night runs 19:00–07:00. */
+export function clockTheme(date = new Date()) {
+  const h = date.getHours();
+  return h >= 19 || h < 7 ? "night" : "day";
+}
+
 /* ── theme → look ───────────────────────────────────────────────────────────────────────────── */
 
 /** Light rigs per lighting mood: day sun/hemisphere tints and the colour lamps glow at night. */

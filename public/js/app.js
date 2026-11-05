@@ -1,7 +1,7 @@
 // Entry: route (/ = landing, /o/:office = the office), connect the data source, and wire the scene,
 // overlay, sidebar and editor together. State only ever changes through applyFrame().
 
-import { applyFrame } from "./model.js";
+import { applyFrame, clockTheme } from "./model.js";
 import { soundCues } from "./sound-plan.js";
 import { createSound } from "./sound.js";
 import { kindOf } from "../shared/catalog.js";
@@ -43,12 +43,6 @@ function takeKey(office) {
 function forgetKey(office) {
   try { localStorage.removeItem(keySlot(office)); } catch { /* nothing stored */ }
   try { sessionStorage.removeItem(keySlot(office)); } catch { /* nothing stored */ }
-}
-
-/** Day or night from the viewer's local clock (night 19:00–07:00). */
-function clockTheme() {
-  const h = new Date().getHours();
-  return h >= 19 || h < 7 ? "night" : "day";
 }
 
 /** ?theme= wins; a manual toggle sticks only until the clock's day/night phase changes. */

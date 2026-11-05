@@ -17,6 +17,10 @@ final class OfficeRenderer: NSObject {
     private let people = SCNNode()
     private let overlay = SKScene()
     private var sun: SCNNode!
+    private var fill: SCNNode!
+    private let lampLights = SCNNode()
+    /// Glow materials and what they light up as at night (scene.js applyGlow).
+    private var glows: [(mat: SCNMaterial, lamp: Bool, window: Bool)] = []
     private var pills: [String: Pill] = [:]
     private var last: OfficeScene?
     private var agents: [String: AgentNode] = [:]
@@ -51,7 +55,7 @@ final class OfficeRenderer: NSObject {
     override init() {
         super.init()
         scene.background.contents = UIColor(red: 0.78, green: 0.88, blue: 0.96, alpha: 1)
-        for n in [room, furniture, people] { scene.rootNode.addChildNode(n) }
+        for n in [room, furniture, people, lampLights] { scene.rootNode.addChildNode(n) }
         camera.camera = SCNCamera()
         camera.camera?.fieldOfView = 30
         camera.camera?.projectionDirection = .vertical
@@ -93,6 +97,7 @@ final class OfficeRenderer: NSObject {
         scene.fogStartDistance = 50
         scene.fogEndDistance = 160
         scene.rootNode.addChildNode(fill)
+        self.fill = fill
         overlay.scaleMode = .resizeFill
         overlay.backgroundColor = .clear
     }
@@ -118,7 +123,9 @@ final class OfficeRenderer: NSObject {
         defer { Watchdog.at("idle") }
         let structural = last == nil || last!.grid != s.grid || last!.look != s.look || last!.wallH != s.wallH
         if structural { buildRoom(s) }
-        if structural || last!.items != s.items || last!.kinds != s.kinds { buildFurniture(s) }
+        let furnished = structural || last!.items != s.items || last!.kinds != s.kinds
+        if furnished { buildFurniture(s) }
+        if furnished || last!.time != s.time { applyTime(s) }
         syncAgents(s)
         if follow.map({ id in !s.agents.contains { $0.id == id } }) == true { follow = nil }
         if touring, let id = newsworthy(s) {
@@ -154,7 +161,6 @@ final class OfficeRenderer: NSObject {
         sun.light?.orthographicScale = CGFloat(R)
         sun.light?.zNear = 0.5
         sun.light?.zFar = CGFloat(R * 5)
-        scene.background.contents = try voxel.texture("sky")
 
         let floor = SCNNode(geometry: SCNPlane(width: w, height: d))
         floor.geometry?.firstMaterial = voxel.material(map: try voxel.texture("floor", look.floor.material), tint: cssColor(look.floor.color), repeat: CGSize(width: w, height: d), roughness: look.floor.roughness)
@@ -228,6 +234,7 @@ final class OfficeRenderer: NSObject {
 
     private func buildFurniture(_ s: OfficeScene) {
         furniture.childNodes.forEach { $0.removeFromParentNode() }
+        glows = []
         guard let voxel else { preconditionFailure("renderer has no bridge") }
         var cache: [String: [(role: String, map: String?, geo: SCNGeometry)]] = [:]
         do {
@@ -263,11 +270,73 @@ final class OfficeRenderer: NSObject {
             default: voxel.material(map: grain)
             }
             if p.role == "glass" { mat.transparency = 0.38; mat.writesToDepthBuffer = false }
+            if p.role == "glow" { glows.append((mat, kind.glowLamp, p.map == "window")) }
             let g = p.geo.copy() as! SCNGeometry
             g.firstMaterial = mat
             node.addChildNode(SCNNode(geometry: g))
         }
         return node
+    }
+
+    // MARK: time of day
+
+    /// scene.js setTheme/applyLights/applyGlow/updateLampLights for SceneKit: sun, hemisphere (as ambient), fog, sky,
+    /// window glass and glow strength, and at night the lamp and ceiling-fill point lights.
+    private func applyTime(_ s: OfficeScene) {
+        guard let voxel else { preconditionFailure("renderer has no bridge") }
+        let t = s.time, mood = s.look.mood
+        do {
+            sun.light?.intensity = t.sun / .pi * 1000
+            sun.light?.color = cssColor(t.night ? t.sunColor : mood.sun)
+            // a hemisphere light lit from sky above and ground below; ambient takes their mean
+            fill.light?.intensity = t.hemi / .pi * 1000 * 0.85
+            fill.light?.color = mix(cssColor(t.night ? mood.nightSky : mood.sky), cssColor(t.night ? t.hemiGround : mood.ground))
+            scene.fogColor = cssColor(t.fog)
+            scene.background.contents = try voxel.texture("sky", t.name)
+            let day = try voxel.texture("window"), night = try voxel.texture("nightWindow", s.look.nightWindow ?? "stars")
+            for g in glows {
+                g.mat.diffuse.intensity = g.lamp ? t.lamp : t.glow
+                if g.window { g.mat.diffuse.contents = t.night ? night : day; g.mat.diffuse.intensity = t.night ? 0.95 : 1.05 }
+            }
+        } catch {
+            preconditionFailure("time of day: \(error)")
+        }
+        lampLights.childNodes.forEach { $0.removeFromParentNode() }
+        guard t.point > 0 else { return }
+        let lit = s.items.filter { $0.kind == "lamp" || $0.kind == "tv" }.prefix(6)
+        for it in lit {
+            let lamp = it.kind == "lamp"
+            lampLights.addChildNode(omni(color: lamp ? cssColor(mood.lamp) : cssColor("#8fb6ff"), intensity: t.point * (lamp ? 1 : 0.4) * Self.lampScale, reach: 7,
+                                         at: SCNVector3(it.x, lamp ? 1.4 : 1.0, it.z)))
+        }
+        let objects = s.items.filter { !["rug", "window", "poster", "whiteboard", "sign"].contains($0.kind) }.count
+        let density = min(1, Double(objects) / (Double(s.grid.w * s.grid.d) * 0.12))
+        lampLights.addChildNode(omni(color: cssColor(mood.fill), intensity: t.point * (2.2 + 1.6 * density) * Self.fillScale, reach: hypot(Double(s.grid.w), Double(s.grid.d)),
+                                     at: SCNVector3(Double(s.grid.w) / 2, 4.5, Double(s.grid.d) / 2)))
+    }
+
+    /// A three.js PointLight(color, intensity, distance) as a SceneKit omni light fading out at `reach`.
+    private func omni(color: UIColor, intensity: Double, reach: Double, at p: SCNVector3) -> SCNNode {
+        let n = SCNNode()
+        n.light = SCNLight()
+        n.light?.type = .omni
+        n.light?.color = color
+        n.light?.intensity = intensity
+        n.light?.attenuationStartDistance = 0
+        n.light?.attenuationEndDistance = reach
+        n.light?.attenuationFalloffExponent = 1.6
+        n.position = p
+        return n
+    }
+    // three's physical point-light falloff and SceneKit's linear fade differ; these scales match the web by eye
+    private static let lampScale = Double(ProcessInfo.processInfo.environment["AO_LAMP"] ?? "120") ?? 120
+    private static let fillScale = Double(ProcessInfo.processInfo.environment["AO_FILL"] ?? "30") ?? 30
+
+    private func mix(_ a: UIColor, _ b: UIColor) -> UIColor {
+        var (ar, ag, ab, aa, br, bg, bb, ba): (CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0, 0, 0, 0, 0)
+        a.getRed(&ar, green: &ag, blue: &ab, alpha: &aa)
+        b.getRed(&br, green: &bg, blue: &bb, alpha: &ba)
+        return UIColor(red: (ar + br) / 2, green: (ag + bg) / 2, blue: (ab + bb) / 2, alpha: 1)
     }
 
     // MARK: agents
