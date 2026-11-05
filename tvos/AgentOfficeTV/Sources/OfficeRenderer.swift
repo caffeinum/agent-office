@@ -114,7 +114,7 @@ final class OfficeRenderer: NSObject {
         v.scene = scene
         v.pointOfView = camera
         v.overlaySKScene = overlay
-        if Self.stats { v.delegate = self }
+        v.delegate = self
         link?.invalidate()
         link = CADisplayLink(target: self, selector: #selector(tick))
         link?.add(to: .main, forMode: .common)
@@ -124,6 +124,7 @@ final class OfficeRenderer: NSObject {
     func detach() {
         link?.invalidate()
         link = nil
+        view?.delegate = nil
     }
 
     func apply(_ s: OfficeScene) {
@@ -148,6 +149,7 @@ final class OfficeRenderer: NSObject {
     private func buildRoom(_ s: OfficeScene) {
         room.childNodes.forEach { $0.removeFromParentNode() }
         walls = []
+        renderWalls.withLock { $0 = [] }
         guard let bridge, let voxel else { preconditionFailure("renderer has no bridge") }
         do {
             try buildRoom(s, plan: bridge.room(s.grid), voxel: voxel)
@@ -208,19 +210,18 @@ final class OfficeRenderer: NSObject {
             frame.addChildNode(stub)
             room.addChildNode(frame)
             walls.append((wall.name, full, stub))
+            renderWalls.withLock { $0 = walls }
         }
         let posts = SCNNode(geometry: try voxel.geometry(plan.posts))
         posts.geometry?.firstMaterial = trim
         room.addChildNode(posts)
     }
 
-    /// room.js cutaway(): walls the camera stands behind drop to their stubs.
-    private func updateCutaway() {
-        guard let g = last?.grid else { return }
-        // the model position we set (reading .presentation would wait on the render thread)
+    /// room.js cutaway(): walls the camera stands behind drop to their stubs. Render thread.
+    private func updateCutaway(grid g: SIMD2<Float>) {
         let p = camera.simdPosition
-        let hide = ["back": p.z < 0.5, "front": p.z > Float(g.d) - 0.5, "left": p.x < 0.5, "right": p.x > Float(g.w) - 0.5]
-        for w in walls {
+        let hide = ["back": p.z < 0.5, "front": p.z > g.y - 0.5, "left": p.x < 0.5, "right": p.x > g.x - 0.5]
+        for w in renderWalls.withLock({ $0 }) {
             let h = hide[w.name] ?? false
             if w.full.isHidden != h { w.full.isHidden = h; w.stub.isHidden = !h }
         }
@@ -420,16 +421,10 @@ final class OfficeRenderer: NSObject {
         }
         let t2 = CACurrentMediaTime()
         Watchdog.at("tick.camera")
-        let c0 = CACurrentMediaTime()
-        placeCamera(dt: Float(dt))
-        let c1 = CACurrentMediaTime()
-        Watchdog.at("tick.cutaway")
-        updateCutaway()
-        let c2 = CACurrentMediaTime()
-        if c2 - c0 > 0.05 { Watchdog.slow(String(format: "camera %.0fms cutaway %.0fms", (c1 - c0) * 1000, (c2 - c1) * 1000)) }
+        publishCamera()
         let t3 = CACurrentMediaTime()
         Watchdog.at("tick.pills")
-        placePills()
+        publishPills()
         Watchdog.at("idle")
         let t4 = CACurrentMediaTime()
         if Self.stats {
@@ -450,34 +445,55 @@ final class OfficeRenderer: NSObject {
 
     // MARK: camera
 
+    /// What the camera should look at, for the render thread (main thread, every tick).
+    private struct CamInput {
+        var target: SIMD3<Float>; var dist: Float; var azimuth: Float; var zoom: Float
+        var grid: SIMD2<Float>; var touching: Bool; var panning: Bool; var following: Bool
+    }
+    private let camInput = OSAllocatedUnfairLock<CamInput?>(initialState: nil)
+    private let renderWalls = OSAllocatedUnfairLock<[(name: String, full: SCNNode, stub: SCNNode)]>(initialState: [])
+
     /// Home: the whole room (walls included) fits the screen, as homeView() frames it on the web. Following: close behind the agent.
-    private func placeCamera(dt: Float) {
+    private func publishCamera() {
         guard let s = last, let v = view, v.bounds.height > 0 else { return }
         let aspect = Float(v.bounds.width / v.bounds.height)
+        let input: CamInput
+        if let id = follow, let n = agents[id] {
+            input = CamInput(target: [n.node.position.x, 0.8, n.node.position.z], dist: 9, azimuth: azimuthGoal, zoom: zoomGoal,
+                             grid: [Float(s.grid.w), Float(s.grid.d)], touching: touch != nil, panning: false, following: true)
+        } else {
+            input = CamInput(target: [Float(s.grid.w) / 2 + pan.x, 0, Float(s.grid.d) / 2 + pan.y], dist: homeDistance(s.grid, aspect: aspect),
+                             azimuth: azimuthGoal, zoom: zoomGoal, grid: [Float(s.grid.w), Float(s.grid.d)], touching: touch != nil,
+                             panning: gesture?.panning == true, following: false)
+        }
+        camInput.withLock { $0 = input }
+    }
+
+    // render-thread camera state: eased per frame SceneKit draws, so motion is even whatever the main thread's timing
+    private var lastRender: TimeInterval = 0
+
+    /// Render thread, once per drawn frame: eases the camera toward its input, cuts away walls, places the pills.
+    private func renderStep(time: TimeInterval) {
+        let dt = Float(lastRender == 0 ? 0 : min(0.05, time - lastRender))
+        lastRender = time
+        guard let input = camInput.withLock({ $0 }) else { return }
         // short smoothing (~50 ms) on finger input; ▲ home and agent switches use the slower `k` below
         let ease = min(1, dt * 20)
-        azimuth += (azimuthGoal - azimuth) * ease
-        zoom += (zoomGoal - zoom) * ease
-        var wantTarget: SCNVector3
-        var wantDist: Float
-        if let id = follow, let n = agents[id] {
-            wantTarget = SCNVector3(n.node.position.x, 0.8, n.node.position.z)
-            wantDist = 9 * zoom
-        } else {
-            wantTarget = SCNVector3(Float(s.grid.w) / 2 + pan.x, 0, Float(s.grid.d) / 2 + pan.y)
-            wantDist = homeDistance(s.grid, aspect: aspect) * zoom
-        }
+        azimuth += (input.azimuth - azimuth) * ease
+        zoom += (input.zoom - zoom) * ease
         let k = min(1, dt * 4)
-        // a slide follows the finger within ~100 ms: the pad reports in uneven steps, and a camera that moves sideways
-        // shows every step as a jerk (turning hides them better), so it gets a little more smoothing than turn and zoom
-        let kt = gesture?.panning == true ? min(1, dt * 10) : k
-        camTarget = SCNVector3(camTarget.x + (wantTarget.x - camTarget.x) * kt, camTarget.y + (wantTarget.y - camTarget.y) * kt, camTarget.z + (wantTarget.z - camTarget.z) * kt)
+        // a slide follows the finger within ~100 ms, smoothing the pad's uneven steps
+        let kt = input.panning ? min(1, dt * 10) : k
+        let t = input.target
+        camTarget = SCNVector3(camTarget.x + (t.x - camTarget.x) * kt, camTarget.y + (t.y - camTarget.y) * kt, camTarget.z + (t.z - camTarget.z) * kt)
         // while a finger is on the pad the distance follows quickly; transitions (home, switching agents) ease slower
-        camDist += (wantDist - camDist) * (touch != nil ? min(1, dt * 20) : k)
+        camDist += (input.dist * zoom - camDist) * (input.touching ? min(1, dt * 20) : k)
         let dir = SCNVector3(sin(polar) * sin(azimuth), cos(polar), sin(polar) * cos(azimuth))
         camera.position = SCNVector3(camTarget.x + dir.x * camDist, camTarget.y + dir.y * camDist, camTarget.z + dir.z * camDist)
         // world up, every frame: plain look(at:) keeps the node's current up, so roll would creep in while orbiting
         camera.look(at: camTarget, up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 0, -1))
+        updateCutaway(grid: input.grid)
+        placePills()
     }
 
     private func homeDistance(_ g: OfficeScene.Grid, aspect: Float) -> Float {
@@ -486,7 +502,7 @@ final class OfficeRenderer: NSObject {
         // homeView()'s fit box: the floor inset by 1.5 / 1 cells, up to 1.1 high
         for x in [Float(1.5), W - 1.5] { for z in [Float(1), D - 1] { for y in [Float(0), 1.1] { corners.append([x, y, z]) } } }
         let target = SIMD3<Float>(W / 2, 0, D / 2)
-        let dir = SIMD3<Float>(sin(polar) * sin(azimuth), cos(polar), sin(polar) * cos(azimuth))
+        let dir = SIMD3<Float>(sin(polar) * sin(azimuthGoal), cos(polar), sin(polar) * cos(azimuthGoal))
         let fwd = -dir, right = simd_normalize(simd_cross(fwd, [0, 1, 0])), up = simd_cross(right, fwd)
         let tanY = tan(Float(15) * .pi / 180) * 0.9, tanX = tanY * aspect * 0.96
         var lo: Float = 5, hi: Float = 200
@@ -505,26 +521,49 @@ final class OfficeRenderer: NSObject {
 
     // MARK: pills
 
-    private func placePills() {
+    /// Pill nodes and the world point each sits on, for the render thread; where they landed comes back for culling.
+    private struct PillJob { let id: String; let node: SKSpriteNode; let head: SIMD3<Float>; let lift: CGFloat }
+    private let pillJobs = OSAllocatedUnfairLock<(size: CGSize, jobs: [PillJob])>(initialState: (.zero, []))
+    private let pillScreen = OSAllocatedUnfairLock<[String: SIMD3<Float>]>(initialState: [:])
+
+    /// Main thread, every tick: hands the render thread this frame's pill anchors and culls with the last frame's spots.
+    private func publishPills() {
         guard let v = view, v.bounds.height > 0 else { return }
         let size = v.bounds.size
         if overlay.size != size { overlay.size = size }
-        let toScreen = projection(size)
-        var rects: [Bridge.LabelRect] = []
+        var jobs: [PillJob] = []
         for (id, pill) in pills {
             guard let n = agents[id] else { continue }
-            let head = n.node.simdWorldPosition + SIMD3<Float>(0, n.crownY + 0.12, 0)
-            guard let p = toScreen(head) else { pill.node.isHidden = true; continue }
-            pill.node.isHidden = false
-            // SpriteKit's origin is bottom-left; p is top-left like UIKit
-            pill.node.position = CGPoint(x: CGFloat(p.x), y: size.height - CGFloat(p.y) + pill.node.size.height / 2)
-            pill.node.zPosition = CGFloat(1 - p.z) * 1000
+            jobs.append(PillJob(id: id, node: pill.node, head: n.node.simdWorldPosition + SIMD3<Float>(0, n.crownY + 0.12, 0), lift: pill.node.size.height / 2))
+        }
+        pillJobs.withLock { $0 = (size, jobs) }
+        let screen = pillScreen.withLock { $0 }
+        var rects: [Bridge.LabelRect] = []
+        for (id, pill) in pills {
+            guard let n = agents[id], let p = screen[id] else { continue }
             let sz = pill.labelSize
             rects.append(.init(id: id, x: Double(p.x) - sz.width / 2, y: Double(p.y) - sz.height, w: sz.width, h: sz.height, depth: Double(p.z),
                                status: n.agent.status, selected: follow == id, speaking: n.agent.says != nil, kept: pill.kept))
         }
         guard let keep = try? bridge?.cull(rects) else { return }
         for (id, pill) in pills { pill.setKept(keep.contains(id)) }
+    }
+
+    /// Render thread: pills follow the camera of the very frame being drawn, so they never lag the scene.
+    private func placePills() {
+        let (size, jobs) = pillJobs.withLock { $0 }
+        guard size.height > 0 else { return }
+        let toScreen = projection(size)
+        var screen: [String: SIMD3<Float>] = [:]
+        for j in jobs {
+            guard let p = toScreen(j.head) else { j.node.isHidden = true; continue }
+            j.node.isHidden = false
+            // SpriteKit's origin is bottom-left; p is top-left like UIKit
+            j.node.position = CGPoint(x: CGFloat(p.x), y: size.height - CGFloat(p.y) + j.lift)
+            j.node.zPosition = CGFloat(1 - p.z) * 1000
+            screen[j.id] = p
+        }
+        pillScreen.withLock { $0 = screen }
     }
 
     /// World → screen points (top-left origin, z = depth 0…1) from the camera we place ourselves. SCNView.projectPoint
@@ -605,8 +644,8 @@ final class OfficeRenderer: NSObject {
     /// faces now; farther out moves faster.
     private func panBy(_ d: SIMD2<Float>) {
         guard let g = last?.grid else { return }
-        let right = SIMD2(cos(azimuth), -sin(azimuth)), away = SIMD2(-sin(azimuth), -cos(azimuth))
-        let k = camDist / 3
+        let right = SIMD2(cos(azimuthGoal), -sin(azimuthGoal)), away = SIMD2(-sin(azimuthGoal), -cos(azimuthGoal))
+        let k = (camInput.withLock { $0?.dist } ?? 30) * zoomGoal / 3
         pan += right * d.x * k + away * d.y * k
         pan = simd_clamp(pan, SIMD2(-Float(g.w) / 2, -Float(g.d) / 2), SIMD2(Float(g.w) / 2, Float(g.d) / 2))
     }
@@ -741,6 +780,10 @@ func boxNode(at: [Double], size: [Double], color: UIColor) -> SCNNode {
 }
 
 extension OfficeRenderer: SCNSceneRendererDelegate {
+    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        renderStep(time: time)
+    }
+
     func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
         framesDrawn.withLock { $0 += 1 }
     }
