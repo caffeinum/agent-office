@@ -28,9 +28,10 @@ Remote (Siri Remote clickpad):
 | --- | --- | --- |
 | move a finger left / right | turn around the room, by how far the finger moved | turn around the agent |
 | move a finger up / down | zoom | zoom |
+| double tap, keep the finger down and move | slide the camera over the floor (no turn or zoom) | stop following and slide from there |
 | click ◀ ▶ | follow previous / next agent | previous / next agent |
 | click select | follow the first agent | stop following |
-| click ▲ | home view | home view |
+| click ▲ | home view (also undoes a slide) | home view |
 | click ▼ | room chat on / off | room chat on / off |
 | play/pause | agent list on / off (▲▼ move through it, select follows that agent and opens its chat) | this agent's chat on / off |
 | hold play/pause | hide all UI | hide all UI |

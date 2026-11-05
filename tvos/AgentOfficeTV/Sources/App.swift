@@ -248,7 +248,7 @@ struct OfficeScreen: View {
                 }
             }
             if model.hints && !model.clean && model.panel == .none && !model.exitHint {
-                Text("touch ↔ turn · touch ↕ zoom · ◀ ▶ follow · ⏯ agents · ▼ chat · ▲ home · hold ⏯ hide")
+                Text("touch ↔ turn · touch ↕ zoom · tap tap + drag slide · ◀ ▶ follow · ⏯ agents · ▼ chat · ▲ home · hold ⏯ hide")
                     .font(.caption2).foregroundStyle(Color(red: 0.17, green: 0.14, blue: 0.13))
                     .padding(.horizontal, 26).padding(.vertical, 12)
                     .background(Capsule().fill(Color(red: 1, green: 0.99, blue: 0.97, opacity: 0.92)))

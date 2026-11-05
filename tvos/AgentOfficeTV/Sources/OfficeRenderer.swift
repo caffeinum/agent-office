@@ -44,6 +44,11 @@ final class OfficeRenderer: NSObject {
     private(set) var follow: String? { didSet { if follow != oldValue { onFollow?(follow); refreshPills() } } }
     var onFollow: ((String?) -> Void)?
     private var touch: SIMD2<Float>?
+    /// Double tap, then hold and drag: pans over the floor (Google Maps style one-finger mode) instead of turn/zoom.
+    private var gesture: (start: CFTimeInterval, travel: Float, panning: Bool)?
+    private var lastTapLift: CFTimeInterval = -1
+    private var zeroAt: CFTimeInterval = 0
+    private var pan = SIMD2<Float>(0, 0)
 
     // Auto-tour: after `tourAfter` seconds without input the camera spins slowly and visits whoever just spoke or
     // started working, for `tourVisit` seconds each.
@@ -459,7 +464,7 @@ final class OfficeRenderer: NSObject {
             wantTarget = SCNVector3(n.node.position.x, 0.8, n.node.position.z)
             wantDist = 9 * zoom
         } else {
-            wantTarget = SCNVector3(Float(s.grid.w) / 2, 0, Float(s.grid.d) / 2)
+            wantTarget = SCNVector3(Float(s.grid.w) / 2 + pan.x, 0, Float(s.grid.d) / 2 + pan.y)
             wantDist = homeDistance(s.grid, aspect: aspect) * zoom
         }
         let k = min(1, dt * 4)
@@ -554,13 +559,14 @@ final class OfficeRenderer: NSObject {
         follow = order[((i ?? (by > 0 ? -1 : 0)) + by + order.count) % order.count]
     }
 
-    func follow(_ id: String) { follow = id }
-    func toggleFollow() { follow = follow == nil ? last?.agents.first?.id : nil }
+    func follow(_ id: String) { follow = id; pan = .zero }
+    func toggleFollow() { follow = follow == nil ? last?.agents.first?.id : nil; pan = .zero }
     func unfollow() { follow = nil }
 
     /// Back to the web's home view of the whole room.
     func home() {
         follow = nil
+        pan = .zero
         zoomGoal = 1
         // the shortest way back round to the home angle
         var d = (Self.homeAzimuth - azimuthGoal).truncatingRemainder(dividingBy: 2 * .pi)
@@ -583,6 +589,24 @@ final class OfficeRenderer: NSObject {
         if follow != nil, now > tourUntil { follow = nil }
     }
 
+    /// Panning starts from wherever the camera looks now: a followed agent hands its spot over to the pan.
+    private func startPan() {
+        guard let g = last?.grid else { return }
+        if let id = follow, let n = agents[id] {
+            pan = SIMD2(n.node.position.x - Float(g.w) / 2, n.node.position.z - Float(g.d) / 2)
+            follow = nil
+        }
+    }
+
+    /// Drags the floor with the finger, along the screen's axes as the camera faces now; farther out moves faster.
+    private func panBy(_ d: SIMD2<Float>) {
+        guard let g = last?.grid else { return }
+        let right = SIMD2(cos(azimuth), -sin(azimuth)), away = SIMD2(-sin(azimuth), -cos(azimuth))
+        let k = camDist * 0.5
+        pan -= right * d.x * k + away * d.y * k
+        pan = simd_clamp(pan, SIMD2(-Float(g.w) / 2, -Float(g.d) / 2), SIMD2(Float(g.w) / 2, Float(g.d) / 2))
+    }
+
     private func watchControllers() {
         NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil, queue: .main) { [weak self] n in
             if let c = n.object as? GCController { self?.listen(c) }
@@ -602,21 +626,41 @@ final class OfficeRenderer: NSObject {
             if x == 0 && y == 0 {
                 guard self.touch != nil, self.liftWork == nil else { return }
                 let work = DispatchWorkItem { [weak self] in
-                    self?.touch = nil
-                    self?.liftWork = nil
+                    guard let self else { return }
+                    // a short touch that barely moved is a tap; a touch right after one starts a pan
+                    let lift = CACurrentMediaTime() - 0.15
+                    if let g = self.gesture, !g.panning, lift - g.start < 0.3, g.travel < 0.2 { self.lastTapLift = lift } else { self.lastTapLift = -1 }
+                    self.gesture = nil
+                    self.touch = nil
+                    self.liftWork = nil
                 }
                 self.liftWork = work
+                self.zeroAt = CACurrentMediaTime()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
                 return
             }
             if x == 0 || y == 0 { return }
+            if self.liftWork != nil, let g = self.gesture, !g.panning, CACurrentMediaTime() - self.zeroAt > 0.04,
+               self.zeroAt - g.start < 0.3, g.travel < 0.2 {
+                // a tap and a new touch inside the lift debounce: the second touch of a double tap
+                self.gesture = (CACurrentMediaTime(), 0, true)
+                self.touch = nil
+                self.startPan()
+            }
             self.liftWork?.cancel()
             self.liftWork = nil
             self.noteInput()
             let now = SIMD2<Float>(x, y)
             defer { self.touch = now }
+            if self.gesture == nil {
+                let t0 = CACurrentMediaTime()
+                self.gesture = (t0, 0, t0 - self.lastTapLift < 0.45)
+                if self.gesture!.panning { self.startPan() }
+            }
             guard let t = self.touch, simd_length(now - t) < 0.3 else { return }
             let d = now - t
+            self.gesture?.travel += simd_length(d)
+            if self.gesture?.panning == true { self.panBy(d); return }
             self.azimuthGoal -= d.x * 1.1
             self.zoomGoal = min(2.2, max(0.25, self.zoomGoal * exp(-d.y * 0.55)))
         }
