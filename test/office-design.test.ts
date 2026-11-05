@@ -499,3 +499,45 @@ describe("lowpoly neon: wedges, flat boxes, kind lights, dimmed zones", () => {
     expect(lights).toEqual([]);
   });
 });
+
+describe("triangle meshes", () => {
+  const cone = {
+    kind: "lowpoly-cone",
+    label: "Lowpoly cone",
+    footprint: { w: 1, d: 1 },
+    meshes: [{ vertices: [[0, 0, 0], [16, 0, 0], [8, 0, 16], [8, 30, 8]], faces: [[0, 1, 3], [1, 2, 3], [2, 0, 3], [0, 2, 1]], color: "#2a9d74" }],
+    stations: [{ x: 8, z: 24, rot: 180, activity: "water-plants" }],
+  };
+
+  it("a mesh-only kind defines, places and reaches viewers; bad meshes are refused", async () => {
+    const o = await createOffice();
+    const a = await join(o, "Mesher");
+    const t = { token: a.agentToken };
+    const viewer = await openWs(o, o.viewKey);
+    await viewer.next((f) => f.type === "snapshot");
+    const def = await call(o, "define_kind", cone, t);
+    expect(def.status).toBe(200);
+    expect(def.body.kind).toMatchObject({ boxes: 0, meshes: 1, triangles: 4, height: 30 });
+    const kf = await viewer.next((f) => f.type === "kind");
+    expect(kf.kind.meshes[0].faces).toHaveLength(4);
+    expect((await call(o, "add", { kind: "lowpoly-cone", x: 22, z: 10 }, t)).status).toBe(200);
+    const bad = await call(o, "define_kind", { ...cone, kind: "bad-cone", meshes: [{ ...cone.meshes[0], faces: [[0, 1, 7]] }] }, t);
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toMatch(/faces\[0\]\[2\] must be an integer 0\.\.3/);
+    expect((await call(o, "define_kind", { ...cone, kind: "empty-kind", meshes: [] }, t)).body.error).toMatch(/at least one box or mesh/);
+    viewer.ws.close();
+  });
+
+  it("kinds stored before meshes existed load with none", async () => {
+    const o = await createOffice();
+    const a = await join(o, "Old Meshes");
+    await call(o, "define_kind", { kind: "box-only", label: "Box", footprint: { w: 1, d: 1 }, boxes: [{ x: 0, y: 0, z: 0, w: 4, h: 4, d: 4, color: "#ffffff" }] }, { token: a.agentToken });
+    const meshes = await runInDurableObject(stubOf(o.id), async (inst: Office, state) => {
+      const { meshes: _m, ...old } = (await state.storage.get("kind:box-only")) as any;
+      await state.storage.put("kind:box-only", old);
+      await (inst as any).load();
+      return (inst as any).customKinds["box-only"].meshes;
+    });
+    expect(meshes).toEqual([]);
+  });
+});

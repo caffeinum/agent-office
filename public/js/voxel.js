@@ -106,3 +106,23 @@ export function buildGeometry(boxes, { ao = true, floorY = 0 } = {}) {
   g.computeBoundingBox();
   return g;
 }
+
+/** Flat-shaded triangle meshes (model.js kindGeometryPlan meshes) → one geometry with vertex colours and no UVs to speak of. */
+export function buildMeshGeometry(meshes) {
+  const pos = [], nor = [], col = [], uv = [];
+  const c = new THREE.Color();
+  for (const m of meshes) {
+    c.set(m.color);
+    pos.push(...m.positions);
+    nor.push(...m.normals);
+    for (let i = 0; i < m.positions.length / 3; i++) { col.push(c.r, c.g, c.b); uv.push(0, 0); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.computeBoundingSphere();
+  g.computeBoundingBox();
+  return g;
+}

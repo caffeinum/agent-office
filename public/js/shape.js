@@ -31,3 +31,22 @@ export function quadNormal(a, b, c, d) {
   const len = Math.hypot(n[0], n[1], n[2]);
   return len < 1e-9 ? [0, 0, 0] : [n[0] / len, n[1] / len, n[2] / len];
 }
+
+/**
+ * A validated mesh (kinds.js: local units, 16 per cell, origin at the footprint's min corner) → non-indexed triangles in
+ * the item frame (cells, origin at the footprint centre, y up): {positions, normals}, three floats per vertex, one flat
+ * normal per triangle. Slivers (zero area after rounding) are dropped.
+ */
+export function meshTriangles(mesh, fw, fd, units = 16) {
+  const at = (i) => { const v = mesh.vertices[i]; return [v[0] / units - fw / 2, v[1] / units, v[2] / units - fd / 2]; };
+  const positions = [], normals = [];
+  for (const [a, b, c] of mesh.faces) {
+    const p = at(a), q = at(b), r = at(c);
+    const u = [q[0] - p[0], q[1] - p[1], q[2] - p[2]], v = [r[0] - p[0], r[1] - p[1], r[2] - p[2]];
+    const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const len = Math.hypot(n[0], n[1], n[2]);
+    if (len < 1e-9) continue;
+    for (const pt of [p, q, r]) { positions.push(...pt); normals.push(n[0] / len, n[1] / len, n[2] / len); }
+  }
+  return { positions, normals };
+}

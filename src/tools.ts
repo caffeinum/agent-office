@@ -4,7 +4,7 @@ import { z } from "zod";
 import { ACTIVITY_MAX, defangTags, NAME_MAX, SPOOF_CHARS_RE, SPOOF_LINE_RE, TEXT_MAX } from "./shared/catalog";
 import {
   ACCENT_WALL_MATERIALS, ACCENTS_MAX, ACTIVITIES, BOX_MATERIALS, BOXES_MAX, CUSTOM_LAYERS, DURATION_MAX, DURATION_MIN, FLOOR_MATERIALS,
-  FOOTPRINT_MAX, HEIGHT_MAX, KIND_SLUG_RE, LABEL_MAX, LIGHT_INTENSITY_MAX, LIGHT_RANGE_MAX, LIGHTING, LIGHTS_MAX, NIGHT_WINDOWS, SEATS_MAX, SLOPES,
+  FOOTPRINT_MAX, HEIGHT_MAX, KIND_SLUG_RE, LABEL_MAX, LIGHT_INTENSITY_MAX, LIGHT_RANGE_MAX, LIGHTING, LIGHTS_MAX, MESH_FACES_MAX, MESH_MATERIALS, MESH_VERTICES_MAX, MESHES_MAX, NIGHT_WINDOWS, SEATS_MAX, SLOPES,
   STATIONS_MAX, UNITS, WALLS, ZONE_CELLS_MAX, ZONE_DIM_MAX, ZONES_MAX,
 } from "./shared/design";
 import { ASSET_BASE64_MAX, IMAGE_TYPES } from "./images";
@@ -128,6 +128,15 @@ const box = z
   })
   .strict();
 const local = (what: string) => z.number().min(-UNITS).max((FOOTPRINT_MAX + 1) * UNITS).describe(`${what} in local units (16 per cell); may be up to one cell outside the footprint`);
+const meshSchema = z
+  .object({
+    vertices: z.array(z.tuple([z.number(), z.number(), z.number()])).min(3).max(MESH_VERTICES_MAX).describe("[x, y, z] in local units (16 per cell), inside the footprint, 0 ≤ y ≤ 64"),
+    faces: z.array(z.tuple([z.number().int(), z.number().int(), z.number().int()])).min(1).max(MESH_FACES_MAX).describe("Triangles as vertex indices; winding doesn't matter (both sides draw)"),
+    color,
+    emissive: z.boolean().optional().describe("Glows in its own colour"),
+    material: z.enum(MESH_MATERIALS as [string, ...string[]]).optional().describe("flat (default, lowpoly) or glossy"),
+  })
+  .strict();
 const lightSchema = z
   .object({
     x: local("x"),
@@ -377,7 +386,12 @@ export const TOOLS = {
       label: z.string().trim().min(1).max(LABEL_MAX).refine(hasNoTags, NO_TAGS_MSG),
       footprint: z.object({ w: z.number().int().min(1).max(FOOTPRINT_MAX), d: z.number().int().min(1).max(FOOTPRINT_MAX) }).strict().describe("Size in grid cells at rot 0"),
       layer: z.enum(CUSTOM_LAYERS as [string, ...string[]]).optional().describe("object (default), floor (under furniture, like a rug) or wall (hangs on a wall)"),
-      boxes: z.array(box).min(1).max(BOXES_MAX),
+      boxes: z.array(box).max(BOXES_MAX).optional().describe("Voxel boxes; a kind needs ≥1 box or mesh"),
+      meshes: z
+        .array(meshSchema)
+        .max(MESHES_MAX)
+        .optional()
+        .describe(`Lowpoly triangle meshes (≤${MESHES_MAX} per kind, ≤${MESH_VERTICES_MAX} vertices and ≤${MESH_FACES_MAX} triangles in total), flat-shaded: real slopes, cones, leaves, car bodies`),
       seats: z.array(seatSchema).max(SEATS_MAX).optional(),
       stations: z.array(stationSchema).max(STATIONS_MAX).optional(),
       lights: z.array(lightSchema).max(LIGHTS_MAX).optional().describe("Coloured point lights (neon spill): they light the floor and furniture around them, even inside a dimmed theme zone"),

@@ -5,6 +5,16 @@ export type BoxMaterial = "matte" | "glossy" | "glass" | "screen" | "flat";
 /** The side a wedge's top slopes down to. */
 export type Slope = "+x" | "-x" | "+z" | "-z";
 
+/** A small triangle mesh in local units: flat-shaded, drawn from both sides. */
+export interface Mesh {
+  vertices: Array<[number, number, number]>;
+  faces: Array<[number, number, number]>;
+  color: string;
+  emissive?: true;
+  /** Omitted = flat. */
+  material?: "glossy";
+}
+
 /** A coloured point light in local units (16 per cell): lights its surroundings, even inside a dimmed zone. */
 export interface Light {
   x: number;
@@ -40,7 +50,8 @@ export interface KindDef {
   label: string;
   footprint: { w: number; d: number };
   layer?: Layer;
-  boxes: Array<Omit<Box, "emissive" | "material"> & { emissive?: boolean; material?: BoxMaterial }>;
+  boxes?: Array<Omit<Box, "emissive" | "material"> & { emissive?: boolean; material?: BoxMaterial }>;
+  meshes?: Array<Omit<Mesh, "emissive" | "material"> & { emissive?: boolean; material?: "flat" | "glossy" }>;
   seats?: Array<Partial<Seat> & { x: number; z: number }>;
   stations?: Array<Partial<Station> & { x: number; z: number; activity: Activity }>;
   lights?: Array<Partial<Light> & { x: number; y: number; z: number; color: string }>;
@@ -56,6 +67,7 @@ export interface CustomKind {
   d: number;
   layer: Layer;
   boxes: Box[];
+  meshes: Mesh[];
   seats: Seat[];
   stations: Station[];
   lights: Light[];
@@ -114,6 +126,10 @@ export const LABEL_MAX: number;
 export const BOX_MATERIALS: readonly BoxMaterial[];
 export const SLOPES: readonly Slope[];
 export const LIGHTS_MAX: number;
+export const MESHES_MAX: number;
+export const MESH_VERTICES_MAX: number;
+export const MESH_FACES_MAX: number;
+export const MESH_MATERIALS: readonly ("flat" | "glossy")[];
 export const LIGHT_INTENSITY_MAX: number;
 export const LIGHT_RANGE_MAX: number;
 export const ACTIVITIES: readonly Activity[];
@@ -125,6 +141,7 @@ export const CUSTOM_LAYERS: readonly Layer[];
 
 export function validateSeat(s: unknown, w: number, d: number, where?: string): Seat;
 export function validateStation(s: unknown, w: number, d: number, where?: string): Station;
+export function validateMesh(m: unknown, w: number, d: number, where?: string): Mesh;
 export function validateLight(l: unknown, w: number, d: number, where?: string): Light;
 export function validateKindDef(def: unknown): CustomKind;
 export function summarizeKind(k: CustomKind | import("./catalog.js").Kind): Record<string, unknown>;

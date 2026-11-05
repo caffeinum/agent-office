@@ -16,7 +16,7 @@ import {
   placedLights, route, seatOf, themeLook, TIMES_OF_DAY, usableSpots,
 } from "./model.js";
 import { MODELS, SEAT_Y, WALL_H } from "./furniture.js";
-import { buildGeometry, vbox } from "./voxel.js";
+import { buildGeometry, buildMeshGeometry, vbox } from "./voxel.js";
 import { CROWN, applyLimbs, applyProps, awayMaterial, baseMaterial, blink, buildCharacter, characterMaterials } from "./character.js";
 import { POINT_LIGHTS_GL, setPointExempt, setZones, withZones } from "./zone-shader.js";
 import * as T from "./textures.js";
@@ -118,6 +118,10 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     glass: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.38, depthWrite: false }),
     // lowpoly: no grain, one normal per face
     flat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0, flatShading: true }),
+    // custom-kind triangle meshes: any winding, so both sides draw
+    meshFlat: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0, flatShading: true, side: THREE.DoubleSide }),
+    meshGlossy: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.28, metalness: 0.15, flatShading: true, side: THREE.DoubleSide }),
+    meshEmissive: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: true, side: THREE.DoubleSide }),
     emissive: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: true }),
     // room surfaces (persist across room rebuilds so a theme fade survives a grid change)
     floor: fadeMaterial({ map: floorTex("wood"), roughness: 0.78 }),
@@ -127,6 +131,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     trim: new THREE.MeshStandardMaterial({ vertexColors: true, map: tex.grain, roughness: 0.8 }),
   };
   mats.emissive.userData = { baseColor: new THREE.Color("#ffffff"), lamp: false, window: false };
+  mats.meshEmissive.userData = { baseColor: new THREE.Color("#ffffff"), lamp: false, window: false };
   for (const [key, m] of Object.entries(mats)) if (m.isMeshStandardMaterial) withZones(m);
   const charBase = baseMaterial(tex.grain);
   const charAway = awayMaterial(tex.grain);
@@ -197,6 +202,14 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
       applyGlow(mats.emissive);
       parts.push({ role: "emissive", geo: buildGeometry(boxes(plan.emissive), { ao: false }), mat: mats.emissive });
     }
+    const meshesOf = (bucket) => plan.meshes.filter((m) => m.bucket === bucket);
+    if (meshesOf("flat").length) parts.push({ role: "base", geo: buildMeshGeometry(meshesOf("flat")), mat: mats.meshFlat });
+    if (meshesOf("glossy").length) parts.push({ role: "base", geo: buildMeshGeometry(meshesOf("glossy")), mat: mats.meshGlossy });
+    if (meshesOf("emissive").length) {
+      S.glowMats.set("@meshEmissive", mats.meshEmissive);
+      applyGlow(mats.meshEmissive);
+      parts.push({ role: "emissive", geo: buildMeshGeometry(meshesOf("emissive")), mat: mats.meshEmissive });
+    }
     if (plan.screen.length) {
       const glowMat = new THREE.MeshBasicMaterial({ color: "#ffffff", toneMapped: true });
       glowMat.userData = { baseColor: new THREE.Color("#ffffff"), lamp: false, window: false, screen: true, fallback: tex.screen, own: true, logo: def.screen };
@@ -211,6 +224,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     if (def.textable) {
       let top = 0;
       for (const b of def.boxes) top = Math.max(top, (b.y + b.h) / 16);
+      for (const m of def.meshes) for (const v of m.vertices) top = Math.max(top, v[1] / 16);
       const w = Math.max(0.4, def.w * 0.86), h = Math.min(Math.max(0.3, top * 0.6), 1.2);
       text = { x: 0, y: Math.max(h / 2 + 0.05, top - h / 2 - 0.08), z: def.d / 2 + 0.006, w, h, bg: S.look.signBg, fg: S.look.signFg, tw: Math.round(172 * w), th: Math.round(172 * h) };
     }

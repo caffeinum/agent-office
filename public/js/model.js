@@ -4,6 +4,7 @@
 
 import { footprint, kindOf, seatOf } from "../shared/catalog.js";
 import { BOX_MATERIALS, UNITS, allSpots, blockedCells, spotReachable } from "../shared/kinds.js";
+import { meshTriangles } from "./shape.js";
 import { DEFAULT_THEME, hexToHsl, hslToHex, luminance, mixHex, validateTheme } from "../shared/theme.js";
 
 export const CHAT_KEEP = 200;
@@ -604,14 +605,20 @@ export function mergeBoxes(boxes) {
  * footprint's min corner) →
  * geometry buckets in the item frame used by built-ins (1 unit = 1 cell, origin at the footprint centre,
  * y up): {matte, glossy, flat, glass, screen, emissive}, each a list of {cx, y0, cz, w, h, d, color, slope?, lowFrac?}
- * (slope/lowFrac: a wedge, see shape.js). Emissive boxes glow at night whatever their material; screen boxes show the office logo.
+ * (slope/lowFrac: a wedge, see shape.js), plus meshes: [{bucket: flat|glossy|emissive, color, positions, normals}] (shape.js
+ * meshTriangles). Emissive boxes glow at night whatever their material; screen boxes show the office logo.
  */
 export function kindGeometryPlan(def) {
   if (!def || !Number.isInteger(def.w) || !Number.isInteger(def.d) || !Array.isArray(def.boxes)) throw new Error(`custom kind ${JSON.stringify(def?.kind)} has no w/d/boxes`);
   const U = UNITS;
   const fw = def.w, fd = def.d;
   const merged = mergeBoxes(def.boxes);
-  const plan = { matte: [], glossy: [], flat: [], glass: [], screen: [], emissive: [], input: def.boxes.length, merged: merged.length };
+  const plan = { matte: [], glossy: [], flat: [], glass: [], screen: [], emissive: [], meshes: [], input: def.boxes.length, merged: merged.length };
+  if (!Array.isArray(def.meshes)) throw new Error(`custom kind ${def.kind} has no meshes list`);
+  for (const m of def.meshes) {
+    const bucket = m.emissive ? "emissive" : m.material === "glossy" ? "glossy" : "flat";
+    plan.meshes.push({ bucket, color: m.color, ...meshTriangles(m, fw, fd, U) });
+  }
   const layer = overlapLayers(merged);
   merged.forEach((b, i) => {
     const mat = b.material ?? "matte";

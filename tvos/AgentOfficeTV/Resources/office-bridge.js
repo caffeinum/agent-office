@@ -104,6 +104,25 @@
     const len = Math.hypot(n[0], n[1], n[2]);
     return len < 1e-9 ? [0, 0, 0] : [n[0] / len, n[1] / len, n[2] / len];
   }
+  function meshTriangles(mesh, fw, fd, units = 16) {
+    const at = (i) => {
+      const v = mesh.vertices[i];
+      return [v[0] / units - fw / 2, v[1] / units, v[2] / units - fd / 2];
+    };
+    const positions = [], normals = [];
+    for (const [a, b, c] of mesh.faces) {
+      const p = at(a), q = at(b), r = at(c);
+      const u = [q[0] - p[0], q[1] - p[1], q[2] - p[2]], v = [r[0] - p[0], r[1] - p[1], r[2] - p[2]];
+      const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+      const len = Math.hypot(n[0], n[1], n[2]);
+      if (len < 1e-9) continue;
+      for (const pt of [p, q, r]) {
+        positions.push(...pt);
+        normals.push(n[0] / len, n[1] / len, n[2] / len);
+      }
+    }
+    return { positions, normals };
+  }
 
   // public/js/voxel.js
   var FACES = [
@@ -632,6 +651,7 @@
   var UNITS = 16;
   var BOX_MATERIALS = Object.freeze(["matte", "glossy", "glass", "screen", "flat"]);
   var SLOPES = Object.freeze(["+x", "-x", "+z", "-z"]);
+  var MESH_MATERIALS = Object.freeze(["flat", "glossy"]);
   var ACTIVITIES = Object.freeze(["coffee", "snack", "read", "play", "water-plants", "whiteboard", "chat", "think", "watch"]);
   var ACTIVITY_DURATION = Object.freeze({ coffee: 25, snack: 20, read: 60, play: 45, "water-plants": 15, whiteboard: 40, chat: 45, think: 30, watch: 50 });
   var CUSTOM_LAYERS = Object.freeze(["object", "floor", "wall"]);
@@ -1167,7 +1187,12 @@
     const U = UNITS;
     const fw = def.w, fd = def.d;
     const merged = mergeBoxes(def.boxes);
-    const plan = { matte: [], glossy: [], flat: [], glass: [], screen: [], emissive: [], input: def.boxes.length, merged: merged.length };
+    const plan = { matte: [], glossy: [], flat: [], glass: [], screen: [], emissive: [], meshes: [], input: def.boxes.length, merged: merged.length };
+    if (!Array.isArray(def.meshes)) throw new Error(`custom kind ${def.kind} has no meshes list`);
+    for (const m of def.meshes) {
+      const bucket = m.emissive ? "emissive" : m.material === "glossy" ? "glossy" : "flat";
+      plan.meshes.push({ bucket, color: m.color, ...meshTriangles(m, fw, fd, U) });
+    }
     const layer = overlapLayers(merged);
     merged.forEach((b, i) => {
       const mat = b.material ?? "matte";

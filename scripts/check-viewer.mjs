@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { KINDS, KIND_NAMES, GRID, defaultLayout, applyOp, seatOf, footprint } from "../public/shared/catalog.js";
 import { DEFAULT_THEME, ZONES_MAX, brandTheme, describeTheme, mergeTheme, validateTheme } from "../public/shared/theme.js";
-import { ACTIVITIES, LIGHTS_MAX, summarizeKind, validateKindDef } from "../public/shared/kinds.js";
-import { cornerPoint, quadNormal } from "../public/js/shape.js";
+import { ACTIVITIES, LIGHTS_MAX, MESH_VERTICES_MAX, summarizeKind, validateKindDef } from "../public/shared/kinds.js";
+import { cornerPoint, meshTriangles, quadNormal } from "../public/js/shape.js";
 import { POINT_LIGHTS_GL, ZONES_GL, zonedLightsChunk } from "../public/js/zone-glsl.js";
 import {
   applyFrame, poseFor, lingering, idleAtDesk, LOUNGE_ONE_IN, DESK_LINGER_MS, limbAngles, deskSeating, idleSpots, pickSpot, assignSpots, blockedCells, route, entryPoint, layoutBatches,
@@ -340,7 +340,7 @@ test("kindGeometryPlan: boxes → item-frame buckets by material, centred on the
   // nested boxes grow a hair per layer so the later one wins the depth test (no flicker on shared faces)
   const body = { x: 0, y: 8, z: 1, w: 48, h: 14, d: 14, color: "#7a4a2a" }, record = { x: 2, y: 10, z: 6, w: 2, h: 11, d: 9, color: "#e94d3d" };
   assert.deepEqual(overlapLayers([body, record, { x: 0, y: 0, z: 0, w: 2, h: 8, d: 2, color: "#000000" }]), [0, 1, 0]);
-  const console3 = kindGeometryPlan({ kind: "c", w: 3, d: 1, boxes: [body, record] });
+  const console3 = kindGeometryPlan({ kind: "c", w: 3, d: 1, boxes: [body, record], meshes: [] });
   const [b0, r0] = console3.matte;
   assert.ok(r0.cz + r0.d / 2 > b0.cz + b0.d / 2, "the record's front sits just proud of the cabinet front");
   // unit voxels in one colour collapse hard
@@ -542,6 +542,61 @@ test("zone shader: patches three's real lights chunk (room light dimmed, kind li
   assert.match(out, /irradiance \+= zoneL \* getHemisphereLightIrradiance/);
   assert.throws(() => zonedLightsChunk(chunk.replace("getSunLightInfo( sunLight, directLight );", "")), /three\.js changed/);
   assert.ok(POINT_LIGHTS_GL >= 6 + 1 + 12, "lamps + fill + kind lights fit the exemption flags");
+});
+
+
+/* ── triangle meshes ───────────────────────────────────────────────────────────────────────── */
+
+const pyramid = (over = {}) => ({
+  vertices: [[0, 0, 0], [16, 0, 0], [16, 0, 16], [0, 0, 16], [8, 24.333, 8]],
+  faces: [[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4], [0, 2, 1], [0, 3, 2]],
+  color: "#2A9D74",
+  ...over,
+});
+const meshDef = (over = {}) => ({ kind: "lowpoly-thing", label: "Lowpoly thing", footprint: { w: 1, d: 1 }, meshes: [pyramid()], ...over });
+
+test("validateKindDef: meshes normalise (rounded vertices, lowercase colour); a mesh-only kind is fine", () => {
+  const k = validateKindDef(meshDef());
+  assert.deepEqual(k.boxes, []);
+  assert.equal(k.meshes.length, 1);
+  assert.deepEqual(k.meshes[0].vertices[4], [8, 24.33, 8]);
+  assert.equal(k.meshes[0].color, "#2a9d74");
+  assert.equal(k.meshes[0].material, undefined, "flat is the default and isn't stored");
+  assert.equal(validateKindDef(meshDef({ meshes: [pyramid({ material: "glossy", emissive: true })] })).meshes[0].material, "glossy");
+  assert.deepEqual(validateKindDef({ ...meshDef(), meshes: undefined, boxes: [{ x: 0, y: 0, z: 0, w: 4, h: 4, d: 4, color: "#ffffff" }] }).meshes, []);
+  const sum = summarizeKind(k);
+  assert.equal(sum.meshes, 1);
+  assert.equal(sum.triangles, 6);
+  assert.equal(sum.height, 24.33);
+});
+
+test("validateKindDef: bad meshes fail with the field named", () => {
+  const bad = (over, re) => assert.throws(() => validateKindDef(meshDef(over)), re);
+  bad({ meshes: [] }, /needs at least one box or mesh/);
+  bad({ meshes: [pyramid({ vertices: [[0, 0, 0], [17, 0, 0], [0, 0, 1]], faces: [[0, 1, 2]] })] }, /meshes\[0\]\.vertices\[1\]\[0\] \(x\) must be a number 0\.\.16/);
+  bad({ meshes: [pyramid({ vertices: [[0, 65, 0], [1, 0, 0], [0, 0, 1]], faces: [[0, 1, 2]] })] }, /\(y\) must be a number 0\.\.64/);
+  bad({ meshes: [pyramid({ faces: [[0, 1, 9]] })] }, /meshes\[0\]\.faces\[0\]\[2\] must be an integer 0\.\.4/);
+  bad({ meshes: [pyramid({ faces: [[0, 1, 1]] })] }, /faces\[0\] repeats a vertex/);
+  bad({ meshes: [pyramid({ faces: [[0, 1]] })] }, /faces\[0\] must be \[a, b, c\]/);
+  bad({ meshes: [pyramid({ vertices: [[0, 0], [1, 0, 0], [0, 0, 1]] })] }, /vertices\[0\] must be \[x, y, z\]/);
+  bad({ meshes: [pyramid({ material: "glass" })] }, /material must be one of flat, glossy/);
+  bad({ meshes: [pyramid({ uv: [] })] }, /unknown field "uv"/);
+  const many = Array.from({ length: 6 }, () => pyramid({ vertices: Array.from({ length: 200 }, (_, i) => [i % 16, 0, Math.floor(i / 16)]), faces: [[0, 1, 2]] }));
+  bad({ meshes: many }, new RegExp(`too many mesh vertices: 1200, max ${MESH_VERTICES_MAX}`));
+});
+
+test("meshTriangles: item frame (cells, centred), one unit normal per triangle, slivers dropped", () => {
+  const k = validateKindDef(meshDef());
+  const t = meshTriangles(k.meshes[0], 1, 1);
+  assert.equal(t.positions.length, 6 * 9);
+  assert.deepEqual(t.positions.slice(0, 3), [-0.5, 0, -0.5]);
+  for (let i = 0; i < t.normals.length; i += 3) assert.ok(Math.abs(Math.hypot(t.normals[i], t.normals[i + 1], t.normals[i + 2]) - 1) < 1e-9);
+  assert.ok(Math.abs(t.normals[1]) > 0.1 && Math.abs(t.normals[1]) < 0.99, "a side of the pyramid leans");
+  const flat = meshTriangles({ vertices: [[0, 0, 0], [8, 0, 0], [16, 0, 0]], faces: [[0, 1, 2]] }, 1, 1);
+  assert.equal(flat.positions.length, 0);
+  const plan = kindGeometryPlan(validateKindDef(meshDef({ meshes: [pyramid(), pyramid({ emissive: true }), pyramid({ material: "glossy" })] })));
+  assert.deepEqual(plan.meshes.map((m) => m.bucket), ["flat", "emissive", "glossy"]);
+  assert.throws(() => kindGeometryPlan({ ...k, meshes: undefined }), /has no meshes list/);
 });
 
 process.on("exit", () => { if (!process.exitCode) console.log(`check-viewer: ${passed} checks passed`); });

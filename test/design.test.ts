@@ -94,7 +94,7 @@ describe("custom kinds", () => {
     [{ kind: "Arcade" }, /slug/],
     [{ kind: "a" }, /slug/],
     [{ footprint: { w: 9, d: 1 } }, /footprint.w/],
-    [{ boxes: [] }, /non-empty/],
+    [{ boxes: [] }, /at least one box or mesh/],
     [{ boxes: [{ x: 10, y: 0, z: 0, w: 8, h: 4, d: 4, color: "#000000" }] }, /sticks out of the footprint along x/],
     [{ boxes: [{ x: 0, y: 0, z: 10, w: 4, h: 4, d: 8, color: "#000000" }] }, /along z/],
     [{ boxes: [{ x: 0, y: 60, z: 0, w: 4, h: 8, d: 4, color: "#000000" }] }, /too tall/],

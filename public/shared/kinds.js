@@ -21,6 +21,11 @@ export const BOX_MATERIALS = Object.freeze(["matte", "glossy", "glass", "screen"
 /** Which way a wedge box's top slopes down (its low edge), in local model space. */
 export const SLOPES = Object.freeze(["+x", "-x", "+z", "-z"]);
 export const LIGHTS_MAX = 4;
+export const MESHES_MAX = 32;
+/** Per kind, across all its meshes. */
+export const MESH_VERTICES_MAX = 1024;
+export const MESH_FACES_MAX = 2048;
+export const MESH_MATERIALS = Object.freeze(["flat", "glossy"]);
 export const LIGHT_INTENSITY_MAX = 4;
 export const LIGHT_RANGE_MAX = 8;
 export const ACTIVITIES = Object.freeze(["coffee", "snack", "read", "play", "water-plants", "whiteboard", "chat", "think", "watch"]);
@@ -112,6 +117,44 @@ function validateBox(b, w, d, where) {
   return box;
 }
 
+const r2 = (v) => Math.round(v * 100) / 100;
+
+/**
+ * Validates one triangle mesh {vertices: [[x, y, z]…], faces: [[a, b, c]…], color, emissive?, material?} in local units
+ * (inside the footprint, 0 ≤ y ≤ 64). Faces index vertices; winding doesn't matter (meshes draw both sides). Flat-shaded.
+ */
+export function validateMesh(m, w, d, where = "mesh") {
+  if (!isObj(m)) fail(`${where} must be {vertices, faces, color, emissive?, material?}`);
+  onlyKeys(m, ["vertices", "faces", "color", "emissive", "material"], where);
+  if (!Array.isArray(m.vertices) || m.vertices.length < 3) fail(`${where}.vertices must be an array of ≥3 [x, y, z]`);
+  if (!Array.isArray(m.faces) || m.faces.length < 1) fail(`${where}.faces must be a non-empty array of [a, b, c] vertex indices`);
+  const vertices = m.vertices.map((v, i) => {
+    if (!Array.isArray(v) || v.length !== 3) fail(`${where}.vertices[${i}] must be [x, y, z]`);
+    return [
+      r2(num(v[0], 0, w * UNITS, `${where}.vertices[${i}][0] (x)`)),
+      r2(num(v[1], 0, HEIGHT_MAX, `${where}.vertices[${i}][1] (y)`)),
+      r2(num(v[2], 0, d * UNITS, `${where}.vertices[${i}][2] (z)`)),
+    ];
+  });
+  const faces = m.faces.map((f, i) => {
+    if (!Array.isArray(f) || f.length !== 3) fail(`${where}.faces[${i}] must be [a, b, c]`);
+    const out = f.map((ix, j) => int(ix, 0, vertices.length - 1, `${where}.faces[${i}][${j}]`));
+    if (new Set(out).size !== 3) fail(`${where}.faces[${i}] repeats a vertex: ${JSON.stringify(out)}`);
+    return out;
+  });
+  if (typeof m.color !== "string" || !COLOR_RE.test(m.color)) fail(`${where}.color must be #rrggbb, got ${JSON.stringify(m.color)}`);
+  const out = { vertices, faces, color: m.color.toLowerCase() };
+  if (m.emissive !== undefined) {
+    if (typeof m.emissive !== "boolean") fail(`${where}.emissive must be true or false`);
+    if (m.emissive) out.emissive = true;
+  }
+  if (m.material !== undefined) {
+    if (!MESH_MATERIALS.includes(m.material)) fail(`${where}.material must be one of ${MESH_MATERIALS.join(", ")}, got ${JSON.stringify(m.material)}`);
+    if (m.material !== "flat") out.material = m.material;
+  }
+  return out;
+}
+
 /** Validates one light {x, y, z, color, intensity?, range?}: a coloured point light in local units. */
 export function validateLight(l, w, d, where = "light") {
   if (!isObj(l)) fail(`${where} must be {x, y, z, color, intensity?, range?}`);
@@ -129,12 +172,12 @@ export function validateLight(l, w, d, where = "light") {
 
 /**
  * Validates a custom kind definition strictly and returns the normalised kind:
- * {kind, label, w, d, layer, boxes, seats, stations, lights, textable, screen, custom: true}.
- * Input: {kind, label, footprint: {w, d}, boxes, layer?, seats?, stations?, lights?, textable?, screen?}.
+ * {kind, label, w, d, layer, boxes, meshes, seats, stations, lights, textable, screen, custom: true}.
+ * Input: {kind, label, footprint: {w, d}, boxes?, meshes?, layer?, seats?, stations?, lights?, textable?, screen?} (≥1 box or mesh).
  */
 export function validateKindDef(def) {
   if (!isObj(def)) fail("kind definition is not an object");
-  onlyKeys(def, ["kind", "label", "footprint", "layer", "boxes", "seats", "stations", "lights", "textable", "screen"], "kind definition");
+  onlyKeys(def, ["kind", "label", "footprint", "layer", "boxes", "meshes", "seats", "stations", "lights", "textable", "screen"], "kind definition");
   if (typeof def.kind !== "string" || !KIND_SLUG_RE.test(def.kind)) fail(`kind must be a slug: lowercase a-z0-9-, starts with a letter, 2-30 chars; got ${JSON.stringify(def.kind)}`);
   if (Object.hasOwn(KINDS, def.kind)) fail(`"${def.kind}" is a built-in kind and can't be redefined — pick another name (built-ins: ${KIND_NAMES.join(", ")})`);
   if (typeof def.label !== "string" || !def.label.trim() || def.label.length > LABEL_MAX) fail(`label must be a non-empty string ≤${LABEL_MAX} chars`);
@@ -145,9 +188,18 @@ export function validateKindDef(def) {
   const d = int(def.footprint.d, 1, FOOTPRINT_MAX, "footprint.d");
   const layer = def.layer ?? "object";
   if (!CUSTOM_LAYERS.includes(layer)) fail(`layer must be one of ${CUSTOM_LAYERS.join(", ")}`);
-  if (!Array.isArray(def.boxes) || def.boxes.length < 1) fail("boxes must be a non-empty array");
-  if (def.boxes.length > BOXES_MAX) fail(`too many boxes: ${def.boxes.length}, max ${BOXES_MAX} per kind`);
-  const boxes = def.boxes.map((b, i) => validateBox(b, w, d, `boxes[${i}]`));
+  const rawBoxes = def.boxes ?? [];
+  const rawMeshes = def.meshes ?? [];
+  if (!Array.isArray(rawBoxes)) fail("boxes must be an array");
+  if (!Array.isArray(rawMeshes)) fail("meshes must be an array");
+  if (rawBoxes.length + rawMeshes.length < 1) fail("a kind needs at least one box or mesh");
+  if (rawBoxes.length > BOXES_MAX) fail(`too many boxes: ${rawBoxes.length}, max ${BOXES_MAX} per kind`);
+  if (rawMeshes.length > MESHES_MAX) fail(`too many meshes: ${rawMeshes.length}, max ${MESHES_MAX} per kind`);
+  const boxes = rawBoxes.map((b, i) => validateBox(b, w, d, `boxes[${i}]`));
+  const meshes = rawMeshes.map((m, i) => validateMesh(m, w, d, `meshes[${i}]`));
+  const verts = meshes.reduce((n, m) => n + m.vertices.length, 0), tris = meshes.reduce((n, m) => n + m.faces.length, 0);
+  if (verts > MESH_VERTICES_MAX) fail(`too many mesh vertices: ${verts}, max ${MESH_VERTICES_MAX} per kind`);
+  if (tris > MESH_FACES_MAX) fail(`too many mesh faces: ${tris}, max ${MESH_FACES_MAX} per kind`);
   const seats = def.seats ?? [];
   const stations = def.stations ?? [];
   if (!Array.isArray(seats) || seats.length > SEATS_MAX) fail(`seats must be an array of ≤${SEATS_MAX}`);
@@ -162,6 +214,7 @@ export function validateKindDef(def) {
     d,
     layer,
     boxes,
+    meshes,
     seats: seats.map((s, i) => validateSeat(s, w, d, `seats[${i}]`)),
     stations: stations.map((s, i) => validateStation(s, w, d, `stations[${i}]`)),
     lights: lights.map((l, i) => validateLight(l, w, d, `lights[${i}]`)),
@@ -181,9 +234,14 @@ export function summarizeKind(k) {
       area.set(b.color, (area.get(b.color) ?? 0) + b.w * b.d + b.w * b.h + b.d * b.h);
       height = Math.max(height, b.y + b.h);
     }
+    for (const m of k.meshes ?? []) {
+      area.set(m.color, (area.get(m.color) ?? 0) + m.faces.length * 8);
+      for (const v of m.vertices) height = Math.max(height, v[1]);
+    }
     Object.assign(out, {
       custom: true,
       boxes: k.boxes.length,
+      ...(k.meshes?.length ? { meshes: k.meshes.length, triangles: k.meshes.reduce((n, m) => n + m.faces.length, 0) } : {}),
       height,
       colors: [...area.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([c]) => c),
     });
