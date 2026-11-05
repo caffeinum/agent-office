@@ -13,6 +13,11 @@ final class Voxel {
         try Self.geometry(bridge.mesh(boxes, ao: ao, floorY: floorY))
     }
 
+    /// voxel.js's mesh data for a box list (to batch before building the geometry).
+    func meshData(_ boxes: [OfficeScene.Box], ao: Bool = true, floorY: Double = 0) throws -> MeshData {
+        try bridge.mesh(boxes, ao: ao, floorY: floorY)
+    }
+
     static func geometry(_ m: MeshData) -> SCNGeometry {
         let n = m.pos.count / 3
         precondition(m.nor.count == n * 3 && m.col.count == n * 3 && m.uv.count == n * 2, "voxel mesh attribute lengths disagree")

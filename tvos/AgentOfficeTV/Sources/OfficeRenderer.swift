@@ -282,57 +282,86 @@ final class OfficeRenderer: NSObject {
 
     // MARK: furniture
 
+    /// All the furniture batched by material: every item's parts are moved into the room and merged into one mesh per
+    /// (role, texture, tint, zone dimming), so a room of 70 items draws in a few dozen calls instead of hundreds.
     private func buildFurniture(_ s: OfficeScene) {
         furniture.childNodes.forEach { $0.removeFromParentNode() }
         glows = []
         guard let voxel else { preconditionFailure("renderer has no bridge") }
-        var cache: [String: [(role: String, map: String?, geo: SCNGeometry)]] = [:]
+        var parts: [String: [(role: String, map: String?, mesh: MeshData)]] = [:]
+        var batches: [String: (mat: SCNMaterial, pos: [Float], nor: [Float], col: [Float], uv: [Float], idx: [Int32])] = [:]
+        var order: [String] = []
         do {
             for item in s.items {
                 guard let kind = s.kinds[item.kind] else { preconditionFailure("scene has item \(item.id) of unknown kind \(item.kind)") }
-                if cache[item.kind] == nil {
-                    cache[item.kind] = try kind.parts.map { p in
-                        (p.role, p.map, try p.mesh.map(Voxel.geometry) ?? voxel.geometry(p.boxes, ao: !["glow", "nightGlow", "glass"].contains(p.role)))
+                if parts[item.kind] == nil {
+                    parts[item.kind] = try kind.parts.map { p in
+                        (p.role, p.map, try p.mesh ?? voxel.meshData(p.boxes, ao: !["glow", "nightGlow", "glass"].contains(p.role)))
                     }
                 }
-                let node = try model(cache[item.kind]!, kind: kind, item: item, look: s.look, voxel: voxel)
-                node.position = SCNVector3(item.x, 0, item.z)
-                node.eulerAngles.y = Float(item.yaw)
-                furniture.addChildNode(node)
+                // theme zones dim the whole item, baked in: furniture doesn't move
+                let dim = Self.zoneShaders ? 1 : Self.zoneDim(s.look.zones, x: item.x, z: item.z)
+                let accentCss = item.color ?? s.look.kindColors[item.kind] ?? kind.defaultColor ?? "#ffffff"
+                let c = Float(cos(item.yaw)), sn = Float(sin(item.yaw)), tx = Float(item.x), tz = Float(item.z)
+                for p in parts[item.kind]! {
+                    let tint = p.role == "accent" ? accentCss : ["glow", "nightGlow"].contains(p.role) ? "\(kind.glowColor ?? "")|\(kind.glowLamp)" : ""
+                    let key = "\(p.role)|\(p.map ?? "")|\(tint)|\(dim)"
+                    if batches[key] == nil {
+                        let mat = try material(role: p.role, map: p.map, accent: cssColor(accentCss), kind: kind, look: s.look, voxel: voxel)
+                        if dim != 1 && mat.lightingModel != .constant { mat.diffuse.intensity = CGFloat(dim) }
+                        batches[key] = (mat, [], [], [], [], [])
+                        order.append(key)
+                    }
+                    let m = p.mesh
+                    let base = Int32(batches[key]!.pos.count / 3)
+                    var pos = [Float](), nor = [Float]()
+                    pos.reserveCapacity(m.pos.count); nor.reserveCapacity(m.nor.count)
+                    // y rotation by yaw (three's rotation.y: x' = x cos + z sin, z' = -x sin + z cos), then the item's spot
+                    for v in stride(from: 0, to: m.pos.count, by: 3) {
+                        let x = m.pos[v], y = m.pos[v + 1], z = m.pos[v + 2]
+                        pos += [x * c + z * sn + tx, y, -x * sn + z * c + tz]
+                        let nx = m.nor[v], ny = m.nor[v + 1], nz = m.nor[v + 2]
+                        nor += [nx * c + nz * sn, ny, -nx * sn + nz * c]
+                    }
+                    batches[key]!.pos += pos
+                    batches[key]!.nor += nor
+                    batches[key]!.col += m.col
+                    batches[key]!.uv += m.uv
+                    batches[key]!.idx += m.idx.map { $0 + base }
+                }
             }
         } catch {
             preconditionFailure("furniture build failed: \(error)")
         }
+        for key in order {
+            let b = batches[key]!
+            let g = Voxel.geometry(MeshData(pos: b.pos, nor: b.nor, col: b.col, uv: b.uv, idx: b.idx))
+            g.firstMaterial = b.mat
+            furniture.addChildNode(SCNNode(geometry: g))
+        }
     }
 
-    /// One item: each part's shared mesh with the web's material for its role (scene.js builtinAssets/customAssets).
-    private func model(_ parts: [(role: String, map: String?, geo: SCNGeometry)], kind: OfficeScene.Kind, item: OfficeScene.Item, look: OfficeScene.Look, voxel: Voxel) throws -> SCNNode {
-        let node = SCNNode()
-        let accent = cssColor(item.color ?? look.kindColors[item.kind] ?? kind.defaultColor ?? "#ffffff")
+    /// The web's material for a part's role (scene.js builtinAssets/customAssets).
+    private func material(role: String, map: String?, accent: UIColor, kind: OfficeScene.Kind, look: OfficeScene.Look, voxel: Voxel) throws -> SCNMaterial {
         let grain = try voxel.texture("grain")
-        for p in parts {
-            let mat: SCNMaterial = switch p.role {
-            case "accent": voxel.material(map: try voxel.texture(p.map ?? "grain"), tint: accent, roughness: p.map == "rug" ? 1 : 0.82)
-            case "finish": voxel.material(map: grain, tint: cssColor(look.desk.wood), roughness: 0.7)
-            case "rail": voxel.material(map: grain, tint: cssColor(look.desk.rail), roughness: 0.6)
-            case "glow": voxel.glow(map: try p.map.map { try voxel.texture($0) }, tint: kind.glowColor.map(cssColor) ?? .white)
-            case "glass": voxel.material(map: nil, roughness: 0.08)
-            case "flat", "meshFlat": voxel.material(map: nil, roughness: 0.7)
-            case "meshGlossy": voxel.material(map: nil, roughness: 0.28)
-            case "meshGlow", "nightGlow", "meshNightGlow": voxel.glow(map: nil, tint: .white)
-            default: voxel.material(map: grain)
-            }
-            if p.role == "glass" { mat.transparency = 0.38; mat.writesToDepthBuffer = false }
-            if ["glow", "meshGlow", "nightGlow", "meshNightGlow"].contains(p.role) {
-                glows.append((mat, kind.glowLamp, p.map == "window", p.role == "nightGlow" || p.role == "meshNightGlow"))
-            }
-            // triangle meshes are drawn from both sides, like the web's DoubleSide mesh materials
-            if p.role.hasPrefix("mesh") { mat.isDoubleSided = true }
-            let g = p.geo.copy() as! SCNGeometry
-            g.firstMaterial = mat
-            node.addChildNode(SCNNode(geometry: g))
+        let mat: SCNMaterial = switch role {
+        case "accent": voxel.material(map: try voxel.texture(map ?? "grain"), tint: accent, roughness: map == "rug" ? 1 : 0.82)
+        case "finish": voxel.material(map: grain, tint: cssColor(look.desk.wood), roughness: 0.7)
+        case "rail": voxel.material(map: grain, tint: cssColor(look.desk.rail), roughness: 0.6)
+        case "glow": voxel.glow(map: try map.map { try voxel.texture($0) }, tint: kind.glowColor.map(cssColor) ?? .white)
+        case "glass": voxel.material(map: nil, roughness: 0.08)
+        case "flat", "meshFlat": voxel.material(map: nil, roughness: 0.7)
+        case "meshGlossy": voxel.material(map: nil, roughness: 0.28)
+        case "meshGlow", "nightGlow", "meshNightGlow": voxel.glow(map: nil, tint: .white)
+        default: voxel.material(map: grain)
         }
-        return node
+        if role == "glass" { mat.transparency = 0.38; mat.writesToDepthBuffer = false }
+        if ["glow", "meshGlow", "nightGlow", "meshNightGlow"].contains(role) {
+            glows.append((mat, kind.glowLamp, map == "window", role == "nightGlow" || role == "meshNightGlow"))
+        }
+        // triangle meshes are drawn from both sides, like the web's DoubleSide mesh materials
+        if role.hasPrefix("mesh") { mat.isDoubleSided = true }
+        return mat
     }
 
     // MARK: desk screens
@@ -435,8 +464,14 @@ final class OfficeRenderer: NSObject {
         }
         let objects = s.items.filter { !["rug", "window", "poster", "whiteboard", "sign"].contains($0.kind) }.count
         let density = min(1, Double(objects) / (Double(s.grid.w * s.grid.d) * 0.12))
-        if Self.fillScale > 0 { lampLights.addChildNode(omni(color: cssColor(mood.fill), intensity: t.point * (2.2 + 1.6 * density) * 1.2 * Self.fillScale, reach: hypot(Double(s.grid.w), Double(s.grid.d)) + 9,
-                                     at: SCNVector3(Double(s.grid.w) / 2, 9, Double(s.grid.d) / 2))) }
+        // the web's soft ceiling fill, folded into the ambient light: as an omni light over the whole room it cost the TV
+        // ~8 fps for a nearly even glow (AO_FILL > 0 brings the omni back)
+        if Self.fillScale > 0 {
+            lampLights.addChildNode(omni(color: cssColor(mood.fill), intensity: t.point * (2.2 + 1.6 * density) * 1.2 * Self.fillScale, reach: hypot(Double(s.grid.w), Double(s.grid.d)) + 9,
+                                         at: SCNVector3(Double(s.grid.w) / 2, 9, Double(s.grid.d) / 2)))
+        } else {
+            fill.light?.intensity = (fill.light?.intensity ?? 0) + t.point * (2.2 + 1.6 * density) * Self.fillAmbient
+        }
     }
 
     /// A three.js PointLight(color, intensity, distance) as a SceneKit omni light fading out at `reach`.
@@ -497,7 +532,7 @@ final class OfficeRenderer: NSObject {
 
     private func shadeZones(_ zones: [OfficeScene.Zone]) {
         guard !zones.isEmpty else { return }
-        for n in furniture.childNodes + agents.values.map(\.node) {
+        for n in agents.values.map(\.node) {  // furniture is dimmed when it is batched (buildFurniture)
             let k = CGFloat(Self.zoneDim(zones, x: Double(n.position.x), z: Double(n.position.z)))
             n.enumerateHierarchy { c, _ in
                 for m in c.geometry?.materials ?? [] where m.lightingModel != .constant && m.diffuse.intensity != k { m.diffuse.intensity = k }
@@ -568,7 +603,8 @@ final class OfficeRenderer: NSObject {
             ctx.cgContext.drawRadialGradient(g, startCenter: CGPoint(x: 64, y: 64), startRadius: 0, endCenter: CGPoint(x: 64, y: 64), endRadius: 64, options: [])
         }
     }()
-    private static let fillScale = Double(ProcessInfo.processInfo.environment["AO_FILL"] ?? "10") ?? 10
+    private static let fillScale = Double(ProcessInfo.processInfo.environment["AO_FILL"] ?? "0") ?? 0
+    private static let fillAmbient = Double(ProcessInfo.processInfo.environment["AO_FILL_AMBIENT"] ?? "10") ?? 10
 
     private func mix(_ a: UIColor, _ b: UIColor) -> UIColor {
         var (ar, ag, ab, aa, br, bg, bb, ba): (CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0, 0, 0, 0, 0)
