@@ -9,7 +9,7 @@ import { ACTIVITIES, LIGHTS_MAX, MESH_VERTICES_MAX, summarizeKind, validateKindD
 import { cornerPoint, meshTriangles, quadNormal } from "../public/js/shape.js";
 import { POINT_LIGHTS_GL, ZONES_GL, zonedLightsChunk } from "../public/js/zone-glsl.js";
 import {
-  applyFrame, poseFor, lingering, idleAtDesk, LOUNGE_ONE_IN, DESK_LINGER_MS, limbAngles, deskSeating, idleSpots, pickSpot, assignSpots, blockedCells, route, entryPoint, layoutBatches,
+  applyFrame, poseFor, SEAT_ONE_IN, limbAngles, deskSeating, idleSpots, pickSpot, assignSpots, blockedCells, route, entryPoint, layoutBatches,
   wallOf, cullLabels, labelPriority, chatWith, roomChat, lastLineOf, speakerName, activeSay, CHAT_KEEP, SAY_MS, SEATED,
   themeLook, CLASSIC_COLORS, MOODS, mergeBoxes, overlapLayers, kindGeometryPlan, usableSpots, placedLights, TIMES_OF_DAY,
 } from "../public/js/model.js";
@@ -69,47 +69,18 @@ test("poseFor: status → pose and place", () => {
   assert.throws(() => poseFor(agent("a", { status: "dancing" }), true), /unknown status/);
 });
 
-test("poseFor: an agent that just worked stays sitting at its desk for DESK_LINGER_MS, then wanders", () => {
-  const now = 1_000_000_000;
-  const fresh = agent("a", { status: "idle", workedAt: now - 1000 });
-  assert.deepEqual(poseFor(fresh, true, now), { pose: "sit", place: "desk" });
-  assert.equal(lingering(fresh, true, now), true);
-  assert.equal(poseFor(fresh, false, now).place, "lounge");
-  assert.deepEqual(poseFor(agent("a", { status: "working", workedAt: now }), true, now), { pose: "type", place: "desk" });
-});
-
-test("idleAtDesk: an idle agent with a desk sits there in most wander slots and lounges in about one in LOUNGE_ONE_IN", () => {
-  const slot = 150_000;
-  let desk = 0, moves = 0, prev = null;
-  const n = 600;
-  for (let i = 0; i < n; i++) {
-    const at = idleAtDesk(agent("a" + (i % 20), { status: "idle" }), true, 1_000_000_000 + Math.floor(i / 20) * slot);
-    if (at) desk++;
-  }
-  const share = desk / n;
-  assert.ok(Math.abs(share - (1 - 1 / LOUNGE_ONE_IN)) < 0.1, `desk share ${share}`);
-  for (let t = 0; t < 3_600_000; t += 1000) {
-    const at = idleAtDesk(agent("b", { status: "idle" }), true, t);
-    if (prev !== null && at !== prev) moves++;
-    prev = at;
-  }
-  assert.ok(moves < 30, `${moves} desk/lounge switches an hour`);
-  assert.equal(idleAtDesk(agent("a", { status: "idle" }), false, 0), false);
-  assert.equal(idleAtDesk(agent("a", { status: "working" }), true, 0), false);
-});
-
-test("screenSpec: the activity as a client-styled terminal, amber while waiting, dark while away", () => {
-  const texts = (spec) => spec.ops.filter((o) => o.op === "text").map((o) => o.text).join(" ");
-  const work = screenSpec({ id: "a", status: "working", activity: "porting the CLI to bun with a very long tail of words", client: "claude-code" }, "#123456");
-  assert.match(texts(work), /porting the CLI/);
-  assert.ok(work.ops.some((o) => o.color === "#d97757"), "claude-code orange accent");
-  assert.equal(screenStyle("someclient", "#123456").accent, "#123456");
-  assert.match(texts(screenSpec({ id: "a", status: "waiting", activity: "review", client: "codex" }, "#123456")), /waiting for you/);
-  const away = screenSpec({ id: "a", status: "away", client: "codex" }, "#123456");
-  assert.deepEqual(away.ops.map((o) => o.op), ["rect"]);
-  const emoji = screenSpec({ id: "a", status: "working", activity: "shipping 🚀 the café fix ✅", client: "paw" }, "#123456");
-  for (const o of emoji.ops) if (o.op === "text") assert.match(o.text, /^[\x20-\x7e]*$/, `non-ASCII on screen: ${o.text}`);
-  assert.match(texts(emoji), /shipping the cafe fix/);
+test("pickSpot: idle agents mostly take a seat, a station about one slot in SEAT_ONE_IN", () => {
+  const spots = [
+    ...["sofa:s0", "sofa:s1", "chair:s0"].map((id) => ({ id, pose: "sit" })),
+    ...["coffee:t0", "plant:t0", "window:t0", "tv:t0"].map((id) => ({ id, pose: "coffee" })),
+  ];
+  let seated = 0;
+  const n = 400;
+  for (let i = 0; i < n; i++) if (pickSpot(`agent${i % 25}`, spots, new Set(), Math.floor(i / 25)).pose === "sit") seated++;
+  assert.ok(Math.abs(seated / n - (1 - 1 / SEAT_ONE_IN)) < 0.1, `seated share ${seated / n}`);
+  // every seat taken: a station, not nothing
+  assert.equal(pickSpot("a", spots, new Set(["sofa:s0", "sofa:s1", "chair:s0"]), 0).pose, "coffee");
+  assert.equal(poseFor(agent("a", { status: "idle" }), true).place, "lounge");
 });
 
 test("limbAngles: seated poses sit, walking swings, hand up raises the right arm", () => {

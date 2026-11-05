@@ -830,17 +830,7 @@
         return state2;
     }
   }
-  var DESK_LINGER_MS = 10 * 6e4;
-  function lingering(agent, hasDesk, now) {
-    return agent.status === "idle" && hasDesk && agent.workedAt != null && now - agent.workedAt < DESK_LINGER_MS;
-  }
-  var LOUNGE_ONE_IN = 2;
-  function idleAtDesk(agent, hasDesk, now) {
-    if (agent.status !== "idle" || !hasDesk) return false;
-    return lingering(agent, hasDesk, now) || hashStr(`${agent.id}:desk:${wanderSalt(agent.id, now)}`) % LOUNGE_ONE_IN !== 0;
-  }
-  function poseFor(agent, hasDesk, now = Date.now()) {
-    if (idleAtDesk(agent, hasDesk, now)) return { pose: "sit", place: "desk" };
+  function poseFor(agent, hasDesk) {
     switch (agent.status) {
       case "working":
         return hasDesk ? { pose: "type", place: "desk" } : { pose: "stand", place: "lounge" };
@@ -1027,8 +1017,18 @@
     const period = 8e4 + hashStr(`${agentId}:period`) % 5e4;
     return Math.floor((now + hashStr(`${agentId}:phase`) % period) / period);
   }
+  var SEAT_ONE_IN = 4;
   function pickSpot(agentId, spots, taken, salt = 0, avoid = null) {
     if (!spots.length) return null;
+    const sit = hashStr(`${agentId}:seat:${salt}`) % SEAT_ONE_IN !== 0;
+    const preferred = spots.filter((s) => s.pose === "sit" === sit);
+    if (preferred.length) {
+      const at = hashStr(`${agentId}:${salt}`) % preferred.length;
+      for (let i = 0; i < preferred.length; i++) {
+        const s = preferred[(at + i) % preferred.length];
+        if (!taken.has(s.id) && s.id !== avoid) return s;
+      }
+    }
     const start = hashStr(`${agentId}:${salt}`) % spots.length;
     for (let i = 0; i < spots.length; i++) {
       const s = spots[(start + i) % spots.length];
@@ -2238,13 +2238,13 @@
       }
     }
     const free = spots.filter((s) => ![...chosen.values()].includes(s));
-    const wanters = state.agents.filter((a) => !chosen.has(a.id) && poseFor(a, seating.has(a.id), now).place === "lounge").map((a) => ({ id: a.id, joinedAt: a.joinedAt, salt: wanderSalt(a.id, now), current: null, restless: false }));
+    const wanters = state.agents.filter((a) => !chosen.has(a.id) && poseFor(a, seating.has(a.id)).place === "lounge").map((a) => ({ id: a.id, joinedAt: a.joinedAt, salt: wanderSalt(a.id, now), current: null, restless: false }));
     const assign = assignSpots(wanters, free);
     const out = /* @__PURE__ */ new Map();
     for (const a of state.agents) {
       const desk = seating.get(a.id);
       const pick = chosen.get(a.id);
-      const { pose, place } = poseFor(a, !!desk, now);
+      const { pose, place } = poseFor(a, !!desk);
       if (pick === "desk" || place === "desk" && desk && !pick) {
         const s = seatOf(desk);
         out.set(a.id, { key: `desk:${desk.id}`, x: s.x, z: s.z, yaw: s.yaw, pose: pick === "desk" && a.status === "idle" ? "sit" : pose, seatY: SEAT_Y });

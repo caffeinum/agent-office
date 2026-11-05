@@ -121,29 +121,8 @@ export function applyFrame(state, frame) {
 
 /* ── poses ──────────────────────────────────────────────────────────────────────────────────── */
 
-/** How long an agent stays sitting at its desk after it was last working or waiting, before it wanders off. */
-export const DESK_LINGER_MS = 10 * 60_000;
-
-/** Idle, but still sitting at its desk because it worked a moment ago. */
-export function lingering(agent, hasDesk, now) {
-  return agent.status === "idle" && hasDesk && agent.workedAt != null && now - agent.workedAt < DESK_LINGER_MS;
-}
-
-/** Of an idle agent's wander slots, how many in LOUNGE_ONE_IN it spends at a seat or station rather than its own desk. */
-export const LOUNGE_ONE_IN = 2;
-
-/**
- * An idle agent with a desk mostly sits there: right after work, and in most wander slots; in about one slot in
- * LOUNGE_ONE_IN it goes to a seat or station instead. A calm office, where walking is the exception.
- */
-export function idleAtDesk(agent, hasDesk, now) {
-  if (agent.status !== "idle" || !hasDesk) return false;
-  return lingering(agent, hasDesk, now) || hashStr(`${agent.id}:desk:${wanderSalt(agent.id, now)}`) % LOUNGE_ONE_IN !== 0;
-}
-
 /** Where an agent should be and what it does there: {pose, place: "desk" | "lounge"}. */
-export function poseFor(agent, hasDesk, now = Date.now()) {
-  if (idleAtDesk(agent, hasDesk, now)) return { pose: "sit", place: "desk" };
+export function poseFor(agent, hasDesk) {
   switch (agent.status) {
     case "working": return hasDesk ? { pose: "type", place: "desk" } : { pose: "stand", place: "lounge" };
     case "waiting": return hasDesk ? { pose: "handup", place: "desk" } : { pose: "wave", place: "lounge" };
@@ -353,8 +332,22 @@ export function wanderSalt(agentId, now) {
   return Math.floor((now + (hashStr(`${agentId}:phase`) % period)) / period);
 }
 
+/** One wander slot in SEAT_ONE_IN goes to a station (coffee, plants, window…); the rest to a seat when one is free. */
+export const SEAT_ONE_IN = 4;
+
 export function pickSpot(agentId, spots, taken, salt = 0, avoid = null) {
   if (!spots.length) return null;
+  // idle agents mostly sit (sofas, chairs, beanbags); in about one slot in SEAT_ONE_IN they do a station instead;
+  // if every place of that sort is taken, any free spot
+  const sit = hashStr(`${agentId}:seat:${salt}`) % SEAT_ONE_IN !== 0;
+  const preferred = spots.filter((s) => (s.pose === "sit") === sit);
+  if (preferred.length) {
+    const at = hashStr(`${agentId}:${salt}`) % preferred.length;
+    for (let i = 0; i < preferred.length; i++) {
+      const s = preferred[(at + i) % preferred.length];
+      if (!taken.has(s.id) && s.id !== avoid) return s;
+    }
+  }
   const start = hashStr(`${agentId}:${salt}`) % spots.length;
   for (let i = 0; i < spots.length; i++) {
     const s = spots[(start + i) % spots.length];
