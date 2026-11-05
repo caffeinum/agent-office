@@ -1,4 +1,4 @@
-// What an agent's desk monitor shows, as a list of paint ops (rects and monospace text) on a small pixel screen:
+// What an agent's desk monitor shows, as a list of paint ops (rects and plain-ASCII monospace text) on a small pixel screen:
 // the activity as a terminal in its client's colours while working, an amber prompt while waiting, a dim screensaver
 // while idle, dark while away. Pure, so the browser (canvas) and the Apple TV (CoreGraphics) paint the same picture.
 
@@ -11,11 +11,11 @@ const CHAR = 0.6;
 
 /** Terminal looks per client (matched on the client name); `null` accent means the agent's own colour. */
 const STYLES = [
-  { match: /claude/i, bg: "#1f1b16", bar: "#2b241d", fg: "#eee6da", accent: "#d97757", dim: "#8a7d6c", prompt: "✻" },
-  { match: /codex|openai/i, bg: "#0b0f0c", bar: "#141c16", fg: "#d7f5df", accent: "#4ade80", dim: "#5e7c66", prompt: "›" },
-  { match: /cursor/i, bg: "#1e1e24", bar: "#26262e", fg: "#e4e4ee", accent: "#8b9cff", dim: "#6d6d80", prompt: "⌘", tree: true },
-  { match: /gemini/i, bg: "#0f1420", bar: "#172033", fg: "#dbe6ff", accent: "#8ab4f8", dim: "#5f6f8f", prompt: "✦" },
-  { match: /paw/i, bg: "#17151f", bar: "#211d2c", fg: "#ece6ff", accent: "#c084fc", dim: "#77708c", prompt: "🐾" },
+  { match: /claude/i, bg: "#1f1b16", bar: "#2b241d", fg: "#eee6da", accent: "#d97757", dim: "#8a7d6c", prompt: "*" },
+  { match: /codex|openai/i, bg: "#0b0f0c", bar: "#141c16", fg: "#d7f5df", accent: "#4ade80", dim: "#5e7c66", prompt: ">" },
+  { match: /cursor/i, bg: "#1e1e24", bar: "#26262e", fg: "#e4e4ee", accent: "#8b9cff", dim: "#6d6d80", prompt: "$", tree: true },
+  { match: /gemini/i, bg: "#0f1420", bar: "#172033", fg: "#dbe6ff", accent: "#8ab4f8", dim: "#5f6f8f", prompt: "+" },
+  { match: /paw/i, bg: "#17151f", bar: "#211d2c", fg: "#ece6ff", accent: "#c084fc", dim: "#77708c", prompt: "~" },
 ];
 const DEFAULT_STYLE = { bg: "#1b2230", bar: "#232c3d", fg: "#e6ebf3", accent: null, dim: "#6c7891", prompt: "$" };
 
@@ -23,6 +23,9 @@ export function screenStyle(client, hueCss) {
   const s = STYLES.find((x) => x.match.test(client ?? "")) ?? DEFAULT_STYLE;
   return { ...s, accent: s.accent ?? hueCss };
 }
+
+/** Plain printable ASCII only: the screen is a blocky monospace terminal, emoji and symbols don't belong on it. */
+export const ascii = (t) => t.normalize("NFKD").replace(/[^\x20-\x7e]/g, "").replace(/\s+/g, " ").trim();
 
 /** Greedy word wrap to `cols` characters, at most `max` lines (the last one ellipsised if cut). */
 function wrap(text, cols, max) {
@@ -67,7 +70,7 @@ export function screenSpec(agent, hueCss) {
   // title bar: three dots and the client name
   rect(0, 0, W, 20, st.bar);
   for (const [i, c] of ["#ff5f57", "#febc2e", "#28c840"].entries()) rect(8 + i * 12, 7, 7, 7, c);
-  text(50, 15, 12, st.dim, agent.client ?? "agent");
+  text(50, 15, 12, st.dim, ascii(agent.client ?? "") || "agent");
   let x0 = 10;
   if (st.tree) {
     // an editor's file tree down the left
@@ -77,7 +80,7 @@ export function screenSpec(agent, hueCss) {
   }
   const size = 19, cols = Math.floor((W - x0 - 8) / (size * CHAR));
   const waiting = agent.status === "waiting";
-  const what = (agent.activity ?? "").trim() || (waiting ? "needs input" : "working");
+  const what = ascii(agent.activity ?? "") || (waiting ? "needs input" : "working");
   const lines = wrap(what, cols - 2, 3);
   let y = 44;
   for (const [i, l] of lines.entries()) {

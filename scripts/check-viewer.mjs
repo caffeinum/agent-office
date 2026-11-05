@@ -106,6 +106,9 @@ test("screenSpec: the activity as a client-styled terminal, amber while waiting,
   assert.match(texts(screenSpec({ id: "a", status: "waiting", activity: "review", client: "codex" }, "#123456")), /waiting for you/);
   const away = screenSpec({ id: "a", status: "away", client: "codex" }, "#123456");
   assert.deepEqual(away.ops.map((o) => o.op), ["rect"]);
+  const emoji = screenSpec({ id: "a", status: "working", activity: "shipping 🚀 the café fix ✅", client: "paw" }, "#123456");
+  for (const o of emoji.ops) if (o.op === "text") assert.match(o.text, /^[\x20-\x7e]*$/, `non-ASCII on screen: ${o.text}`);
+  assert.match(texts(emoji), /shipping the cafe fix/);
 });
 
 test("limbAngles: seated poses sit, walking swings, hand up raises the right arm", () => {

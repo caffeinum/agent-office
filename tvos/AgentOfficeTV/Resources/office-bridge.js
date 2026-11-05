@@ -1865,17 +1865,18 @@
   var SCREEN_H = 150;
   var CHAR = 0.6;
   var STYLES2 = [
-    { match: /claude/i, bg: "#1f1b16", bar: "#2b241d", fg: "#eee6da", accent: "#d97757", dim: "#8a7d6c", prompt: "\u273B" },
-    { match: /codex|openai/i, bg: "#0b0f0c", bar: "#141c16", fg: "#d7f5df", accent: "#4ade80", dim: "#5e7c66", prompt: "\u203A" },
-    { match: /cursor/i, bg: "#1e1e24", bar: "#26262e", fg: "#e4e4ee", accent: "#8b9cff", dim: "#6d6d80", prompt: "\u2318", tree: true },
-    { match: /gemini/i, bg: "#0f1420", bar: "#172033", fg: "#dbe6ff", accent: "#8ab4f8", dim: "#5f6f8f", prompt: "\u2726" },
-    { match: /paw/i, bg: "#17151f", bar: "#211d2c", fg: "#ece6ff", accent: "#c084fc", dim: "#77708c", prompt: "\u{1F43E}" }
+    { match: /claude/i, bg: "#1f1b16", bar: "#2b241d", fg: "#eee6da", accent: "#d97757", dim: "#8a7d6c", prompt: "*" },
+    { match: /codex|openai/i, bg: "#0b0f0c", bar: "#141c16", fg: "#d7f5df", accent: "#4ade80", dim: "#5e7c66", prompt: ">" },
+    { match: /cursor/i, bg: "#1e1e24", bar: "#26262e", fg: "#e4e4ee", accent: "#8b9cff", dim: "#6d6d80", prompt: "$", tree: true },
+    { match: /gemini/i, bg: "#0f1420", bar: "#172033", fg: "#dbe6ff", accent: "#8ab4f8", dim: "#5f6f8f", prompt: "+" },
+    { match: /paw/i, bg: "#17151f", bar: "#211d2c", fg: "#ece6ff", accent: "#c084fc", dim: "#77708c", prompt: "~" }
   ];
   var DEFAULT_STYLE = { bg: "#1b2230", bar: "#232c3d", fg: "#e6ebf3", accent: null, dim: "#6c7891", prompt: "$" };
   function screenStyle(client, hueCss) {
     const s = STYLES2.find((x) => x.match.test(client ?? "")) ?? DEFAULT_STYLE;
     return { ...s, accent: s.accent ?? hueCss };
   }
+  var ascii = (t) => t.normalize("NFKD").replace(/[^\x20-\x7e]/g, "").replace(/\s+/g, " ").trim();
   function wrap(text, cols, max) {
     const words = text.split(/\s+/).filter(Boolean);
     const lines = [];
@@ -1912,7 +1913,7 @@
     rect(0, 0, W, H, st.bg);
     rect(0, 0, W, 20, st.bar);
     for (const [i, c] of ["#ff5f57", "#febc2e", "#28c840"].entries()) rect(8 + i * 12, 7, 7, 7, c);
-    text(50, 15, 12, st.dim, agent.client ?? "agent");
+    text(50, 15, 12, st.dim, ascii(agent.client ?? "") || "agent");
     let x0 = 10;
     if (st.tree) {
       rect(0, 18, 46, H - 18, st.bar);
@@ -1921,7 +1922,7 @@
     }
     const size = 19, cols = Math.floor((W - x0 - 8) / (size * CHAR));
     const waiting = agent.status === "waiting";
-    const what = (agent.activity ?? "").trim() || (waiting ? "needs input" : "working");
+    const what = ascii(agent.activity ?? "") || (waiting ? "needs input" : "working");
     const lines = wrap(what, cols - 2, 3);
     let y = 44;
     for (const [i, l] of lines.entries()) {
