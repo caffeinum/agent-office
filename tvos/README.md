@@ -33,7 +33,7 @@ Remote (Siri Remote clickpad):
 | click select | follow the first agent | stop following |
 | click ▲ | home view | home view |
 | click ▼ | room chat on / off | room chat on / off |
-| play/pause | agent list on / off | this agent's chat on / off |
+| play/pause | agent list on / off (▲▼ move through it, select follows) | this agent's chat on / off |
 | hold play/pause | hide all UI | hide all UI |
 | back | close panel, then "press back again to exit" | close panel, then stop following |
 | hold select | forget the office link | forget the office link |

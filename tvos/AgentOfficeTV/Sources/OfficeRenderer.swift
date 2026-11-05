@@ -391,6 +391,7 @@ final class OfficeRenderer: NSObject {
         follow = order[((i ?? (by > 0 ? -1 : 0)) + by + order.count) % order.count]
     }
 
+    func follow(_ id: String) { follow = id }
     func toggleFollow() { follow = follow == nil ? last?.agents.first?.id : nil }
     func unfollow() { follow = nil }
 

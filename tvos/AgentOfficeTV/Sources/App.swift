@@ -71,6 +71,8 @@ final class OfficeModel: ObservableObject {
     @Published var following: String?
     @Published var clean = false
     @Published var exitHint = false
+    /// The highlighted row while the agent list is open.
+    @Published var cursor = 0
     let renderer = OfficeRenderer()
     private var exitHintUntil: Date = .distantPast
 
@@ -90,6 +92,7 @@ final class OfficeModel: ObservableObject {
         renderer.onFollow = { [weak self] id in
             guard let self else { return }
             following = id
+            if let id, let i = agents.firstIndex(where: { $0.id == id }) { cursor = i }
             if case .chat(let a?) = panel, a != id { panel = id.map { .chat(agent: $0) } ?? .none }
         }
         connection = Connection(link: link, onFrame: { [weak self] in self?.receive($0) }, onState: { [weak self] in self?.status = $0 })
@@ -107,6 +110,15 @@ final class OfficeModel: ObservableObject {
     /// agent list (or the followed agent's chat), back closes things one at a time and then exits on a second press.
     func press(_ type: UIPress.PressType) {
         renderer.noteInput()
+        if panel == .agents, !agents.isEmpty, [.upArrow, .downArrow, .select].contains(type) {
+            switch type {
+            case .upArrow: cursor = max(0, cursor - 1)
+            case .downArrow: cursor = min(agents.count - 1, cursor + 1)
+            default: renderer.follow(agents[cursor].id)
+            }
+            exitHint = false
+            return
+        }
         switch type {
         case .leftArrow: renderer.step(-1)
         case .rightArrow: renderer.step(1)
@@ -116,6 +128,7 @@ final class OfficeModel: ObservableObject {
         case .playPause:
             let want: Panel = following.map { .chat(agent: $0) } ?? .agents
             panel = panel == want ? .none : want
+            if panel == .agents { cursor = following.flatMap { id in agents.firstIndex { $0.id == id } } ?? 0 }
         case .menu:
             if clean { clean = false }
             else if panel != .none { panel = .none }
@@ -194,7 +207,7 @@ struct OfficeScreen: View {
             if !model.clean {
                 switch model.panel {
                 case .agents:
-                    AgentsPanel(title: model.title, status: model.status, agents: model.agents, following: model.following)
+                    AgentsPanel(title: model.title, status: model.status, agents: model.agents, following: model.following, cursor: model.cursor)
                 case .chat(let id):
                     ChatPanel(agent: id.flatMap { id in model.agents.first { $0.id == id } }, chat: model.chat)
                 case .none:
@@ -226,38 +239,42 @@ struct OfficeScreen: View {
 private let statusDot: [String: Color] = ["working": Color(red: 0.31, green: 0.75, blue: 0.48), "idle": Color(red: 0.56, green: 0.65, blue: 0.79),
                                           "waiting": Color(red: 0.95, green: 0.70, blue: 0.24), "away": Color(red: 0.71, green: 0.67, blue: 0.64)]
 
-/// The web sidebar's roster: office name, live state, who is here with their status. The followed agent is marked.
-/// It always fits the screen: rows flow into as many columns as the height needs (the remote can't scroll it).
+/// The web sidebar's roster: office name, live state, who is here with their status. ▲▼ move the highlight (the list
+/// scrolls to keep it in view), select follows the highlighted agent; the followed one is outlined in its colour.
 struct AgentsPanel: View {
     let title: String
     let status: String
     let agents: [OfficeScene.Agent]
     let following: String?
-    private static let rowH: CGFloat = 58, colW: CGFloat = 420
+    let cursor: Int
 
     var body: some View {
-        GeometryReader { geo in
-            let perCol = max(1, Int((geo.size.height - 96 - 160) / Self.rowH))
-            let cols = stride(from: 0, to: agents.count, by: perCol).map { Array(agents[$0..<min($0 + perCol, agents.count)]) }
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(title).font(.headline)
-                    Text("\(agents.count) here · \(status)").font(.caption2).foregroundStyle(.secondary)
-                }
-                HStack(alignment: .top, spacing: 24) {
-                    ForEach(Array(cols.enumerated()), id: \.offset) { _, col in
-                        VStack(alignment: .leading, spacing: 4) { ForEach(col, id: \.id) { row($0) } }.frame(width: Self.colW)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title).font(.headline)
+                Text("\(agents.count) here · \(status)").font(.caption2).foregroundStyle(.secondary)
+            }
+            ScrollViewReader { scroll in
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(agents.enumerated()), id: \.element.id) { i, a in row(a, highlighted: i == cursor).id(a.id) }
                     }
                 }
-                Text("◀ ▶ follow · ⏯ list · ▼ chat · ▲ home · ring: spin · swipe ↕ zoom ↔ pan").font(.caption2).foregroundStyle(.tertiary)
+                .onChange(of: cursor) { _, c in
+                    guard agents.indices.contains(c) else { return }
+                    withAnimation(.easeOut(duration: 0.2)) { scroll.scrollTo(agents[c].id, anchor: .center) }
+                }
+                .onAppear { if agents.indices.contains(cursor) { scroll.scrollTo(agents[cursor].id, anchor: .center) } }
             }
-            .padding(28)
-            .background(RoundedRectangle(cornerRadius: 28).fill(Color(red: 1, green: 0.99, blue: 0.97, opacity: 0.95)))
-            .padding(48)
+            Text("▲▼ choose · select follow · ⏯ close · ◀ ▶ next agent").font(.caption2).foregroundStyle(.tertiary)
         }
+        .padding(28)
+        .frame(width: 560, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 28).fill(Color(red: 1, green: 0.99, blue: 0.97, opacity: 0.95)))
+        .padding(48)
     }
 
-    private func row(_ a: OfficeScene.Agent) -> some View {
+    private func row(_ a: OfficeScene.Agent, highlighted: Bool) -> some View {
         HStack(spacing: 12) {
             Text(a.emoji ?? String(a.name.prefix(1)).uppercased()).font(.caption.bold()).foregroundStyle(.white)
                 .frame(width: 40, height: 40).background(RoundedRectangle(cornerRadius: 10).fill(Color(uiColor: cssColor(a.css))))
@@ -269,9 +286,10 @@ struct AgentsPanel: View {
             Spacer(minLength: 4)
             Circle().fill(statusDot[a.status] ?? .gray).frame(width: 12, height: 12)
         }
-        .frame(height: Self.rowH - 6)
-        .padding(.horizontal, 6)
-        .background(RoundedRectangle(cornerRadius: 12).stroke(Color(uiColor: cssColor(a.css)), lineWidth: following == a.id ? 3 : 0))
+        .frame(height: 52)
+        .padding(.horizontal, 10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(highlighted ? Color(uiColor: cssColor(a.css)).opacity(0.22) : .clear))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(uiColor: cssColor(a.css)), lineWidth: following == a.id ? 3 : 0))
     }
 }
 
