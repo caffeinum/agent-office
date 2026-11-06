@@ -12,7 +12,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { footprint, kindOf } from "../shared/catalog.js";
 import { DEFAULT_THEME } from "../shared/theme.js";
 import {
-  SEATED, settling, wanderSalt, assignSpots, blockedCells, deskSeating, entryPoint, hashStr, idleSpots, kindGeometryPlan, layoutBatches, limbAngles, poseFor,
+  SEATED, settling, talkPartners, wanderSalt, assignSpots, blockedCells, deskSeating, entryPoint, hashStr, idleSpots, kindGeometryPlan, layoutBatches, limbAngles, poseFor,
   hueColors, itemPoint, placedLights, route, seatOf, themeLook, usableSpots,
 } from "./model.js";
 import { DESK_SCREEN, MODELS, SEAT_Y, WALL_H } from "./furniture.js";
@@ -633,7 +633,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     const free = S.spots.filter((s) => ![...chosen.values()].includes(s));
     const wanters = live.filter((c) => !chosen.has(c.id) && poseFor(c.agent, S.seating.has(c.agent.id)).place === "lounge")
       .map((c) => ({ id: c.id, joinedAt: c.agent.joinedAt, salt: c.salt, current: null, restless: false }));
-    S.assign = assignSpots(wanters, free);
+    S.assign = assignSpots(wanters, free, S.partners ?? new Map());
     for (const c of live) {
       const pick = chosen.get(c.id);
       const spot = pick && pick !== "desk" ? pick : (S.assign.get(c.id) ?? null);
@@ -667,6 +667,10 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
       const settle = settling(c.agent, S.seating.has(c.id), t);
       if (settle !== c.settle) { c.settle = settle; changed = true; }
     }
+    // agents that start or stop talking to each other meet up or part (the chat log and the clock, shared by every viewer)
+    const partners = talkPartners(S.chat ?? [], new Set(S.chars.keys()), t);
+    const key = [...partners].map(([a, b]) => `${a}>${b}`).sort().join(",");
+    if (key !== S.partnersKey) { S.partnersKey = key; S.partners = partners; changed = true; }
     if (changed) retarget();
   }
 
@@ -833,6 +837,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     S.firstItemsSeen = true;
     S.items = state.items;
     S.agents = state.agents;
+    S.chat = state.chat;
     S.seating = deskSeating(state.agents, state.items);
     if (itemsChanged) {
       S.blocked = blockedCells(S.items, S.grid, S.custom);

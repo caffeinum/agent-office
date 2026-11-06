@@ -1041,12 +1041,56 @@
     }
     return null;
   }
-  function assignSpots(wanters, spots) {
+  var TALK_MS = 5 * 6e4;
+  function talkPartners(chat, agentIds, now) {
+    const last = /* @__PURE__ */ new Map();
+    for (const m of chat) {
+      if (!m.to || m.from === m.to || now - m.ts > TALK_MS || m.ts > now) continue;
+      if (!agentIds.has(m.from) || !agentIds.has(m.to)) continue;
+      for (const [a, b] of [[m.from, m.to], [m.to, m.from]]) {
+        const p = last.get(a);
+        if (!p || m.ts >= p.ts) last.set(a, { partner: b, ts: m.ts });
+      }
+    }
+    const out = /* @__PURE__ */ new Map();
+    for (const [a, { partner }] of last) if (last.get(partner)?.partner === a) out.set(a, partner);
+    return out;
+  }
+  function spotPairs(spots) {
+    const byItem = /* @__PURE__ */ new Map();
+    for (const s of spots) byItem.set(s.itemId, [...byItem.get(s.itemId) ?? [], s]);
+    const pairs = [];
+    for (const list2 of byItem.values()) {
+      for (let i = 0; i + 1 < list2.length; i += 2) {
+        const [a, b] = [list2[i], list2[i + 1]];
+        if (a.pose === b.pose && Math.hypot(a.x - b.x, a.z - b.z) <= 3) pairs.push([a, b]);
+      }
+    }
+    return pairs;
+  }
+  function assignSpots(wanters, spots, partners = /* @__PURE__ */ new Map()) {
     const byId = new Map(spots.map((s) => [s.id, s]));
     const taken = /* @__PURE__ */ new Set();
     const out = /* @__PURE__ */ new Map();
     const order = [...wanters].sort((a, b) => a.joinedAt - b.joinedAt || (a.id < b.id ? -1 : 1));
+    const wanting = new Set(order.map((w) => w.id));
+    const pairs = spotPairs(spots);
     for (const w of order) {
+      const p = partners.get(w.id);
+      if (!p || !wanting.has(p) || w.id > p || out.has(w.id) || out.has(p)) continue;
+      const at = hashStr(`${w.id}|${p}`) % Math.max(1, pairs.length);
+      for (let i = 0; i < pairs.length; i++) {
+        const [a, b] = pairs[(at + i) % pairs.length];
+        if (taken.has(a.id) || taken.has(b.id)) continue;
+        taken.add(a.id);
+        taken.add(b.id);
+        out.set(w.id, a);
+        out.set(p, b);
+        break;
+      }
+    }
+    for (const w of order) {
+      if (out.has(w.id)) continue;
       const cur = w.current ? byId.get(w.current) : null;
       if (cur && !w.restless && !taken.has(cur.id)) {
         taken.add(cur.id);
@@ -2338,7 +2382,7 @@
     }
     const free = spots.filter((s) => ![...chosen.values()].includes(s));
     const wanters = state.agents.filter((a) => !chosen.has(a.id) && poseFor(a, seating.has(a.id), now).place === "lounge").map((a) => ({ id: a.id, joinedAt: a.joinedAt, salt: wanderSalt(a.id, now), current: null, restless: false }));
-    const assign = assignSpots(wanters, free);
+    const assign = assignSpots(wanters, free, talkPartners(state.chat, new Set(state.agents.map((a) => a.id)), now));
     const out = /* @__PURE__ */ new Map();
     for (const a of state.agents) {
       const desk = seating.get(a.id);

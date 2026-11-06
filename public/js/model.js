@@ -366,18 +366,71 @@ export function pickSpot(agentId, spots, taken, salt = 0, avoid = null) {
   return null;
 }
 
+/** How long after their last message two agents still count as talking. */
+export const TALK_MS = 5 * 60_000;
+
+/**
+ * Who is talking with whom right now: agent id → partner id, for two office agents that are each other's most recent
+ * direct-message partner within TALK_MS of `now`. From the chat log alone, so every viewer pairs them the same way.
+ */
+export function talkPartners(chat, agentIds, now) {
+  const last = new Map();
+  for (const m of chat) {
+    if (!m.to || m.from === m.to || now - m.ts > TALK_MS || m.ts > now) continue;
+    if (!agentIds.has(m.from) || !agentIds.has(m.to)) continue;
+    for (const [a, b] of [[m.from, m.to], [m.to, m.from]]) {
+      const p = last.get(a);
+      if (!p || m.ts >= p.ts) last.set(a, { partner: b, ts: m.ts });
+    }
+  }
+  const out = new Map();
+  for (const [a, { partner }] of last) if (last.get(partner)?.partner === a) out.set(a, partner);
+  return out;
+}
+
+/** Two spots of one item close enough to talk across (a table's two sides, neighbouring sofa seats): [[a, b], …]. */
+export function spotPairs(spots) {
+  const byItem = new Map();
+  for (const s of spots) byItem.set(s.itemId, [...(byItem.get(s.itemId) ?? []), s]);
+  const pairs = [];
+  for (const list of byItem.values()) {
+    for (let i = 0; i + 1 < list.length; i += 2) {
+      const [a, b] = [list[i], list[i + 1]];
+      if (a.pose === b.pose && Math.hypot(a.x - b.x, a.z - b.z) <= 3) pairs.push([a, b]);
+    }
+  }
+  return pairs;
+}
+
 /**
  * Who goes where, one agent per seat/station, stable: agents already on a spot keep it until they're
  * restless (their time there is up); then the rest pick in join order. A free "chat" station next to
  * someone already chatting is preferred now and then, so huddles fill in pairs.
- * wanters: [{id, joinedAt, salt, current: spotId | null, restless: bool}] → Map(id → spot).
+ * wanters: [{id, joinedAt, salt, current: spotId | null, restless: bool}], partners: talkPartners() → Map(id → spot).
  */
-export function assignSpots(wanters, spots) {
+export function assignSpots(wanters, spots, partners = new Map()) {
   const byId = new Map(spots.map((s) => [s.id, s]));
   const taken = new Set();
   const out = new Map();
   const order = [...wanters].sort((a, b) => a.joinedAt - b.joinedAt || (a.id < b.id ? -1 : 1));
+  // two idle agents talking to each other go to a pair of spots together, first, so the pair keeps its spots for the
+  // whole conversation whoever else wanders; no free pair, they wander as usual
+  const wanting = new Set(order.map((w) => w.id));
+  const pairs = spotPairs(spots);
   for (const w of order) {
+    const p = partners.get(w.id);
+    if (!p || !wanting.has(p) || w.id > p || out.has(w.id) || out.has(p)) continue;
+    const at = hashStr(`${w.id}|${p}`) % Math.max(1, pairs.length);
+    for (let i = 0; i < pairs.length; i++) {
+      const [a, b] = pairs[(at + i) % pairs.length];
+      if (taken.has(a.id) || taken.has(b.id)) continue;
+      taken.add(a.id); taken.add(b.id);
+      out.set(w.id, a); out.set(p, b);
+      break;
+    }
+  }
+  for (const w of order) {
+    if (out.has(w.id)) continue;
     const cur = w.current ? byId.get(w.current) : null;
     if (cur && !w.restless && !taken.has(cur.id)) { taken.add(cur.id); out.set(w.id, cur); }
   }

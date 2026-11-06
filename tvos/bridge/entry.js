@@ -3,7 +3,7 @@
 // it the office WebSocket frames and draws what scene() returns.
 import { MODELS, SEAT_Y, WALL_H } from "../../public/js/furniture.js";
 import {
-  applyFrame, assignSpots, deskSeating, entryPoint, hashStr, idleSpots, itemPoint, kindGeometryPlan, layoutBatches, poseFor, seatOf,
+  applyFrame, assignSpots, talkPartners, deskSeating, entryPoint, hashStr, idleSpots, itemPoint, kindGeometryPlan, layoutBatches, poseFor, seatOf,
   usableSpots, wanderSalt, limbAngles, route, cullLabels, labelPriority, placedLights,
 } from "../../public/js/model.js";
 import { blockedCells } from "../../public/shared/kinds.js";
@@ -112,7 +112,7 @@ function targets(now) {
   const wanters = state.agents
     .filter((a) => !chosen.has(a.id) && poseFor(a, seating.has(a.id), now).place === "lounge")
     .map((a) => ({ id: a.id, joinedAt: a.joinedAt, salt: wanderSalt(a.id, now), current: null, restless: false }));
-  const assign = assignSpots(wanters, free);
+  const assign = assignSpots(wanters, free, talkPartners(state.chat, new Set(state.agents.map((a) => a.id)), now));
   const out = new Map();
   for (const a of state.agents) {
     const desk = seating.get(a.id);

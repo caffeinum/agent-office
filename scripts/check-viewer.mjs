@@ -9,7 +9,7 @@ import { ACTIVITIES, LIGHTS_MAX, MESH_VERTICES_MAX, summarizeKind, validateKindD
 import { cornerPoint, meshTriangles, quadNormal } from "../public/js/shape.js";
 import { POINT_LIGHTS_GL, ZONES_GL, zonedLightsChunk } from "../public/js/zone-glsl.js";
 import {
-  applyFrame, poseFor, DESK_SETTLE_MS, SEAT_ONE_IN, limbAngles, deskSeating, idleSpots, pickSpot, assignSpots, blockedCells, route, entryPoint, layoutBatches,
+  applyFrame, poseFor, DESK_SETTLE_MS, talkPartners, spotPairs, TALK_MS, SEAT_ONE_IN, limbAngles, deskSeating, idleSpots, pickSpot, assignSpots, blockedCells, route, entryPoint, layoutBatches,
   wallOf, cullLabels, labelPriority, chatWith, roomChat, lastLineOf, speakerName, activeSay, CHAT_KEEP, SAY_MS, SEATED,
   themeLook, CLASSIC_COLORS, MOODS, mergeBoxes, overlapLayers, kindGeometryPlan, usableSpots, placedLights, TIMES_OF_DAY,
 } from "../public/js/model.js";
@@ -91,6 +91,41 @@ test("pickSpot: idle agents mostly take a seat, a station about one slot in SEAT
   // every seat taken: a station, not nothing
   assert.equal(pickSpot("a", spots, new Set(["sofa:s0", "sofa:s1", "chair:s0"]), 0).pose, "coffee");
   assert.equal(poseFor(agent("a", { status: "idle" }), true).place, "lounge");
+});
+
+test("talkPartners: mutual recent DM partners pair up; stale, room and one-sided chats don't", () => {
+  const now = 10_000_000, ids = new Set(["a", "b", "c", "d"]);
+  const m = (from, to, ago) => ({ from, to, ts: now - ago });
+  const p = talkPartners([m("a", "b", 60_000), m("b", "a", 30_000), m("c", null, 1000), m("d", "a", TALK_MS + 1)], ids, now);
+  assert.equal(p.get("a"), "b"); assert.equal(p.get("b"), "a"); assert.equal(p.has("c"), false); assert.equal(p.has("d"), false);
+  // c talks to a after a↔b: a's most recent partner is c, so b is left alone and a, c pair
+  const q = talkPartners([m("a", "b", 60_000), m("b", "a", 30_000), m("c", "a", 10_000)], ids, now);
+  assert.equal(q.get("a"), "c"); assert.equal(q.get("c"), "a"); assert.equal(q.has("b"), false);
+  assert.equal(talkPartners([m("a", "x", 1000)], ids, now).size, 0, "someone not in the office");
+});
+
+test("assignSpots: talking idle agents take a pair of spots together and keep it while others wander", () => {
+  const spots = [
+    { id: "table:t0", itemId: "table", x: 1, z: 1, pose: "chat", activity: "chat" }, { id: "table:t1", itemId: "table", x: 3, z: 1, pose: "chat", activity: "chat" },
+    { id: "sofa:s0", itemId: "sofa", x: 6, z: 1, pose: "sit" }, { id: "sofa:s1", itemId: "sofa", x: 7, z: 1, pose: "sit" }, { id: "sofa:s2", itemId: "sofa", x: 8, z: 1, pose: "sit" },
+    { id: "plant:t0", itemId: "plant", x: 9, z: 9, pose: "water-plants" },
+  ];
+  assert.equal(spotPairs(spots).length, 2);
+  const partners = new Map([["a", "b"], ["b", "a"]]);
+  const w = (id, salt) => ({ id, joinedAt: id.charCodeAt(0), salt, current: null, restless: false });
+  let first = null;
+  for (let salt = 0; salt < 20; salt++) {
+    const got = assignSpots([w("a", salt), w("b", salt + 3), w("c", salt * 7)], spots, partners);
+    const [sa, sb] = [got.get("a"), got.get("b")];
+    assert.equal(sa.itemId, sb.itemId, "same item");
+    assert.notEqual(sa.id, sb.id);
+    first ??= `${sa.id}+${sb.id}`;
+    assert.equal(`${sa.id}+${sb.id}`, first, "the pair stays put across wander slots");
+    assert.notEqual(got.get("c")?.id, sa.id);
+  }
+  // only one of them idle: no pairing
+  const solo = assignSpots([w("a", 1)], spots, partners);
+  assert.ok(solo.has("a"));
 });
 
 test("sun.js: SF daylight, a golden dusk, night after sunset, and fixed day/night", () => {
