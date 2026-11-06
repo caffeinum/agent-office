@@ -462,6 +462,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       await this.ensureRegistered();
       if (url.pathname === "/internal/admin/info") return json(200, this.adminInfo());
       if (url.pathname === "/internal/admin/city") return json(200, await this.requestCityLink(((await readJson(req)) ?? {}) as Record<string, unknown>, "admin"));
+      if (url.pathname === "/internal/admin/kick") return json(200, await this.kick((((await readJson(req)) ?? {}) as Record<string, unknown>).id, "human:admin"));
       const asset = /^\/o\/[^/]+\/assets\/([^/]+)$/.exec(url.pathname);
       if (asset) return this.serveAsset(req, asset[1]!);
       const ip = req.headers.get("cf-connecting-ip") ?? "local";
