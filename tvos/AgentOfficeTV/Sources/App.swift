@@ -86,7 +86,9 @@ final class OfficeModel: ObservableObject {
     @Published var toast: String?
     private var toastWork: DispatchWorkItem?
     private var connection: Connection?
+    private var link: OfficeLink?
     private var timer: Timer?
+    private var bridgeTimer: Timer?
 
     func start(_ link: OfficeLink) {
         Watchdog.start()
@@ -113,14 +115,52 @@ final class OfficeModel: ObservableObject {
             if let id, let i = agents.firstIndex(where: { $0.id == id }) { cursor = i }
             if case .chat(let a?) = panel, a != id { panel = id.map { .chat(agent: $0) } ?? .none }
         }
+        self.link = link
+        connect()
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() }
+        checkBridge()
+        bridgeTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in self?.checkBridge() }
+    }
+
+    private func connect() {
+        guard let link else { return }
+        connection?.stop()
         connection = Connection(link: link, onFrame: { [weak self] in self?.receive($0) }, onState: { [weak self] in self?.status = $0 })
         connection?.start()
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() }
+    }
+
+    /// Fetches the office site's office-bridge.js; a new one that loads replaces the running behaviour (placement, poses,
+    /// light, screens) without an app update, and a fresh snapshot fills it in. A failed fetch or a bad bundle keeps the
+    /// running one (logged): the office keeps working on what it has.
+    private func checkBridge() {
+        guard let url = link?.bridgeURL else { return }
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        req.setValue("AgentOfficeTV", forHTTPHeaderField: "User-Agent")
+        URLSession.shared.dataTask(with: req) { [weak self] data, resp, error in
+            DispatchQueue.main.async {
+                guard let self, let bridge = self.bridge else { return }
+                guard error == nil, (resp as? HTTPURLResponse)?.statusCode == 200, let data, let code = String(data: data, encoding: .utf8) else {
+                    print("bridge update: fetch failed (\(error?.localizedDescription ?? "status \((resp as? HTTPURLResponse)?.statusCode ?? 0)"))")
+                    return
+                }
+                guard code != bridge.source else { return }
+                do {
+                    try bridge.reload(code)
+                } catch {
+                    print("bridge update: kept the running bundle: \(error.localizedDescription)")
+                    return
+                }
+                print("bridge update: loaded \(data.count) bytes from \(url.host ?? "")")
+                self.renderer.bridge = bridge
+                self.connect()
+            }
+        }.resume()
     }
 
     func stop() {
         connection?.stop()
         timer?.invalidate()
+        bridgeTimer?.invalidate()
         renderer.detach()
     }
 

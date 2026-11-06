@@ -4,6 +4,8 @@ import Foundation
 struct OfficeLink: Equatable {
     let socketURL: URL
     let key: String
+    /// Where the office's site serves the bridge bundle (build-bridge.sh copies it to public/tv/).
+    let bridgeURL: URL
 
     init(_ raw: String) throws {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -18,6 +20,8 @@ struct OfficeLink: Equatable {
         guard let ws = URL(string: "\(scheme)://\(host)\(port)/o/\(parts[1])/ws") else { throw LinkError("could not build the socket URL") }
         socketURL = ws
         key = String(frag.dropFirst(2))
+        guard let b = URL(string: "\(url.scheme!)://\(host)\(port)/tv/office-bridge.js") else { throw LinkError("could not build the bridge URL") }
+        bridgeURL = b
     }
 }
 

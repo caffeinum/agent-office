@@ -1,23 +1,53 @@
 import Foundation
 import JavaScriptCore
 
-/// The web viewer's own placement logic (office-bridge.js), run in JavaScriptCore.
+/// The web viewer's own placement logic (office-bridge.js), run in JavaScriptCore. The app starts on the copy it last
+/// downloaded from the office's site (or the one built in), and `reload` swaps in a newer one while running.
 final class Bridge {
-    private let context: JSContext
-    private let ao: JSValue
+    /// The AO API this app speaks (entry.js AO.api): a downloaded bundle with another number is ignored.
+    static let api = 1
+    private var context: JSContext
+    private var ao: JSValue
+    /// The source now running, to tell a new download from the same one.
+    private(set) var source: String
 
     init() throws {
+        if let cached = try? String(contentsOf: Self.cacheURL, encoding: .utf8), let (ctx, ao) = try? Self.load(cached, name: "downloaded office-bridge.js") {
+            (context, self.ao, source) = (ctx, ao, cached)
+            return
+        }
         guard let url = Bundle.main.url(forResource: "office-bridge", withExtension: "js") else {
             throw BridgeError.missing("office-bridge.js is not in the app bundle (run tvos/build-bridge.sh)")
         }
+        let code = try String(contentsOf: url, encoding: .utf8)
+        (context, ao) = try Self.load(code, name: "office-bridge.js")
+        source = code
+    }
+
+    /// Runs `code` in a fresh context and checks it speaks our API.
+    private static func load(_ code: String, name: String) throws -> (JSContext, JSValue) {
         guard let ctx = JSContext() else { throw BridgeError.missing("JavaScriptCore would not start") }
         var thrown: String?
         ctx.exceptionHandler = { _, e in thrown = e?.toString() }
-        ctx.evaluateScript(try String(contentsOf: url, encoding: .utf8), withSourceURL: url)
-        if let thrown { throw BridgeError.script("loading office-bridge.js: \(thrown)") }
-        guard let ao = ctx.objectForKeyedSubscript("AO"), !ao.isUndefined else { throw BridgeError.missing("office-bridge.js did not define AO") }
-        context = ctx
-        self.ao = ao
+        ctx.evaluateScript(code, withSourceURL: URL(string: "office-bridge.js"))
+        if let thrown { throw BridgeError.script("loading \(name): \(thrown)") }
+        guard let ao = ctx.objectForKeyedSubscript("AO"), !ao.isUndefined else { throw BridgeError.missing("\(name) did not define AO") }
+        let api = ao.objectForKeyedSubscript("api")?.toInt32() ?? 0
+        guard api == Self.api else { throw BridgeError.script("\(name) speaks AO api \(api), this app speaks \(Self.api)") }
+        return (ctx, ao)
+    }
+
+    private static var cacheURL: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("office-bridge.js")
+    }
+
+    /// Swaps in a downloaded bundle and keeps it for the next launch. Its state starts empty: feed it a snapshot next.
+    /// Throws (and keeps the running one) if it doesn't load or speaks another API.
+    func reload(_ code: String) throws {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let (ctx, ao) = try Self.load(code, name: "downloaded office-bridge.js")
+        (context, self.ao, source) = (ctx, ao, code)
+        try code.write(to: Self.cacheURL, atomically: true, encoding: .utf8)
     }
 
     /// Feeds one WebSocket frame; returns its type ("snapshot", "agent", …).

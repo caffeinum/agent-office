@@ -163,6 +163,9 @@ function nameOf(ref) {
 
 
 globalThis.AO = {
+  /** The shape of this API (what AO's functions take and return). The app loads a bundle downloaded from the office's
+   *  site only when this matches its own Bridge.api: bump it with any change the Swift side has to follow. */
+  api: 1,
   /** The web viewer's A* walk from one point to another (cell centres, then the exact goal), as JSON [[x, z], …]. */
   route(fx, fz, tx, tz) {
     if (!walk) return "[]";
