@@ -215,6 +215,35 @@ export function windowTexture(night) {
   return tex(c);
 }
 
+/** The window view at sunrise / sunset: a warm sky, the sun low over the hills, pink clouds. */
+export function duskWindowTexture() {
+  const [c, g] = canvas(32, 16);
+  const grad = g.createLinearGradient(0, 0, 0, 16);
+  grad.addColorStop(0, "#6f6aa8"); grad.addColorStop(0.45, "#f08a7a"); grad.addColorStop(0.8, "#ffc27a");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 32, 16);
+  g.fillStyle = "#ffe3a3"; g.fillRect(21, 10, 4, 3); g.fillRect(22, 9, 2, 1);
+  g.fillStyle = "#f7a3a8";
+  g.fillRect(4, 5, 7, 1); g.fillRect(6, 4, 3, 1);
+  g.fillRect(14, 7, 6, 1);
+  g.fillStyle = "#5c5a7e"; g.fillRect(0, 13, 32, 3);
+  g.fillStyle = "#4b4a6c";
+  for (let x = 0; x < 32; x += 3) g.fillRect(x, 12 + (x % 2), 2, 1);
+  return tex(c);
+}
+
+/** Sky gradient background at sunrise / sunset. */
+export function duskSkyTexture() {
+  const [c, g] = canvas(4, 256);
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, "#5d5f9c"); grad.addColorStop(0.5, "#e7949a"); grad.addColorStop(1, "#ffcf94");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 4, 256);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 /** Sky gradient background (with stars at night). */
 export function skyTexture(night) {
   const [c, g] = canvas(4, 256);

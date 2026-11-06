@@ -108,6 +108,12 @@ test("sun.js: SF daylight, a golden dusk, night after sunset, and fixed day/nigh
   assert.ok(dusk.hemi < 1.25 && dusk.hemi > 0.22, `hemisphere blends between day and night (${dusk.hemi})`);
   // the sun moves: morning light from the east (+x), evening from the west
   assert.ok(at("2026-11-04T08:30:00-08:00").sunDir[0] > 0.3 && at("2026-11-04T15:30:00-08:00").sunDir[0] < -0.3);
+  // windows and sky: day at noon, the dusk view around sunset and sunrise, night after dark
+  assert.equal(at("2026-11-04T12:00:00-08:00").view, "day");
+  assert.equal(at("2026-11-04T16:45:00-08:00").view, "dusk");
+  assert.equal(at("2026-11-05T06:50:00-08:00").view, "dusk");
+  assert.equal(at("2026-11-04T23:00:00-08:00").view, "night");
+  assert.ok(at("2026-11-04T17:05:00-08:00").windowLight < at("2026-11-04T16:30:00-08:00").windowLight, "window glass dims as the sun sets");
   assert.equal(fixedLight("night", mood).name, "night");
   assert.equal(fixedLight("day", mood).hemi, 1.25);
   assert.throws(() => fixedLight("noon", mood), /unknown time of day/);

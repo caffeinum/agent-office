@@ -29,6 +29,8 @@ struct OfficeScene: Decodable, Equatable {
         let hemiSky: String; let hemiGround: String; let hemi: Double; let sun: Double; let sunColor: String; let fog: String
         let sunDir: [Double]
         let glow: Double; let lamp: Double; let point: Double; let neon: Double; let nightNeon: Double; let nightGlow: Double
+        /// What the windows and the sky show ("day" | "dusk" | "night") and the window glass brightness.
+        let view: String; let windowLight: Double
         var night: Bool { name == "night" }
     }
     /// voxel.js box; `slope`/`lowFrac` make it a wedge (shape.js).

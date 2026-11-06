@@ -437,15 +437,15 @@ final class OfficeRenderer: NSObject {
             fill.light?.color = mix(cssColor(t.hemiSky), cssColor(t.hemiGround))
             scene.fogColor = cssColor(t.fog)
             cityLights?.isHidden = !t.night
-            scene.background.contents = try voxel.texture("sky", t.name)
-            let day = try voxel.texture("window"), night = try voxel.texture("nightWindow", s.look.nightWindow ?? "stars")
+            scene.background.contents = try voxel.texture("sky", t.view)
+            let view = t.view == "night" ? try voxel.texture("nightWindow", s.look.nightWindow ?? "stars") : try voxel.texture("window", t.view)
             for sc in screens.values {
                 sc.node.geometry?.firstMaterial?.diffuse.intensity = t.glow
                 sc.spill.isHidden = !(sc.lit && t.night)
             }
             for g in glows {
                 g.mat.diffuse.intensity = g.night ? t.nightGlow : g.lamp ? t.lamp : t.glow
-                if g.window { g.mat.diffuse.contents = t.night ? night : day; g.mat.diffuse.intensity = t.night ? 0.95 : 1.05 }
+                if g.window { g.mat.diffuse.contents = view; g.mat.diffuse.intensity = t.windowLight }
             }
         } catch {
             preconditionFailure("time of day: \(error)")

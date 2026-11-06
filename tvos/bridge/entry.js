@@ -10,7 +10,7 @@ import { blockedCells } from "../../public/shared/kinds.js";
 import { kindOf } from "../../public/shared/catalog.js";
 import { characterRig } from "../../public/js/character.js";
 import { GARDEN_BORDER, cornerPosts, gardenBoxes, roomWalls, wallBoxes } from "../../public/js/room.js";
-import { floorTexture, grainTexture, grassTexture, nightWindowTexture, plinthTexture, rackTexture, rugTexture, screenOffTexture, screenTexture, skyTexture, tvTexture, wallTexture, windowTexture } from "../../public/js/textures.js";
+import { duskSkyTexture, duskWindowTexture, floorTexture, grainTexture, grassTexture, nightWindowTexture, plinthTexture, rackTexture, rugTexture, screenOffTexture, screenTexture, skyTexture, tvTexture, wallTexture, windowTexture } from "../../public/js/textures.js";
 import { hueColors, themeLook } from "../../public/js/model.js";
 import { fixedLight, lightAt } from "../../public/js/sun.js";
 import { buildGeometry, buildMeshGeometry } from "../../public/js/voxel.js";
@@ -26,7 +26,8 @@ installDocument();
 const TEXTURES = {
   grain: () => grainTexture(), grass: () => grassTexture(), plinth: () => plinthTexture(), rug: () => rugTexture(),
   floor: (m) => floorTexture(m), wall: (m) => wallTexture(m),
-  screen: () => screenTexture(), screenOff: () => screenOffTexture(), tv: () => tvTexture(), rack: () => rackTexture(), window: () => windowTexture(false), sky: (time) => skyTexture(time === "night"),
+  screen: () => screenTexture(), screenOff: () => screenOffTexture(), tv: () => tvTexture(), rack: () => rackTexture(), window: (view) => (view === "dusk" ? duskWindowTexture() : windowTexture(false)),
+  sky: (view) => (view === "dusk" ? duskSkyTexture() : skyTexture(view === "night")),
   nightWindow: (style) => nightWindowTexture(style),
 };
 

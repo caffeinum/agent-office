@@ -43,7 +43,8 @@ function mix(a, b, k) {
  * The light for darkness `dark` (0 day … 1 night) and golden-hour strength `golden` (0…1) under a theme's mood:
  * every TIMES_OF_DAY number blended, the final colours (hemiSky, hemiGround, sunColor, fog), `sunDir` (unit vector
  * towards the light, world axes: north = -z, east = +x) and `name` ("night" once it's more than half dark: textures,
- * window views and city lights switch there).
+ * city lights switch there), `view` ("day" | "dusk" | "night": the windows' and the sky's picture) and `windowLight`
+ * (window glass brightness).
  */
 export function lightFor(dark, golden, sunDir, mood) {
   const D = TIMES_OF_DAY.day, N = TIMES_OF_DAY.night;
@@ -55,6 +56,10 @@ export function lightFor(dark, golden, sunDir, mood) {
   out.hemiGround = mix(mood.ground, N.hemiGround, dark);
   out.fog = mix(mix(D.fog, GOLDEN.fog, g), N.fog, dark);
   out.sunDir = sunDir;
+  // what the windows and the sky behind the office show, and how bright the window glass is: the dusk view through the
+  // golden hour, dimming as the sun sets until the night view takes over
+  out.view = dark > 0.5 ? "night" : golden > 0.4 ? "dusk" : "day";
+  out.windowLight = out.view === "night" ? 0.95 : 1.05 * (1 - dark * 0.8);
   return out;
 }
 

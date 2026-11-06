@@ -87,7 +87,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
   const tex = {
     grain: T.grainTexture(), wood: T.woodTexture(), plaster: T.plasterTexture(), grass: T.grassTexture(), plinth: T.plinthTexture(),
     rug: T.rugTexture(), screen: T.screenTexture(), screenOff: T.screenOffTexture(), tv: T.tvTexture(), rack: T.rackTexture(),
-    windowDay: T.windowTexture(false), skyDay: T.skyTexture(false), skyNight: T.skyTexture(true), blob: T.blobTexture(),
+    windowDay: T.windowTexture(false), windowDusk: T.duskWindowTexture(), skyDay: T.skyTexture(false), skyDusk: T.duskSkyTexture(), skyNight: T.skyTexture(true), blob: T.blobTexture(),
   };
   const texCache = new Map();
   const cachedTex = (key, make) => { if (!texCache.has(key)) texCache.set(key, make()); return texCache.get(key); };
@@ -898,7 +898,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     const th = light;
     hemi.intensity = th.hemi;
     sun.intensity = th.sun;
-    scene.background = th.name === "night" ? tex.skyNight : tex.skyDay;
+    scene.background = { day: tex.skyDay, dusk: tex.skyDusk, night: tex.skyNight }[th.view];
     if (S.cityLights) S.cityLights.visible = th.name === "night";
     scene.fog.color.set(th.fog);
     bloom.strength = th.bloom; bloom.threshold = th.threshold;
@@ -923,9 +923,9 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     const night = th.name === "night";
     m.color.copy(m.userData.baseColor).multiplyScalar(m.userData.night ? th.nightGlow : m.userData.lamp ? th.lamp : th.glow);
     if (m.userData.window) {
-      const map = night ? nightWindowTex(S.look.nightWindow) : tex.windowDay;
+      const map = { day: tex.windowDay, dusk: tex.windowDusk, night: nightWindowTex(S.look.nightWindow) }[th.view];
       if (m.map !== map) { m.map = map; m.needsUpdate = true; }
-      m.color.setScalar(night ? 0.95 : 1.05);
+      m.color.setScalar(th.windowLight);
     }
   }
 
