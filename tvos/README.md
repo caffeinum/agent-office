@@ -39,7 +39,7 @@ Remote (Siri Remote clickpad):
 | click ▼ | room chat on / off | room chat on / off |
 | play/pause | agent list on / off (▲▼ move through it, select follows that agent and opens its chat) | this agent's chat on / off |
 | hold play/pause | hide all UI (names too; only speech bubbles stay) | same |
-| hold ▲ | radio: off → SomaFM Fluid → Groove Salad → 0R Lo-Fi → off (remembered) | same |
+| hold ▲ | radio: off → SomaFM Fluid → Groove Salad → 0R Lo-Fi → Mastra Radio → off (remembered) | same |
 | back | agent chat → room chat → closed, then "press back again to exit" | same, then stop following |
 | hold select | forget the office link | forget the office link |
 

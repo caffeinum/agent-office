@@ -147,9 +147,12 @@ final class RadioPlayer {
     private(set) var station: RadioStation?
     private static let volume: Float = Float(ProcessInfo.processInfo.environment["AO_RADIO_VOLUME"] ?? "0.4") ?? 0.4
 
+    private var loopObserver: NSObjectProtocol?
+
     func play(_ s: RadioStation?) {
         player?.pause()
         player = nil
+        if let o = loopObserver { NotificationCenter.default.removeObserver(o); loopObserver = nil }
         station = s
         guard let s else { return }
         guard let url = URL(string: s.url) else { preconditionFailure("radio station \(s.id) has a bad url \(s.url)") }
@@ -157,6 +160,13 @@ final class RadioPlayer {
         p.volume = Self.volume
         p.play()
         player = p
+        // a recorded station (Mastra's HLS episode) starts over when it ends; live streams never get here
+        if let item = p.currentItem {
+            loopObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main) { [weak p] _ in
+                p?.seek(to: .zero)
+                p?.play()
+            }
+        }
         if ProcessInfo.processInfo.environment["AO_STATS"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak p] in
                 guard let p else { return }
