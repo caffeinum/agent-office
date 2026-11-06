@@ -846,6 +846,9 @@
     switch (agent.status) {
       case "working":
         return hasDesk ? { pose: "type", place: "desk" } : { pose: "stand", place: "lounge" };
+      // its own job runs on (a build, subagents, a workflow): it sits back at its desk and waits, hands off the keyboard
+      case "running":
+        return hasDesk ? { pose: "sit", place: "desk" } : { pose: "stand", place: "lounge" };
       case "waiting":
         return hasDesk ? { pose: "handup", place: "desk" } : { pose: "wave", place: "lounge" };
       case "away":
@@ -2137,6 +2140,23 @@
     }
     const size = 19, cols = Math.floor((W - x0 - 8) / (size * CHAR));
     const waiting = agent.status === "waiting";
+    if (agent.status === "running") {
+      const what2 = ascii(agent.activity ?? "").replace(/^background:\s*/i, "") || "running";
+      const size2 = 17, cols2 = Math.floor((W - x0 - 8) / (size2 * CHAR));
+      const lines2 = wrap(what2, cols2 - 2, 2);
+      let y2 = 42;
+      for (const [i, l] of lines2.entries()) {
+        if (i === 0) text(x0, y2, size2, st.accent, ">", true);
+        text(x0 + size2 * CHAR * 2, y2, size2, st.fg, l, i === 0);
+        y2 += size2 + 4;
+      }
+      const barW = W - x0 - 12, fill = Math.round(barW * (0.3 + seed % 55 / 100));
+      rect(x0, y2 + 2, barW, 12, st.bar);
+      rect(x0, y2 + 2, fill, 12, st.accent);
+      y2 += 26;
+      for (let i = 0; y2 < H - 8 && i < 5; i++, y2 += 10) rect(x0, y2, 24 + (seed >> i * 2 + 1) % (W - x0 - 50), 4, st.dim);
+      return { w: W, h: H, ops };
+    }
     const what = ascii(agent.activity ?? "") || (waiting ? "needs input" : "working");
     const lines = wrap(what, cols - 2, 3);
     let y = 44;
@@ -2432,7 +2452,7 @@
         w: DESK_SCREEN.w,
         h: DESK_SCREEN.h,
         // the light it spills on the desk top at night
-        spill: { x: q.x, z: q.z, fx: r.x, fz: r.z, color: screenStyle(a.client, css).accent, lit: a.status === "working" || a.status === "waiting" }
+        spill: { x: q.x, z: q.z, fx: r.x, fz: r.z, color: screenStyle(a.client, css).accent, lit: a.status === "working" || a.status === "running" || a.status === "waiting" }
       };
     });
   }

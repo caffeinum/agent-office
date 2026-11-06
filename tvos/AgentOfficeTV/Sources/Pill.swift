@@ -15,7 +15,7 @@ final class Pill {
     private(set) var labelSize = CGSize.zero
     private static let scale: CGFloat = 1.45
     private static let dot: [String: UIColor] = [
-        "working": cssColor("#4fbf7a"), "idle": cssColor("#8fa6c9"), "waiting": cssColor("#f2b33d"), "away": cssColor("#b4aaa2"),
+        "working": cssColor("#4fbf7a"), "running": cssColor("#3fa7b8"), "idle": cssColor("#8fa6c9"), "waiting": cssColor("#f2b33d"), "away": cssColor("#b4aaa2"),
     ]
 
     init() {
@@ -40,7 +40,7 @@ final class Pill {
 
     /// `bubbleOnly`: the clean view (UI hidden) shows just speech bubbles, no names or activities.
     func update(_ a: OfficeScene.Agent, selected: Bool, bubbleOnly: Bool = false) {
-        let act: String? = a.status == "working" ? a.activity.map { clip($0, 48) } : a.status == "waiting" ? clip(a.activity ?? "needs input", 48) : nil
+        let act: String? = a.status == "working" || a.status == "running" ? a.activity.map { clip($0, 48) } : a.status == "waiting" ? clip(a.activity ?? "needs input", 48) : nil
         let say = a.says.map { clip($0, 140) }
         let s = "\(a.name)|\(a.emoji ?? "")|\(a.status)|\(act ?? "")|\(say ?? "")|\(a.css)|\(selected)|\(bubbleOnly)"
         guard s != sig else { return }
@@ -56,7 +56,7 @@ final class Pill {
         let img = Self.draw(name: a.name, emoji: a.emoji, status: a.status, act: bubbleOnly ? nil : act, say: say, hue: cssColor(a.css), selected: selected, tag: !bubbleOnly)
         full = (SKTexture(image: img), img.size)
         labelSize = CGSize(width: img.size.width - 16 * Self.scale, height: img.size.height - 16 * Self.scale)
-        working = a.status == "working"
+        working = a.status == "working" || a.status == "running"
         dotNode.fillColor = cssColor(a.css)
         node.alpha = a.status == "away" ? 0.75 : 1
         setKept(kept)

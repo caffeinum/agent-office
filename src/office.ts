@@ -1171,7 +1171,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
         if (at) agent.at = this.checkSpot(agent, at);
         else delete agent.at;
         agent.status = status;
-        if (status === "working" || status === "waiting") agent.workedAt = Date.now();
+        if (status === "working" || status === "running" || status === "waiting") agent.workedAt = Date.now();
         if (activity?.trim()) agent.activity = defangTags(activity.trim().slice(0, ACTIVITY_MAX));
         else delete agent.activity;
         await this.saveAgent(agent);

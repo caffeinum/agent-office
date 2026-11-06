@@ -330,6 +330,7 @@
      "type": "string",
      "enum": [
       "working",
+      "running",
       "idle",
       "waiting",
       "away"

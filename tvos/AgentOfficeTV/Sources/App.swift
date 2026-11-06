@@ -380,7 +380,7 @@ struct OfficeScreen: View {
     }
 }
 
-private let statusDot: [String: Color] = ["working": Color(red: 0.31, green: 0.75, blue: 0.48), "idle": Color(red: 0.56, green: 0.65, blue: 0.79),
+private let statusDot: [String: Color] = ["working": Color(red: 0.31, green: 0.75, blue: 0.48), "running": Color(red: 0.25, green: 0.65, blue: 0.72), "idle": Color(red: 0.56, green: 0.65, blue: 0.79),
                                           "waiting": Color(red: 0.95, green: 0.70, blue: 0.24), "away": Color(red: 0.71, green: 0.67, blue: 0.64)]
 
 /// The web sidebar's roster: office name, live state, who is here with their status. ▲▼ move the highlight (the list
@@ -424,7 +424,7 @@ struct AgentsPanel: View {
                 .frame(width: 40, height: 40).background(RoundedRectangle(cornerRadius: 10).fill(Color(uiColor: cssColor(a.css))))
             VStack(alignment: .leading, spacing: 0) {
                 Text(a.name).font(.caption.bold()).lineLimit(1)
-                Text(a.status == "working" ? (a.activity ?? "working") : a.status == "waiting" ? (a.activity ?? "needs input") : a.status)
+                Text(a.status == "working" || a.status == "running" ? (a.activity ?? a.status) : a.status == "waiting" ? (a.activity ?? "needs input") : a.status)
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)

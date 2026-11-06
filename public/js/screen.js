@@ -80,6 +80,24 @@ export function screenSpec(agent, hueCss) {
   }
   const size = 19, cols = Math.floor((W - x0 - 8) / (size * CHAR));
   const waiting = agent.status === "waiting";
+  if (agent.status === "running") {
+    // its job runs on its own: the job's name, a progress bar, and the log scrolling by; no cursor, nobody typing
+    const what = ascii(agent.activity ?? "").replace(/^background:\s*/i, "") || "running";
+    const size = 17, cols = Math.floor((W - x0 - 8) / (size * CHAR));
+    const lines = wrap(what, cols - 2, 2);
+    let y = 42;
+    for (const [i, l] of lines.entries()) {
+      if (i === 0) text(x0, y, size, st.accent, ">", true);
+      text(x0 + size * CHAR * 2, y, size, st.fg, l, i === 0);
+      y += size + 4;
+    }
+    const barW = W - x0 - 12, fill = Math.round(barW * (0.3 + (seed % 55) / 100));
+    rect(x0, y + 2, barW, 12, st.bar);
+    rect(x0, y + 2, fill, 12, st.accent);
+    y += 26;
+    for (let i = 0; y < H - 8 && i < 5; i++, y += 10) rect(x0, y, 24 + ((seed >> (i * 2 + 1)) % (W - x0 - 50)), 4, st.dim);
+    return { w: W, h: H, ops };
+  }
   const what = ascii(agent.activity ?? "") || (waiting ? "needs input" : "working");
   const lines = wrap(what, cols - 2, 3);
   let y = 44;

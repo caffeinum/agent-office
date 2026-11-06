@@ -19,10 +19,10 @@ export function createOverlay(layer, { onPress, onMenu }) {
     if (n.sig === sig) return;
     n.sig = sig;
     const col = hueColors(a.hue ?? 0).css;
-    const act = a.status === "working" && a.activity ? `<div class="act">${esc(clip(a.activity, 48))}</div>` : a.status === "waiting" ? `<div class="act wait">${esc(clip(a.activity || "needs input", 48))}</div>` : "";
+    const act = (a.status === "working" || a.status === "running") && a.activity ? `<div class="act">${esc(clip(a.activity, 48))}</div>` : a.status === "waiting" ? `<div class="act wait">${esc(clip(a.activity || "needs input", 48))}</div>` : "";
     n.el.innerHTML = `${say ? `<div class="bubble">${esc(clip(say, 140))}</div>` : ""}<div class="tag" style="--hue:${col}">${a.emoji ? `<span class="emo">${esc(a.emoji)}</span>` : ""}<b>${esc(a.name)}</b>${isDesigner ? `<em class="badge">Designer</em>` : ""}<i class="dot ${a.status}"></i></div>${act}`;
     n.el.classList.toggle("away", a.status === "away");
-    n.el.classList.toggle("working", a.status === "working");
+    n.el.classList.toggle("working", a.status === "working" || a.status === "running");
     n.el.classList.toggle("sel", selected === a.id);
     n.el.classList.toggle("speaking", !!say);
     n.size = null;

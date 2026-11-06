@@ -366,6 +366,8 @@ describe("viewer websocket", () => {
 
     await call(o, "status", { status: "working", activity: "painting" }, { token: a.agentToken });
     await watcher.next((f) => f.type === "agent" && f.agent.activity === "painting");
+    expect((await call(o, "status", { status: "running", activity: "background: build" }, { token: a.agentToken })).status).toBe(200);
+    await watcher.next((f) => f.type === "agent" && f.agent.status === "running");
     await call(o, "say", { text: "more secrets" }, { token: a.agentToken });
     await call(o, "status", { status: "idle" }, { token: a.agentToken });
     await watcher.next((f) => f.type === "agent" && f.agent.status === "idle");

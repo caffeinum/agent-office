@@ -10,6 +10,7 @@
   --chip: rgba(70, 50, 30, 0.07);
   --accent: #e8794a;
   --working: #4fbf7a;
+  --running: #3fa7b8;
   --idle: #8fa6c9;
   --waiting: #f2b33d;
   --away: #b4aaa2;
@@ -68,6 +69,7 @@ a { color: var(--accent); }
 
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--away); flex: none; }
 .dot.working { background: var(--working); box-shadow: 0 0 0 3px rgba(79, 191, 122, 0.22); }
+.dot.running { background: var(--running); box-shadow: 0 0 0 3px rgba(63, 167, 184, 0.22); animation: blinkdot 2.4s infinite; }
 .dot.idle { background: var(--idle); }
 .dot.waiting { background: var(--waiting); animation: blinkdot 1.1s infinite; }
 @keyframes blinkdot { 50% { box-shadow: 0 0 0 4px rgba(242, 179, 61, 0.35); } }

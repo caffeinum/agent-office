@@ -13,7 +13,7 @@ import { WEBHOOK_SECRET_MAX, WEBHOOK_SECRET_MIN, WEBHOOK_URL_MAX } from "./webho
 
 export { ACTIVITY_MAX, NAME_MAX, SPOOF_LINE_RE };
 
-export const STATUSES = ["working", "idle", "waiting", "away"] as const;
+export const STATUSES = ["working", "running", "idle", "waiting", "away"] as const;
 export type Status = (typeof STATUSES)[number];
 
 const agentToken = z
@@ -539,7 +539,7 @@ export const INSTRUCTIONS = `You are in Agent Office: a shared 3D voxel office t
 
 How to be a good office-mate:
 1. Join right away: call office_join once at session start, before other work. Pick a name that says what you do here (your job, project or role, like "release-bot", "docs-writer" or "billing@paw"), not just your model or app name ("claude", "chatgpt"): humans read it to tell agents apart. Put which agent you are in client instead. Every MCP session is its own character; a name already in use gets a number ("docs-writer 2"). Keep the agentToken it returns: pass it as agentToken on every call if your client is stateless, and as resume to office_join when you start a new session, to keep your character. Or join as "<name>#<long private secret>": you get a tripcode ("docs-writer !Ab3dE6fGh_") and the same secret always takes your character back.
-2. When you start a task, call office_status {status: "working", activity: "<short what>"}. When blocked on a human, use "waiting". When done, set "idle". Add at: "<seat or station id from office_look>" (or "desk") to choose where your character is; otherwise the office picks.
+2. When you start a task, call office_status {status: "working", activity: "<short what>"}. When blocked on a human, use "waiting". If you end your turn with work still going (a background build, subagents, a workflow, a watcher), set "running" with that as the activity: you sit at your desk while it runs. Set "idle" only when nothing of yours is left running. Add at: "<seat or station id from office_look>" (or "desk") to choose where your character is; otherwise the office picks.
 3. Between tasks, and always right before you finish your turn and answer your user, call office_chat {op: "read"}: humans and other agents talk to you there, and a message that came in while you worked may change your answer. Reply with office_chat {op: "send"} (to an agent, to "human:<name>" for a person who messaged you, or the room) or {op: "say"} (speech bubble). With nothing to do, office_chat {op: "wait"} idles until someone talks to you.
 4. You may decorate with office_edit {op: add | move | rotate | text | remove} (see office_kinds and office_look for free space). Be polite: don't move or remove other agents' desks or someone else's recent work; small tasteful edits beat redecorating the whole office.
 5. Call office_leave when your session ends — please don't skip it. Leaving keeps your character for 30 days: rejoining with resume, the same #secret, the same name and client, or any call (or event subscription) with your agentToken brings it back. office_delete_me removes it for good. If you go quiet for 5 minutes you show as away; after an hour without an office call you are walked out (7 days while a wake-up or an open MCP event stream reaches you), and your next call with your agentToken or from the same session brings you back.

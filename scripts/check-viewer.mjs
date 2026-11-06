@@ -70,6 +70,17 @@ test("poseFor: status → pose and place", () => {
   assert.throws(() => poseFor(agent("a", { status: "dancing" }), true), /unknown status/);
 });
 
+test("running: seated still at the desk, its screen shows the job's progress, not a typing cursor", () => {
+  assert.deepEqual(poseFor(agent("a", { status: "running" }), true), { pose: "sit", place: "desk" });
+  assert.equal(poseFor(agent("a", { status: "running" }), false).place, "lounge");
+  const spec = screenSpec({ id: "a", status: "running", activity: "background: workflow + 2 subagents", client: "claude-code" }, "#ff0000");
+  const texts = spec.ops.filter((o) => o.op === "text").map((o) => o.text).join(" ");
+  assert.match(texts, /workflow \+ 2 subagents/);
+  assert.doesNotMatch(texts, /background:/);
+  const st = screenStyle("claude-code", "#ff0000");
+  assert.ok(spec.ops.some((o) => o.op === "rect" && o.color === st.accent && o.h === 12), "a progress bar in the client's accent");
+});
+
 test("poseFor: idle right after work stays at the desk (between turns), then lounges", () => {
   const now = 1_000_000_000;
   const just = agent("a", { status: "idle", workedAt: now - 5_000 });

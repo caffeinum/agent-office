@@ -457,7 +457,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
       if (desk.id !== deskId) continue;
       const ag = S.agents.find((x) => x.id === agentId);
       if (!ag) return S.logo.tex ? 0.45 : 0.08;
-      return ag.status === "working" ? 1 : ag.status === "away" ? 0.25 : 0.6;
+      return ag.status === "working" || ag.status === "running" ? 1 : ag.status === "away" ? 0.25 : 0.6;
     }
     // with a logo, empty desks show it dimmed (a screensaver) instead of a dark screen
     return S.logo.tex ? 0.45 : 0.08;
@@ -789,7 +789,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
         paintScreen(screenSpec(a, css), sc.cv);
         sc.tex.needsUpdate = true;
         sc.spill.material.color.set(screenStyle(a.client, css).accent);
-        sc.lit = a.status === "working" || a.status === "waiting";
+        sc.lit = a.status === "working" || a.status === "running" || a.status === "waiting";
       }
       sc.spill.visible = sc.lit && S.theme === "night";
     }

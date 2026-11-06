@@ -147,7 +147,7 @@ function deskScreens() {
     return {
       agent: a.id, key: screenKey(a, css), x: p.x, y: DESK_SCREEN.y + DESK_SCREEN.h / 2, z: p.z, yaw: p.yaw, w: DESK_SCREEN.w, h: DESK_SCREEN.h,
       // the light it spills on the desk top at night
-      spill: { x: q.x, z: q.z, fx: r.x, fz: r.z, color: screenStyle(a.client, css).accent, lit: a.status === "working" || a.status === "waiting" },
+      spill: { x: q.x, z: q.z, fx: r.x, fz: r.z, color: screenStyle(a.client, css).accent, lit: a.status === "working" || a.status === "running" || a.status === "waiting" },
     };
   });
 }

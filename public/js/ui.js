@@ -184,7 +184,7 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
   function agentRow(a) {
     const last = lastLineOf(state.chat, a.id);
     const col = hueColors(a.hue ?? 0);
-    const line = a.status === "working" && a.activity ? a.activity : last ? `“${last.text}”` : a.client ?? "";
+    const line = (a.status === "working" || a.status === "running") && a.activity ? a.activity : last ? `“${last.text}”` : a.client ?? "";
     const designer = state.designer === a.id;
     return `<button class="agent ${a.status} ${dmAgent === a.id ? "sel" : ""} ${designer ? "designer" : ""}" data-id="${esc(a.id)}">
       <span class="av" style="--hue:${col.css}">${a.emoji ? esc(a.emoji) : esc(a.name.slice(0, 1).toUpperCase())}</span>

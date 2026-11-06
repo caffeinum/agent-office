@@ -135,6 +135,8 @@ export function poseFor(agent, hasDesk, now = Date.now()) {
   if (settling(agent, hasDesk, now)) return { pose: "sit", place: "desk" };
   switch (agent.status) {
     case "working": return hasDesk ? { pose: "type", place: "desk" } : { pose: "stand", place: "lounge" };
+    // its own job runs on (a build, subagents, a workflow): it sits back at its desk and waits, hands off the keyboard
+    case "running": return hasDesk ? { pose: "sit", place: "desk" } : { pose: "stand", place: "lounge" };
     case "waiting": return hasDesk ? { pose: "handup", place: "desk" } : { pose: "wave", place: "lounge" };
     case "away": return hasDesk ? { pose: "doze", place: "desk" } : { pose: "stand", place: "lounge" };
     case "idle": return { pose: "lounge", place: "lounge" };
@@ -145,7 +147,7 @@ export function poseFor(agent, hasDesk, now = Date.now()) {
 export const SEATED = new Set(["type", "handup", "doze", "sit"]);
 
 export function statusLabel(status) {
-  return { working: "working", idle: "idle", waiting: "needs input", away: "away" }[status] ?? status;
+  return { working: "working", running: "running", idle: "idle", waiting: "needs input", away: "away" }[status] ?? status;
 }
 
 /** Limb angles (radians) for the blocky rig. t in seconds; phase de-syncs characters. */
