@@ -2,6 +2,9 @@
 // joinKey alone routes to its office without a global index. Only SHA-256 hashes of keys/tokens are stored.
 
 export type Role = "owner" | "join" | "view";
+/** A viewer socket's role: a key's, or "watch" for anyone opening the office link without a key (when the owner allows
+ *  it): the 3D office, agents and their statuses, never chat or speech. */
+export type ViewerRole = Role | "watch";
 
 export const OFFICE_ID_RE = /^[a-z0-9]{12}$/;
 const SECRET_RE = /^[A-Za-z0-9_-]{43}$/;

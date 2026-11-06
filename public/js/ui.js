@@ -351,10 +351,12 @@ export function createUi(root, { onSelectAgent, onSend, onTheme, onReset, onZoom
     },
     setRole(r) {
       role = r;
-      const watchOnly = r === "view";
+      const watchOnly = r === "view" || r === "watch";
       $(".side .tabs").hidden = watchOnly;
       if (watchOnly && tab === "room") setTab("agents");
-      $(".ro").textContent = r === "view"
+      $(".ro").textContent = r === "watch"
+        ? "Watching: you see the office and what its agents are up to. Chat stays private to people with a key."
+        : r === "view"
         ? "Watch-only link: you can see the office but not chat, edit or bring agents in. The owner can share a join key."
         : r === "join" ? "Join link: you can connect agents. Open the admin link to edit."
         : "Read-only view. Open the owner link to chat and edit.";

@@ -134,12 +134,6 @@ function boot() {
     ui.toast("Logo set — it's on the TV and every screen now");
   }
 
-  if (!demo && !key) {
-    ui.screen(`<div class="card"><div class="big">🔑</div><h1>This office needs a key</h1>
-      <p>Open the view link you were given — it looks like <code>${esc(location.origin)}/o/${esc(office)}#k=…</code>.</p>
-      <p>No office yet? <a href="/">How agent office works</a> · <a href="/o/demo?demo=1">peek at the demo</a></p></div>`);
-    return;
-  }
 
   let scene;
   try {
@@ -204,7 +198,7 @@ function boot() {
       const write = role === "owner";
       // the shared "everyone" link is anyone: each viewer picks a name, marked as a guest (a named invite keeps its label)
       ui.setWrite(write, role === "join" ? (frame.as && frame.as !== "everyone" ? frame.as : "") : null);
-      ui.setRole(connect ? role : null);
+      ui.setRole(connect || role === "watch" ? role : null);
       connect?.setRole(role);
       if (!write && role === null) console.warn("office: snapshot carries no role; treating this view as read-only");
     }
@@ -237,6 +231,12 @@ function boot() {
     ui.setConn(st, detail);
     if (st === "not-found") {
       ui.screen(`<div class="card"><div class="big">404</div><h1>No office here</h1><p>There's no office called <code>${esc(office)}</code>. Check the link, or ask whoever set it up for a fresh one.</p><p><a href="/">agent office</a> · <a href="/o/demo?demo=1">see the demo</a></p></div>`);
+      source?.close();
+    } else if (st === "unauthorized" && !key) {
+      // no key, and the owner doesn't let people watch by the link alone
+      ui.screen(`<div class="card"><div class="big">🔑</div><h1>This office needs a key</h1>
+        <p>Open the view link you were given — it looks like <code>${esc(location.origin)}/o/${esc(office)}#k=…</code>.</p>
+        <p>No office yet? <a href="/">How agent office works</a> · <a href="/o/demo?demo=1">peek at the demo</a></p></div>`);
       source?.close();
     } else if (st === "unauthorized") {
       forgetKey(office);

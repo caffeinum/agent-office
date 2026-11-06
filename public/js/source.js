@@ -13,13 +13,14 @@ export function connectLive({ office, key, onFrame, onStatus }) {
   let ws = null, tries = 0, closed = false, gotSnapshot = false, timer = 0, ping = 0;
   // the key rides in a WebSocket subprotocol (browsers can't set headers), never in the URL, so it stays out of logs
   const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/o/${encodeURIComponent(office)}/ws`;
-  const protocols = ["agent-office", `ao-key.${key}`];
+  // no key: watch the office the way anyone with its link may (if its owner allows): the 3D office, no chat
+  const protocols = key ? ["agent-office", `ao-key.${key}`] : ["agent-office"];
 
   async function probe() {
     // A failed upgrade hides the HTTP status from the browser, so ask the same URL as a plain GET:
     // 404 = no such office, 401/403 = bad key, 426 = fine (it wanted an upgrade) → transient.
     try {
-      const r = await fetch(url.replace(/^ws/, "http"), { headers: { accept: "application/json", authorization: `Bearer ${key}` } });
+      const r = await fetch(url.replace(/^ws/, "http"), { headers: { accept: "application/json", ...(key ? { authorization: `Bearer ${key}` } : {}) } });
       let msg = "";
       try { msg = (await r.json()).error ?? ""; } catch { /* non-JSON body */ }
       if (r.status === 404) return { state: "not-found", detail: msg || "no such office" };

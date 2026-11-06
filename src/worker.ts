@@ -87,7 +87,9 @@ async function route(req: Request, env: Env): Promise<Response> {
   const ws = /^\/o\/([^/]+)\/ws$/.exec(path);
   if (ws) {
     const office = ws[1]!;
-    if (!OFFICE_ID_RE.test(office) || officeOfKey(keyFromRequest(req)) !== office) {
+    // no key at all: the office decides (it lets watchers in when the owner allows public watching)
+    const key = keyFromRequest(req);
+    if (!OFFICE_ID_RE.test(office) || (key && officeOfKey(key) !== office)) {
       return errorResponse(401, "missing or wrong key for this office (subprotocol ao-key.<key>, Authorization: Bearer <key>, or ?k=<key>)");
     }
     return officeStub(env, office).fetch(req);

@@ -7,7 +7,7 @@ import {
 } from "./shared/design";
 import { ASSET_BYTES_MAX, ASSET_DIM_MAX, ASSETS_MAX, ASSETS_TOTAL_MAX, decodeBase64, sniffImage } from "./images";
 import {
-  DEFAULT_INVITE, newOfficeKey, normalizeKeyHashes, randomSecret, roleOfKey, sha256hex, keyFromRequest, tripcode, WS_PROTOCOL, type Invite, type KeyHashes, type Role,
+  DEFAULT_INVITE, newOfficeKey, normalizeKeyHashes, randomSecret, roleOfKey, sha256hex, keyFromRequest, tripcode, WS_PROTOCOL, type Invite, type KeyHashes, type Role, type ViewerRole,
 } from "./auth";
 import { CORS_HEADERS, errorResponse, HttpError, json, readJson } from "./http";
 import { CHAT_WAIT_DEFAULT_SEC, isMergedTool, MERGED_ROUTES, NAME_MAX, SPOOF_LINE_RE, parseArgs, parseOwnerFrame, ToolError, type MergedTool, type Status, type ToolArgs, type ToolName, ACTIVITY_MAX } from "./tools";
@@ -174,6 +174,9 @@ interface Meta {
   grid: Grid;
   keys: KeyHashes;
   createdAt: number;
+  /** Anyone with the office link may watch without a key (agents, statuses, movement; no chat). On unless the owner
+   *  turned it off (absent = on: every office so far is aleks's, 2026-11-06). */
+  publicWatch?: boolean;
 }
 
 export interface CallCtx {
@@ -209,7 +212,7 @@ export interface ToolHost {
 export type EventMethod = "events/list" | "events/subscribe" | "events/unsubscribe";
 
 type Frame =
-  | { type: "snapshot"; state: OfficeState; role: Role; as?: string }
+  | { type: "snapshot"; state: OfficeState; role: ViewerRole; as?: string }
   | { type: "agent"; agent: Agent }
   | { type: "agent-left"; id: string }
   | { type: "item"; item: Item }
@@ -230,10 +233,22 @@ const OWNER_TOOLS = new Set<ToolName>(["office_theme_get", "office_theme_set", "
 type WakeReason = "message" | "timeout" | "replaced" | "gone";
 
 interface WsAttachment {
-  role: Role;
+  role: ViewerRole;
   sid: string;
   /** Join-key viewers chat as their invite's label. */
   label?: string;
+}
+
+/** What a keyless watcher may see of the office: everything 3D, agents and statuses, but no chat and no speech. */
+export function watchState(st: OfficeState): OfficeState {
+  return { ...st, chat: [], agents: st.agents.map(({ says: _says, ...a }) => a) };
+}
+
+/** A broadcast frame as a watcher gets it: chat dropped (null), speech taken off agents, the rest as is. */
+export function watchFrame(f: Frame): Frame | null {
+  if (f.type === "chat") return null;
+  if (f.type === "agent" && f.agent.says) { const { says: _says, ...agent } = f.agent; return { ...f, agent }; }
+  return f;
 }
 
 /** A shared-link guest's chosen name, cleaned and marked: "mossy-otter" → "mossy-otter (guest)"; nothing usable → "guest". */
@@ -467,7 +482,9 @@ export class Office extends DurableObject<Env> implements ToolHost {
       if (asset) return this.serveAsset(req, asset[1]!);
       const ip = req.headers.get("cf-connecting-ip") ?? "local";
       this.rateLimit(`ip:${ip}`, IP_RATE_MAX);
-      const match = await roleOfKey(keyFromRequest(req), this.meta.keys);
+      const key = keyFromRequest(req);
+      const match = await roleOfKey(key, this.meta.keys);
+      if (!match && !key && this.meta.publicWatch !== false && /^\/o\/[^/]+\/ws$/.test(url.pathname)) return this.acceptViewer(req, "watch", "public", null);
       if (!match) return errorResponse(401, "missing or wrong key for this office (Authorization: Bearer <key> or ?key=)");
       const { role, invite } = match;
       await this.markActive(role === "owner");
@@ -500,11 +517,12 @@ export class Office extends DurableObject<Env> implements ToolHost {
         if (req.method === "GET") return json(200, { link: this.cityLink, cityInvites: [...this.cityInvites] });
         return json(200, await this.requestCityLink(((await readJson(req)) ?? {}) as Record<string, unknown>, ip));
       }
-      if (m && (m[1] === "kick" || m[1] === "rotate-keys" || m[1] === "rotate_keys" || m[1] === "designer" || m[1] === "view-keys")) {
+      if (m && (m[1] === "kick" || m[1] === "rotate-keys" || m[1] === "rotate_keys" || m[1] === "designer" || m[1] === "view-keys" || m[1] === "public")) {
         if (role !== "owner") return errorResponse(403, `${m[1]} needs the ownerKey`);
         if (req.method !== "POST") return errorResponse(405, `POST /api/o/:office/${m[1]}`);
         const body = ((await readJson(req)) ?? {}) as Record<string, unknown>;
         if (m[1] === "kick") return json(200, await this.kick(body.id, "human:owner"));
+        if (m[1] === "public") return json(200, await this.setPublicWatch(body.on));
         if (m[1] === "designer") return json(200, await this.setDesigner(body.id));
         if (m[1] === "view-keys") return json(200, await this.manageViewKeys(body, url.origin));
         return json(200, await this.rotateKeys(body.which, new URL(req.url).origin));
@@ -535,7 +553,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       return errorResponse(400, `init needs the joinKey matching keys.join (one "${DEFAULT_INVITE}" invite)`);
     }
     if (typeof body.viewKey !== "string" || !body.keys.view.includes(await sha256hex(body.viewKey))) return errorResponse(400, "init needs the viewKey matching keys.view");
-    const meta: Meta = { id: body.id, name: body.name, grid: { ...GRID }, keys: body.keys, createdAt: Date.now() };
+    const meta: Meta = { id: body.id, name: body.name, grid: { ...GRID }, keys: body.keys, createdAt: Date.now(), publicWatch: true };
     const items = defaultLayout(meta.createdAt);
     const activity: Activity = { lastActiveAt: meta.createdAt, lastOwnerAt: meta.createdAt, joined: false, graceUntil: meta.createdAt };
     const puts: Record<string, unknown> = {
@@ -717,7 +735,23 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   private broadcast(frame: Frame): void {
     const data = JSON.stringify(frame);
-    for (const ws of this.ctx.getWebSockets("viewer")) sendSocket(ws, data);
+    const watched = watchFrame(frame);
+    const watchData = watched === frame ? data : watched && JSON.stringify(watched);
+    for (const ws of this.ctx.getWebSockets("viewer")) {
+      const watcher = (ws.deserializeAttachment() as WsAttachment).role === "watch";
+      if (!watcher) sendSocket(ws, data);
+      else if (watchData) sendSocket(ws, watchData);
+    }
+  }
+
+  /** Owner: let anyone with the link watch (or not). Turning it off closes every keyless watcher. */
+  private async setPublicWatch(on: unknown) {
+    if (typeof on !== "boolean") throw new ToolError(400, "public needs {on: true | false}");
+    const meta = this.mustMeta();
+    this.meta = { ...meta, publicWatch: on };
+    await this.ctx.storage.put("meta", this.meta);
+    if (!on) for (const ws of this.ctx.getWebSockets("watch")) ws.close(4003, "the owner stopped public watching");
+    return { ok: true, publicWatch: on };
   }
 
   private async saveAgent(a: AgentRecord, broadcast = true): Promise<void> {
@@ -1922,14 +1956,17 @@ export class Office extends DurableObject<Env> implements ToolHost {
 
   // ---------- viewers ----------
 
-  private acceptViewer(req: Request, role: Role, keyHash: string, invite: Invite | null): Response {
+  private acceptViewer(req: Request, role: ViewerRole, keyHash: string, invite: Invite | null): Response {
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return errorResponse(426, "expected a WebSocket upgrade");
     if (this.ctx.getWebSockets("viewer").length >= MAX_VIEWERS) return errorResponse(503, `too many viewers (${MAX_VIEWERS})`);
+    // keyless watchers get at most half the seats, so a crowd off a shared link never locks out the office's own people
+    if (role === "watch" && this.ctx.getWebSockets("watch").length >= MAX_VIEWERS / 2) return errorResponse(503, "too many people watching this office right now");
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(server, ["viewer", role, `k:${keyHash}`]);
     server.serializeAttachment({ role, sid: shortId() + shortId(), ...(invite ? { label: invite.label } : {}) } satisfies WsAttachment);
-    server.send(JSON.stringify({ type: "snapshot", state: this.state(), role, ...(invite ? { as: invite.label } : {}) } satisfies Frame));
+    const state = role === "watch" ? watchState(this.state()) : this.state();
+    server.send(JSON.stringify({ type: "snapshot", state, role, ...(invite ? { as: invite.label } : {}) } satisfies Frame));
     const offered = (req.headers.get("sec-websocket-protocol") ?? "").split(",").map((p) => p.trim());
     const headers = offered.includes(WS_PROTOCOL) ? { "sec-websocket-protocol": WS_PROTOCOL } : undefined;
     return new Response(null, { status: 101, webSocket: client, headers });

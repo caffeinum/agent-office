@@ -326,8 +326,9 @@ describe("presence alarm", () => {
 });
 
 describe("viewer websocket", () => {
-  async function open(o: { id: string }, key: string) {
-    const res = await SELF.fetch(`${ORIGIN}/o/${o.id}/ws?k=${encodeURIComponent(key)}`, { headers: { upgrade: "websocket" } });
+  async function open(o: { id: string }, key: string | null) {
+    const q = key === null ? "" : `?k=${encodeURIComponent(key)}`;
+    const res = await SELF.fetch(`${ORIGIN}/o/${o.id}/ws${q}`, { headers: { upgrade: "websocket" } });
     expect(res.status).toBe(101);
     const ws = res.webSocket!;
     const frames: any[] = [];
@@ -350,6 +351,39 @@ describe("viewer websocket", () => {
     };
     return { ws, frames, next };
   }
+
+  it("lets anyone with the link watch without a key: agents and statuses, never chat or speech; the owner can turn it off", async () => {
+    const o = await createOffice();
+    const a = await join(o, "Talky");
+    await call(o, "say", { text: "secret plans" }, { token: a.agentToken });
+    const watcher = await open(o, null);
+    const snap = await watcher.next((f) => f.type === "snapshot");
+    expect(snap.role).toBe("watch");
+    expect(snap.state.chat).toEqual([]);
+    const me = snap.state.agents.find((x: any) => x.id === a.agent.id);
+    expect(me.name).toBe("Talky");
+    expect(me.says).toBeUndefined();
+
+    await call(o, "status", { status: "working", activity: "painting" }, { token: a.agentToken });
+    await watcher.next((f) => f.type === "agent" && f.agent.activity === "painting");
+    await call(o, "say", { text: "more secrets" }, { token: a.agentToken });
+    await call(o, "status", { status: "idle" }, { token: a.agentToken });
+    await watcher.next((f) => f.type === "agent" && f.agent.status === "idle");
+    expect(watcher.frames.some((f) => f.type === "chat")).toBe(false);
+    expect(watcher.frames.some((f) => f.type === "agent" && f.agent.says)).toBe(false);
+    // a watcher can't chat
+    watcher.ws.send(JSON.stringify({ type: "chat", text: "hi" }));
+    await watcher.next((f) => f.type === "error");
+
+    // a wrong key is still refused (no falling back to watching)
+    expect((await SELF.fetch(`${ORIGIN}/o/${o.id}/ws?k=${encodeURIComponent(o.joinKey.replace(/.$/, "x"))}`, { headers: { upgrade: "websocket" } })).status).toBe(401);
+    // the owner turns it off: watchers are closed and refused
+    const off = await SELF.fetch(`${ORIGIN}/api/o/${o.id}/public`, { method: "POST", headers: { authorization: `Bearer ${o.ownerKey}`, "content-type": "application/json" }, body: JSON.stringify({ on: false }) });
+    expect(off.status).toBe(200);
+    expect((await SELF.fetch(`${ORIGIN}/o/${o.id}/ws`, { headers: { upgrade: "websocket" } })).status).toBe(401);
+    const notOwner = await SELF.fetch(`${ORIGIN}/api/o/${o.id}/public`, { method: "POST", headers: { authorization: `Bearer ${o.joinKey}`, "content-type": "application/json" }, body: JSON.stringify({ on: true }) });
+    expect(notOwner.status).toBe(403);
+  });
 
   it("sends a snapshot then deltas; owner can chat and edit, viewer cannot", async () => {
     const o = await createOffice();
