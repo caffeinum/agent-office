@@ -122,6 +122,27 @@ final class OfficeModel: ObservableObject {
         bridgeTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in self?.checkBridge() }
     }
 
+    /// The logo the office shows now (fetched or being fetched).
+    private var logoWanted: OfficeScene.Logo?
+
+    /// scene.js syncLogo: fetches the office logo (asset URLs need no key) and hands it to the renderer; a failed fetch
+    /// leaves the plain screens and says so.
+    private func fetchLogo(_ logo: OfficeScene.Logo?, screenBg: String) {
+        logoWanted = logo
+        guard let logo else { renderer.setLogo(nil, id: nil, screenBg: screenBg); return }
+        guard let base = link?.bridgeURL, let url = URL(string: logo.url, relativeTo: base) else { failure = "bad logo URL \(logo.url)"; return }
+        URLSession.shared.dataTask(with: url) { [weak self] data, resp, error in
+            DispatchQueue.main.async {
+                guard let self, self.logoWanted == logo else { return }
+                guard error == nil, (resp as? HTTPURLResponse)?.statusCode == 200, let data, let img = UIImage(data: data) else {
+                    print("office logo: couldn't load \(url.absoluteString): \(error?.localizedDescription ?? "status \((resp as? HTTPURLResponse)?.statusCode ?? 0)")")
+                    return
+                }
+                self.renderer.setLogo(img, id: logo.id, screenBg: screenBg)
+            }
+        }.resume()
+    }
+
     private func connect() {
         guard let link else { return }
         connection?.stop()
@@ -297,6 +318,7 @@ final class OfficeModel: ObservableObject {
         do {
             guard let s = try bridge?.scene() else { return }
             renderer.apply(s)
+            if s.logo != logoWanted { fetchLogo(s.logo, screenBg: s.look.screenBg) }
             title = s.name ?? s.id
             agents = s.agents
             chat = s.chat

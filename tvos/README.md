@@ -7,7 +7,7 @@ A native tvOS viewer (tvOS has no browser or web view). Read-only, live over the
 - The app downloads that bundle from the office's site (`/tv/office-bridge.js`, copied to `public/tv/` by
   `build-bridge.sh`) at launch and every 10 minutes, and swaps it in while running: a push to main changes behaviour on
   the TV without a rebuild. It loads only if its `AO.api` matches the app's `Bridge.api` (bump both when the Swift side
-  must change); otherwise, or offline, the app keeps the cached or built-in copy. Only Swift changes need a rebuild.
+  must change; now 2); otherwise, or offline, the app keeps the cached or built-in copy. Only Swift changes need a rebuild.
 - `AgentOfficeTV/Sources` draws it with SceneKit: `Bridge` (JSContext), `Connection` (WebSocket with the key in a
   subprotocol), `OfficeRenderer` (room, furniture), `AgentNode` (characters, name tags).
 

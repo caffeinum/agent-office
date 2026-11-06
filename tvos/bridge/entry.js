@@ -1,7 +1,7 @@
 // The Apple TV viewer's brain, run in JavaScriptCore: the web viewer's own pure modules decide furniture shapes,
 // desk seating, idle spots and wandering, so the TV places everything exactly where a browser would. Swift feeds
 // it the office WebSocket frames and draws what scene() returns.
-import { MODELS, SEAT_Y, WALL_H } from "../../public/js/furniture.js";
+import { MODELS, SEAT_Y, WALL_H, customTextPanel } from "../../public/js/furniture.js";
 import {
   applyFrame, assignSpots, talkPartners, deskSeating, entryPoint, hashStr, idleSpots, itemPoint, kindGeometryPlan, layoutBatches, poseFor, seatOf,
   usableSpots, wanderSalt, limbAngles, route, cullLabels, labelPriority, placedLights,
@@ -57,6 +57,7 @@ function kindParts(kind, custom) {
       defaultColor: m.defaultColor ?? null,
       glowColor: m.glow?.color ?? null,
       glowLamp: !!m.glow?.lamp,
+      screen: !!kindOf(kind, custom)?.screen,
       parts: [
         { role: "base", boxes: boxesOf(m.base) },
         { role: "accent", boxes: boxesOf(m.accent), map: m.accentMap === "rug" ? "rug" : "grain" },
@@ -78,6 +79,7 @@ function kindParts(kind, custom) {
     defaultColor: null,
     glowColor: null,
     glowLamp: false,
+    screen: !!def.screen,
     parts: [
       { role: "base", boxes: [...plan.matte, ...plan.glossy].map((b) => toBox(b)) },
       { role: "flat", boxes: plan.flat.map((b) => toBox(b)) },
@@ -165,7 +167,7 @@ function nameOf(ref) {
 globalThis.AO = {
   /** The shape of this API (what AO's functions take and return). The app loads a bundle downloaded from the office's
    *  site only when this matches its own Bridge.api: bump it with any change the Swift side has to follow. */
-  api: 1,
+  api: 2,
   /** The web viewer's A* walk from one point to another (cell centres, then the exact goal), as JSON [[x, z], …]. */
   route(fx, fz, tx, tz) {
     if (!walk) return "[]";
@@ -234,8 +236,10 @@ globalThis.AO = {
   scene(now, time) {
     if (!state) return JSON.stringify(null);
     const custom = state.customKinds ?? {};
-    const { batches } = layoutBatches(state.items, custom);
+    const { batches, texts } = layoutBatches(state.items, custom);
     const items = [...batches.values()].flat();
+    const look = themeLook(state.theme);
+    const logo = look.logo ? (state.assets ?? []).find((a) => a.id === look.logo) ?? null : null;
     const kinds = {};
     for (const it of items) if (!kinds[it.kind]) kinds[it.kind] = kindParts(it.kind, custom);
     const t = targets(now);
@@ -259,6 +263,20 @@ globalThis.AO = {
         rig: characterRig(a), target: t.get(a.id),
       })),
       screens: deskScreens(),
+      // scene.js syncTexts/panelStyle: each textable item's panel (item frame), colours, and whether the logo goes on it
+      texts: texts.map((t) => {
+        const builtin = MODELS[t.kind]?.().text;
+        const panel = builtin ?? (custom[t.kind]?.textable ? customTextPanel(custom[t.kind]) : null);
+        if (!panel) throw new Error(`textable kind ${t.kind} has no text panel`);
+        const sign = t.kind === "sign" || !builtin;
+        return {
+          id: t.id, text: t.text, x: t.x, z: t.z, yaw: t.yaw,
+          panel: { x: panel.x, y: panel.y, z: panel.z, w: panel.w, h: panel.h, tw: panel.tw, th: panel.th },
+          bg: sign ? look.signBg : panel.bg, fg: sign ? look.signFg : panel.fg, logo: sign && !!look.logoOnSigns && !!logo,
+        };
+      }),
+      // scene.js syncLogo: the office logo's image (office-relative URL), shown on every screen kind
+      logo: logo ? { id: logo.id, url: logo.url } : null,
       chat: state.chat.slice(-40).map((m) => ({ from: nameOf(m.from), to: m.to ? nameOf(m.to) : null, text: m.text, ts: m.ts })),
     });
   },

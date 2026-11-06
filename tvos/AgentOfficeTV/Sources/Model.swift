@@ -37,7 +37,8 @@ struct OfficeScene: Decodable, Equatable {
     struct Box: Codable, Equatable { let at: [Double]; let size: [Double]; let color: String?; let faces: [Int]?; let unitUV: Bool?; let slope: String?; let lowFrac: Double? }
     /// Boxes for voxel.js to merge, or (mesh roles) a custom kind's triangle meshes already built by voxel.js.
     struct Part: Decodable, Equatable { let role: String; let boxes: [Box]; let map: String?; let mesh: MeshData? }
-    struct Kind: Decodable, Equatable { let defaultColor: String?; let glowColor: String?; let glowLamp: Bool; let parts: [Part] }
+    /// `screen`: its screen boxes show the office logo when there is one (catalog screen: true).
+    struct Kind: Decodable, Equatable { let defaultColor: String?; let glowColor: String?; let glowLamp: Bool; let screen: Bool; let parts: [Part] }
     struct Item: Decodable, Equatable { let id: String; let kind: String; let x: Double; let z: Double; let yaw: Double; let color: String? }
     struct Target: Decodable, Equatable { let key: String; let x: Double; let z: Double; let yaw: Double; let pose: String; let seatY: Double }
     struct RigPart: Decodable, Equatable { let parent: String?; let at: [Double]; let boxes: [Box]; let face: [Box]? }
@@ -65,6 +66,16 @@ struct OfficeScene: Decodable, Equatable {
         let agent: String; let key: String; let x, y, z, yaw, w, h: Double; let spill: Spill
     }
     let screens: [Screen]
+    /// A textable item's panel (poster, whiteboard, sign): its spot, the panel in the item's frame, colours, and whether
+    /// the office logo goes on it (signs, with theme.logoOnSigns).
+    struct TextPanel: Decodable, Equatable {
+        struct Panel: Decodable, Equatable { let x, y, z, w, h: Double; let tw, th: Double }
+        let id: String; let text: String; let x, z, yaw: Double; let panel: Panel; let bg, fg: String; let logo: Bool
+    }
+    let texts: [TextPanel]
+    /// The office logo (an uploaded asset, office-relative URL), or nil.
+    struct Logo: Decodable, Equatable { let id: String; let url: String }
+    let logo: Logo?
     let chat: [Chat]
 }
 

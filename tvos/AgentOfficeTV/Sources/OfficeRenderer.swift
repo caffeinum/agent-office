@@ -15,6 +15,11 @@ final class OfficeRenderer: NSObject {
     private(set) var view: OfficeSCNView?
     private let room = SCNNode()
     private let furniture = SCNNode()
+    /// Poster, whiteboard and sign panels (syncTexts).
+    private let textRoot = SCNNode()
+    private var texts: [String: (node: SCNNode, sig: String)] = [:]
+    /// The office logo and its screen picture, once the app has fetched it (setLogo).
+    private var logo: (id: String, image: UIImage, screen: UIImage)?
     private let people = SCNNode()
     private let overlay = SKScene()
     private var sun: SCNNode!
@@ -22,7 +27,7 @@ final class OfficeRenderer: NSObject {
     private var cityLights: SCNNode?
     private let lampLights = SCNNode()
     /// Glow materials and what they light up as at night (scene.js applyGlow).
-    private var glows: [(mat: SCNMaterial, lamp: Bool, window: Bool, night: Bool)] = []
+    private var glows: [(mat: SCNMaterial, lamp: Bool, window: Bool, night: Bool, logo: Bool, fallback: UIImage?)] = []
     private var pills: [String: Pill] = [:]
     private var last: OfficeScene?
     private var agents: [String: AgentNode] = [:]
@@ -62,7 +67,7 @@ final class OfficeRenderer: NSObject {
     override init() {
         super.init()
         scene.background.contents = UIColor(red: 0.78, green: 0.88, blue: 0.96, alpha: 1)
-        for n in [room, furniture, people, lampLights] { scene.rootNode.addChildNode(n) }
+        for n in [room, furniture, textRoot, people, lampLights] { scene.rootNode.addChildNode(n) }
         camera.camera = SCNCamera()
         camera.camera?.fieldOfView = 30
         camera.camera?.projectionDirection = .vertical
@@ -139,6 +144,7 @@ final class OfficeRenderer: NSObject {
         let joined = s.agents.contains { agents[$0.id] == nil }
         syncAgents(s)
         syncScreens(s)
+        syncTexts(s)
         if Self.zoneShaders { stampZones(s.look.zones, force: (furnished || joined) && !s.look.zones.isEmpty) }
         else { shadeZones(s.look.zones) }
         if follow.map({ id in !s.agents.contains { $0.id == id } }) == true { follow = nil }
@@ -303,7 +309,7 @@ final class OfficeRenderer: NSObject {
                 let accentCss = item.color ?? s.look.kindColors[item.kind] ?? kind.defaultColor ?? "#ffffff"
                 let c = Float(cos(item.yaw)), sn = Float(sin(item.yaw)), tx = Float(item.x), tz = Float(item.z)
                 for p in parts[item.kind]! {
-                    let tint = p.role == "accent" ? accentCss : ["glow", "nightGlow"].contains(p.role) ? "\(kind.glowColor ?? "")|\(kind.glowLamp)" : ""
+                    let tint = p.role == "accent" ? accentCss : ["glow", "nightGlow"].contains(p.role) ? "\(kind.glowColor ?? "")|\(kind.glowLamp)|\(kind.screen)" : ""
                     let key = "\(p.role)|\(p.map ?? "")|\(tint)|\(dim)"
                     if batches[key] == nil {
                         let mat = try material(role: p.role, map: p.map, accent: cssColor(accentCss), kind: kind, look: s.look, voxel: voxel)
@@ -356,11 +362,57 @@ final class OfficeRenderer: NSObject {
         }
         if role == "glass" { mat.transparency = 0.38; mat.writesToDepthBuffer = false }
         if ["glow", "meshGlow", "nightGlow", "meshNightGlow"].contains(role) {
-            glows.append((mat, kind.glowLamp, map == "window", role == "nightGlow" || role == "meshNightGlow"))
+            // scene.js screenMap: a screen kind's screen shows the office logo once there is one
+            let logoed = kind.screen && ["screen", "screenOff", "tv"].contains(map ?? "")
+            let fallback = mat.diffuse.contents as? UIImage
+            if logoed, let logo { mat.diffuse.contents = logo.screen }
+            glows.append((mat, kind.glowLamp, map == "window", role == "nightGlow" || role == "meshNightGlow", logoed, fallback))
         }
         // triangle meshes are drawn from both sides, like the web's DoubleSide mesh materials
         if role.hasPrefix("mesh") { mat.isDoubleSided = true }
         return mat
+    }
+
+    // MARK: text panels and logo
+
+    /// scene.js syncTexts: a lit plane per poster, whiteboard and sign, redrawn only when what it shows changes.
+    private func syncTexts(_ s: OfficeScene) {
+        guard let voxel else { preconditionFailure("renderer has no bridge") }
+        let want = Dictionary(uniqueKeysWithValues: s.texts.map { ($0.id, $0) })
+        let sig = { (t: OfficeScene.TextPanel) in "\(t.text)|\(t.bg)|\(t.fg)|\(t.x)|\(t.z)|\(t.yaw)|\(t.panel)|\(t.logo ? self.logo?.id ?? "" : "")" }
+        for (id, o) in texts where want[id].map(sig) != o.sig {
+            o.node.removeFromParentNode()
+            texts[id] = nil
+        }
+        for t in s.texts where texts[t.id] == nil {
+            let p = t.panel
+            let image = if t.logo, let logo {
+                TextPainter.logoText(logo.image, t.text, bg: cssColor(t.bg), fg: cssColor(t.fg), w: p.tw * 2, h: p.th * 2)
+            } else {
+                TextPainter.text(t.text, bg: cssColor(t.bg), fg: cssColor(t.fg), w: p.tw, h: p.th)
+            }
+            let plane = SCNPlane(width: p.w, height: p.h)
+            plane.firstMaterial = voxel.material(map: image, roughness: 0.9)
+            let panel = SCNNode(geometry: plane)
+            panel.position = SCNVector3(p.x, p.y, p.z)
+            let holder = SCNNode()
+            holder.position = SCNVector3(t.x, 0, t.z)
+            holder.eulerAngles.y = Float(t.yaw)
+            holder.addChildNode(panel)
+            textRoot.addChildNode(holder)
+            texts[t.id] = (holder, sig(t))
+        }
+    }
+
+    /// The office logo arrived (or went): screens of screen kinds show it, signs with logoOnSigns print it.
+    func setLogo(_ image: UIImage?, id: String?, screenBg: String) {
+        if let id, let image { logo = (id, image, TextPainter.logoScreen(image, bg: cssColor(screenBg))) } else { logo = nil }
+        for g in glows where g.logo { g.mat.diffuse.contents = logo?.screen ?? g.fallback ?? UIColor.white }
+        if let s = last {
+            texts.values.forEach { $0.node.removeFromParentNode() }
+            texts = [:]
+            syncTexts(s)
+        }
     }
 
     // MARK: desk screens

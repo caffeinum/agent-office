@@ -15,7 +15,7 @@ import {
   SEATED, settling, talkPartners, wanderSalt, assignSpots, blockedCells, deskSeating, entryPoint, hashStr, idleSpots, kindGeometryPlan, layoutBatches, limbAngles, poseFor,
   hueColors, itemPoint, placedLights, route, seatOf, themeLook, usableSpots,
 } from "./model.js";
-import { DESK_SCREEN, MODELS, SEAT_Y, WALL_H } from "./furniture.js";
+import { DESK_SCREEN, MODELS, SEAT_Y, WALL_H, customTextPanel } from "./furniture.js";
 import { buildGeometry, buildMeshGeometry, vbox } from "./voxel.js";
 import { CROWN, applyLimbs, applyProps, awayMaterial, baseMaterial, blink, buildCharacter, characterMaterials } from "./character.js";
 import { POINT_LIGHTS_GL, setPointExempt, setZones, withZones } from "./zone-shader.js";
@@ -242,13 +242,7 @@ export function createScene(container, { fetchAsset = (url) => fetch(url), onErr
     }
     // a textable custom kind gets a sign-like panel on its front face, sized to the model
     let text = null;
-    if (def.textable) {
-      let top = 0;
-      for (const b of def.boxes) top = Math.max(top, (b.y + b.h) / 16);
-      for (const m of def.meshes) for (const v of m.vertices) top = Math.max(top, v[1] / 16);
-      const w = Math.max(0.4, def.w * 0.86), h = Math.min(Math.max(0.3, top * 0.6), 1.2);
-      text = { x: 0, y: Math.max(h / 2 + 0.05, top - h / 2 - 0.08), z: def.d / 2 + 0.006, w, h, bg: S.look.signBg, fg: S.look.signFg, tw: Math.round(172 * w), th: Math.round(172 * h) };
-    }
+    if (def.textable) text = { ...customTextPanel(def), bg: S.look.signBg, fg: S.look.signFg };
     return { parts, model: { text, noShadow: def.layer === "floor" }, defaultColor: new THREE.Color("#ffffff"), custom: true, plan };
   }
 

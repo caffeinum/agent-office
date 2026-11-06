@@ -236,3 +236,13 @@ export const MODELS = {
 
 for (const k of Object.keys(KINDS)) if (!MODELS[k]) throw new Error(`furniture: no model for catalog kind "${k}"`);
 for (const k of Object.keys(MODELS)) if (!KINDS[k]) throw new Error(`furniture: model "${k}" is not in the catalog`);
+
+/** Where a textable custom kind's sign-like panel sits on its front face, sized to the model (item frame, metres;
+ *  tw/th the texture size). Shared by the web scene and the TV bridge. */
+export function customTextPanel(def) {
+  let top = 0;
+  for (const b of def.boxes) top = Math.max(top, (b.y + b.h) / 16);
+  for (const m of def.meshes) for (const v of m.vertices) top = Math.max(top, v[1] / 16);
+  const w = Math.max(0.4, def.w * 0.86), h = Math.min(Math.max(0.3, top * 0.6), 1.2);
+  return { x: 0, y: Math.max(h / 2 + 0.05, top - h / 2 - 0.08), z: def.d / 2 + 0.006, w, h, tw: Math.round(172 * w), th: Math.round(172 * h) };
+}

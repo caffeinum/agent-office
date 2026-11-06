@@ -5,7 +5,7 @@ import JavaScriptCore
 /// downloaded from the office's site (or the one built in), and `reload` swaps in a newer one while running.
 final class Bridge {
     /// The AO API this app speaks (entry.js AO.api): a downloaded bundle with another number is ignored.
-    static let api = 1
+    static let api = 2
     private var context: JSContext
     private var ao: JSValue
     /// The source now running, to tell a new download from the same one.

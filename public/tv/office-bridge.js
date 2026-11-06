@@ -527,6 +527,13 @@
   };
   for (const k2 of Object.keys(KINDS)) if (!MODELS[k2]) throw new Error(`furniture: no model for catalog kind "${k2}"`);
   for (const k2 of Object.keys(MODELS)) if (!KINDS[k2]) throw new Error(`furniture: model "${k2}" is not in the catalog`);
+  function customTextPanel(def) {
+    let top = 0;
+    for (const b of def.boxes) top = Math.max(top, (b.y + b.h) / 16);
+    for (const m of def.meshes) for (const v of m.vertices) top = Math.max(top, v[1] / 16);
+    const w = Math.max(0.4, def.w * 0.86), h = Math.min(Math.max(0.3, top * 0.6), 1.2);
+    return { x: 0, y: Math.max(h / 2 + 0.05, top - h / 2 - 0.08), z: def.d / 2 + 6e-3, w, h, tw: Math.round(172 * w), th: Math.round(172 * h) };
+  }
 
   // public/shared/theme.js
   var FLOOR_MATERIALS = Object.freeze(["wood", "tile", "concrete", "carpet"]);
@@ -2331,6 +2338,7 @@
         defaultColor: m.defaultColor ?? null,
         glowColor: m.glow?.color ?? null,
         glowLamp: !!m.glow?.lamp,
+        screen: !!kindOf(kind, custom)?.screen,
         parts: [
           { role: "base", boxes: boxesOf(m.base) },
           { role: "accent", boxes: boxesOf(m.accent), map: m.accentMap === "rug" ? "rug" : "grain" },
@@ -2352,6 +2360,7 @@
       defaultColor: null,
       glowColor: null,
       glowLamp: false,
+      screen: !!def.screen,
       parts: [
         { role: "base", boxes: [...plan.matte, ...plan.glossy].map((b) => toBox(b)) },
         { role: "flat", boxes: plan.flat.map((b) => toBox(b)) },
@@ -2434,7 +2443,7 @@
   globalThis.AO = {
     /** The shape of this API (what AO's functions take and return). The app loads a bundle downloaded from the office's
      *  site only when this matches its own Bridge.api: bump it with any change the Swift side has to follow. */
-    api: 1,
+    api: 2,
     /** The web viewer's A* walk from one point to another (cell centres, then the exact goal), as JSON [[x, z], …]. */
     route(fx, fz, tx, tz) {
       if (!walk) return "[]";
@@ -2503,8 +2512,10 @@
     scene(now, time) {
       if (!state) return JSON.stringify(null);
       const custom = state.customKinds ?? {};
-      const { batches } = layoutBatches(state.items, custom);
+      const { batches, texts } = layoutBatches(state.items, custom);
       const items = [...batches.values()].flat();
+      const look = themeLook(state.theme);
+      const logo = look.logo ? (state.assets ?? []).find((a) => a.id === look.logo) ?? null : null;
       const kinds = {};
       for (const it of items) if (!kinds[it.kind]) kinds[it.kind] = kindParts(it.kind, custom);
       const t = targets(now);
@@ -2536,6 +2547,26 @@
           target: t.get(a.id)
         })),
         screens: deskScreens(),
+        // scene.js syncTexts/panelStyle: each textable item's panel (item frame), colours, and whether the logo goes on it
+        texts: texts.map((t2) => {
+          const builtin = MODELS[t2.kind]?.().text;
+          const panel = builtin ?? (custom[t2.kind]?.textable ? customTextPanel(custom[t2.kind]) : null);
+          if (!panel) throw new Error(`textable kind ${t2.kind} has no text panel`);
+          const sign = t2.kind === "sign" || !builtin;
+          return {
+            id: t2.id,
+            text: t2.text,
+            x: t2.x,
+            z: t2.z,
+            yaw: t2.yaw,
+            panel: { x: panel.x, y: panel.y, z: panel.z, w: panel.w, h: panel.h, tw: panel.tw, th: panel.th },
+            bg: sign ? look.signBg : panel.bg,
+            fg: sign ? look.signFg : panel.fg,
+            logo: sign && !!look.logoOnSigns && !!logo
+          };
+        }),
+        // scene.js syncLogo: the office logo's image (office-relative URL), shown on every screen kind
+        logo: logo ? { id: logo.id, url: logo.url } : null,
         chat: state.chat.slice(-40).map((m) => ({ from: nameOf(m.from), to: m.to ? nameOf(m.to) : null, text: m.text, ts: m.ts }))
       });
     }
