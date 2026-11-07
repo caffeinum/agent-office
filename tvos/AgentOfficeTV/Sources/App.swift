@@ -143,10 +143,22 @@ final class OfficeModel: ObservableObject {
         }.resume()
     }
 
+    /// Bumped on every (re)connect: frames the old socket had already queued are dropped, so after a bridge swap the
+    /// fresh bridge only ever sees the new socket's snapshot first ("frame chat arrived before the snapshot" otherwise).
+    private var connectionGen = 0
+
     private func connect() {
         guard let link else { return }
         connection?.stop()
-        connection = Connection(link: link, onFrame: { [weak self] in self?.receive($0) }, onState: { [weak self] in self?.status = $0 })
+        connectionGen += 1
+        let gen = connectionGen
+        connection = Connection(link: link, onFrame: { [weak self] text in
+            guard let self, gen == self.connectionGen else { return }
+            self.receive(text)
+        }, onState: { [weak self] st in
+            guard let self, gen == self.connectionGen else { return }
+            self.status = st
+        })
         connection?.start()
     }
 
