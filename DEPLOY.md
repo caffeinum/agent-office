@@ -1,6 +1,6 @@
 # Deploying agent office to Cloudflare
 
-This runbook is for the operator's Cloudflare agent. Nothing in this repo has been deployed yet. Every step below runs from the repo root.
+This runbook is for the operator's Cloudflare agent. The office is live at office.bykhun.com (the `agent-office` Worker); pushing `main` deploys it through Cloudflare Workers Builds, so the manual steps below are for a fresh account or a sibling project. Every step runs from the repo root.
 
 ## What gets deployed
 
@@ -11,8 +11,8 @@ From `wrangler.jsonc`:
 | Worker name | `agent-office` (→ `https://agent-office.<account-subdomain>.workers.dev`) |
 | entry | `src/worker.ts` |
 | static assets | `./public`, bound as `ASSETS`, SPA fallback, `run_worker_first` on every path except the static city data (`/city/*/chunks/*`, `manifest.json`, `companies.json`, `LICENSE.txt`), which the asset server answers directly with headers from `public/_headers` |
-| Durable Object binding | `OFFICE` → class `Office` |
-| DO migration | tag `v1`, `new_sqlite_classes: ["Office"]` (SQLite-backed DO; available on the Workers Free and Paid plans) |
+| Durable Object bindings | `OFFICE` → `Office` (one per office), `REGISTRY` → `Registry`, `AUTH` → `Auth`, `CITY` → `City` |
+| DO migrations | `v1`–`v4`, each `new_sqlite_classes` (SQLite-backed DOs; available on the Workers Free and Paid plans) |
 | compatibility | `compatibility_date: 2026-08-15`, `nodejs_compat` |
 | secret | `ADMIN_KEY` (required; office creation answers 503 without it) |
 | observability | Workers Logs on |
