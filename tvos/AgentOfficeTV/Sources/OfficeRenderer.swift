@@ -39,10 +39,12 @@ final class OfficeRenderer: NSObject {
     // The horizon never tilts: the polar angle stays at the web's home view; only spin and zoom move the camera.
     private static let homeAzimuth: Float = .pi / 4.6
     private let polar: Float = 0.93
-    private var azimuth: Float = OfficeRenderer.homeAzimuth
+    /// AO_AZIMUTH seeds the angle (e.g. 33000, what days of auto-tour used to reach) to check spins stay smooth.
+    private static let seedAzimuth = Float(ProcessInfo.processInfo.environment["AO_AZIMUTH"] ?? "") ?? homeAzimuth
+    private var azimuth: Float = OfficeRenderer.seedAzimuth
     private var zoom: Float = 1
     // input moves the goals; the camera eases toward them, so a jittery finger doesn't shake the picture
-    private var azimuthGoal: Float = OfficeRenderer.homeAzimuth
+    private var azimuthGoal: Float = OfficeRenderer.seedAzimuth
     private var zoomGoal: Float = 1
     private var liftWork: DispatchWorkItem?
     private var camTarget = SCNVector3Zero
@@ -276,6 +278,9 @@ final class OfficeRenderer: NSObject {
     /// The agent that just said something or just started working (for the tour), recording what each one is doing now.
     private func newsworthy(_ s: OfficeScene) -> String? {
         var pick: String?
+        let present = Set(s.agents.map(\.id))
+        lastSaid = lastSaid.filter { present.contains($0.key) }
+        lastStatus = lastStatus.filter { present.contains($0.key) }
         for a in s.agents {
             if let say = a.says, lastSaid[a.id] != say { pick = a.id }
             else if a.status == "working", let was = lastStatus[a.id], was != "working", pick == nil { pick = a.id }
@@ -731,7 +736,8 @@ final class OfficeRenderer: NSObject {
             if now - perf.since > 2 {
                 let ms = { (v: Double) in String(format: "%.1f", v / Double(self.perf.n) * 1000) }
                 let frames = framesDrawn.withLock { n in defer { n = 0 }; return n }
-                print("AO_STATS frames/s \(Int(Double(frames) / (now - perf.since))) ticks/s \(Int(Double(perf.n) / (now - perf.since))) step \(ms(perf.step))ms limbs \(ms(perf.limbs))ms cam \(ms(perf.cam))ms pills \(ms(perf.pills))ms")
+                let stuck = stuckFrames.withLock { n in defer { n = 0 }; return n }
+                print("AO_STATS frames/s \(Int(Double(frames) / (now - perf.since))) ticks/s \(Int(Double(perf.n) / (now - perf.since))) stuck \(stuck) azimuth \(azimuthGoal) step \(ms(perf.step))ms limbs \(ms(perf.limbs))ms cam \(ms(perf.cam))ms pills \(ms(perf.pills))ms")
                 perf = (now, 0, 0, 0, 0, 0)
             }
         }
@@ -740,6 +746,8 @@ final class OfficeRenderer: NSObject {
     private static let stats = ProcessInfo.processInfo.environment["AO_STATS"] != nil
     /// Frames SceneKit drew (render thread), for AO_STATS.
     private let framesDrawn = OSAllocatedUnfairLock(initialState: 0)
+    /// Drawn frames whose camera angle didn't move while the goal was elsewhere, for AO_STATS (should stay 0).
+    private let stuckFrames = OSAllocatedUnfairLock(initialState: 0)
     private var perf: (since: Double, n: Int, step: Double, limbs: Double, cam: Double, pills: Double) = (0, 0, 0, 0, 0, 0)
 
     // MARK: camera
@@ -779,7 +787,11 @@ final class OfficeRenderer: NSObject {
         guard let input = camInput.withLock({ $0 }) else { return }
         // short smoothing (~50 ms) on finger input; ▲ home and agent switches use the slower `k` below
         let ease = min(1, dt * 20)
-        azimuth += (input.azimuth - azimuth) * ease
+        // the goal and the camera stay within ±π (a Float that grew over days of touring could no longer
+        // hold the tour's tiny per-frame step, so the spin stuttered and then froze); ease the shortest way round
+        let was = azimuth
+        azimuth = wrapAngle(azimuth + wrapAngle(input.azimuth - azimuth) * ease)
+        if Self.stats, dt > 0, azimuth == was, abs(wrapAngle(input.azimuth - azimuth)) > 1e-4 { stuckFrames.withLock { $0 += 1 } }
         zoom += (input.zoom - zoom) * ease
         let k = min(1, dt * 4)
         // a slide follows the finger within ~100 ms, smoothing the pad's uneven steps
@@ -924,9 +936,7 @@ final class OfficeRenderer: NSObject {
         pan = .zero
         zoomGoal = 1
         // the shortest way back round to the home angle
-        var d = (Self.homeAzimuth - azimuthGoal).truncatingRemainder(dividingBy: 2 * .pi)
-        if d > .pi { d -= 2 * .pi } else if d < -.pi { d += 2 * .pi }
-        azimuthGoal += d
+        azimuthGoal = Self.homeAzimuth
     }
 
     /// The clean view (UI hidden): labels show only speech bubbles.
@@ -943,7 +953,7 @@ final class OfficeRenderer: NSObject {
                 _ = last.map(newsworthy)
         }
         guard touring else { return }
-        azimuthGoal += dt * 0.06
+        azimuthGoal = wrapAngle(azimuthGoal + dt * 0.06)
         if follow != nil, now > tourUntil { follow = nil }
     }
 
@@ -1020,7 +1030,7 @@ final class OfficeRenderer: NSObject {
             let d = now - t
             self.gesture?.travel += simd_length(d)
             if self.gesture?.panning == true { self.panBy(d); return }
-            self.azimuthGoal -= d.x * 1.1
+            self.azimuthGoal = wrapAngle(self.azimuthGoal - d.x * 1.1)
             self.zoomGoal = min(2.2, max(0.25, self.zoomGoal * exp(-d.y * 0.55)))
         }
     }
@@ -1109,3 +1119,6 @@ extension OfficeRenderer: SCNSceneRendererDelegate {
         framesDrawn.withLock { $0 += 1 }
     }
 }
+
+/// The same angle within [-π, π].
+func wrapAngle(_ a: Float) -> Float { remainderf(a, 2 * .pi) }
