@@ -33,6 +33,7 @@ function takeKey(office) {
     hash.delete("k");
     const search = new URLSearchParams(location.search);
     search.delete("k");
+    search.delete("i");
     const q = search.toString(), h = hash.toString();
     history.replaceState(null, "", `${location.pathname}${q ? `?${q}` : ""}${h ? `#${h}` : ""}`);
     return given;

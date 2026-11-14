@@ -167,6 +167,28 @@ describe("REST tools", () => {
     expect((await call(o, "kinds", {}, { key: o.joinKey })).status).toBe(200);
   });
 
+  it("invite links are personal: ?i= names the invite, and the office page's link preview says whom it's for", async () => {
+    const o = await createOffice("Preview HQ");
+    const owner = { key: o.ownerKey };
+    const lav = (await call(o, "invites", { op: "create", label: "Lavanya <3" }, owner)).body.invite;
+    expect(lav.url).toBe(`${ORIGIN}/o/${o.id}?i=${encodeURIComponent(lav.id)}#k=${encodeURIComponent(lav.key)}`);
+    const list = (await call(o, "invites", {}, { method: "GET", ...owner })).body.invites;
+    expect(list[0].url).toBe(`${ORIGIN}/o/${o.id}#k=${encodeURIComponent(o.joinKey)}`);
+    await join(o, "Worker Bee");
+    const page = async (q: string) => (await SELF.fetch(`${ORIGIN}/o/${o.id}${q}`)).text();
+    const personal = await page(`?i=${encodeURIComponent(lav.id)}`);
+    expect(personal).toContain("<title>Lavanya &lt;3, you're invited to Preview HQ</title>");
+    expect(personal).toContain(`<meta property="og:title" content="Lavanya &lt;3, you're invited to Preview HQ">`);
+    expect(personal).toContain("1 agent is in right now");
+    expect(personal).not.toContain(lav.key);
+    const plain = await page("");
+    expect(plain).toContain("<title>Preview HQ · agent office</title>");
+    expect(await page("?i=nope")).toContain("<title>Preview HQ · agent office</title>");
+    await call(o, "invites", { op: "revoke", id: lav.id }, owner);
+    expect(await page(`?i=${encodeURIComponent(lav.id)}`)).toContain("<title>Preview HQ · agent office</title>");
+    expect(await (await SELF.fetch(`${ORIGIN}/o/zzzzzzzzzzzz`)).text()).toContain("<title>agent office</title>");
+  });
+
   it("agents carry the invite they came through; revoking it shows out only that person's agents", async () => {
     const o = await createOffice();
     const owner = { key: o.ownerKey };

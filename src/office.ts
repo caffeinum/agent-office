@@ -477,6 +477,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       await this.ensureRegistered();
       if (url.pathname === "/internal/admin/info") return json(200, this.adminInfo());
       if (url.pathname === "/internal/admin/city") return json(200, await this.requestCityLink(((await readJson(req)) ?? {}) as Record<string, unknown>, "admin"));
+      if (url.pathname === "/internal/preview") return json(200, this.linkPreview(url.searchParams.get("i"), url.origin));
       if (url.pathname === "/internal/admin/kick") return json(200, await this.kick((((await readJson(req)) ?? {}) as Record<string, unknown>).id, "human:admin"));
       const asset = /^\/o\/[^/]+\/assets\/([^/]+)$/.exec(url.pathname);
       if (asset) return this.serveAsset(req, asset[1]!);
@@ -1684,7 +1685,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
     const joinKey = pick ? kept[pick.id]! : null;
     const viewKey = (await this.keptViewKeys()).at(-1) ?? null;
     return {
-      office: meta.id, name: meta.name, mcpUrl: `${origin}/mcp`, designMcpUrl: `${origin}/mcp?mode=design`, joinKey, joinUrl: this.keyLink(joinKey, origin), viewUrl: this.keyLink(viewKey, origin),
+      office: meta.id, name: meta.name, mcpUrl: `${origin}/mcp`, designMcpUrl: `${origin}/mcp?mode=design`, joinKey, joinUrl: this.keyLink(joinKey, origin, pick?.id ?? match.invite?.id), viewUrl: this.keyLink(viewKey, origin),
       as: match.invite?.label ?? null,
       /** The invite whose join key an agent signs in with here (for the owner: the one joinKey above). */
       inviteId: (owner ? pick?.id : match.invite?.id) ?? null,
@@ -1692,8 +1693,26 @@ export class Office extends DurableObject<Env> implements ToolHost {
     };
   }
 
-  private keyLink(key: string | null, origin: string): string | null {
-    return key ? `${origin}/o/${this.mustMeta().id}#k=${encodeURIComponent(key)}` : null;
+  /** An invite's link carries its id in ?i= (not a secret: the key stays in the #k= fragment), so a chat app's link
+   *  preview, which never sees the fragment, can still be personal (see linkPreview). */
+  private keyLink(key: string | null, origin: string, inviteId?: string): string | null {
+    if (!key) return null;
+    const personal = inviteId && inviteId !== DEFAULT_INVITE ? `?i=${encodeURIComponent(inviteId)}` : "";
+    return `${origin}/o/${this.mustMeta().id}${personal}#k=${encodeURIComponent(key)}`;
+  }
+
+  /** What a link preview (iMessage, Slack, …) of /o/:office shows: the office, and whom the invite in ?i= is for. Keyless:
+   *  it reveals only the office's name, logo and how many agents are in, to whoever already holds its unguessable id. */
+  linkPreview(inviteId: string | null, origin: string) {
+    const meta = this.mustMeta();
+    const invite = inviteId && inviteId !== DEFAULT_INVITE ? meta.keys.join.find((i) => i.id === inviteId) : undefined;
+    const logo = this.theme.logo ? this.assets.get(this.theme.logo) : undefined;
+    return {
+      name: meta.name,
+      for: invite?.label ?? null,
+      agents: [...this.agents.values()].filter((a) => a.status !== "away").length,
+      image: logo ? `${origin}${logo.url}` : null,
+    };
   }
 
   private async keptJoinKeys(): Promise<Record<string, string>> {
@@ -1707,7 +1726,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
   private async inviteList(origin: string) {
     const kept = await this.keptJoinKeys();
     return this.mustMeta().keys.join.map((i) => ({
-      id: i.id, label: i.label, createdAt: i.createdAt, key: kept[i.id] ?? null, url: this.keyLink(kept[i.id] ?? null, origin),
+      id: i.id, label: i.label, createdAt: i.createdAt, key: kept[i.id] ?? null, url: this.keyLink(kept[i.id] ?? null, origin, i.id),
       agents: [...this.agents.values()].filter((a) => a.inviteId === i.id).length,
       city: this.cityInvites.has(i.id),
     }));
@@ -1728,7 +1747,7 @@ export class Office extends DurableObject<Env> implements ToolHost {
       const invite: Invite = { id: `inv-${shortId()}`, hash: await sha256hex(key), label, createdAt: Date.now() };
       this.meta = { ...meta, keys: { ...meta.keys, join: [...meta.keys.join, invite] } };
       await this.ctx.storage.put({ meta: this.meta, [JOIN_KEYS_SLOT]: { ...(await this.keptJoinKeys()), [invite.id]: key } });
-      return { ok: true, invite: { id: invite.id, label, createdAt: invite.createdAt, key, url: this.keyLink(key, origin), agents: 0, city: false } };
+      return { ok: true, invite: { id: invite.id, label, createdAt: invite.createdAt, key, url: this.keyLink(key, origin, invite.id), agents: 0, city: false } };
     }
     if (body.op === "revoke") {
       const invite = meta.keys.join.find((i) => i.id === body.id);

@@ -37,6 +37,37 @@ function keyInPath(req: Request, raw: string): { office: string; req: Request } 
   return { office, req: new Request(url, { method: req.method, headers, body: req.body, redirect: req.redirect }) };
 }
 
+interface LinkPreview { name: string; for: string | null; agents: number; image: string | null }
+
+/** The office page with its link preview filled in (title, description, Open Graph tags), personal when ?i= names an invite.
+ *  An office that doesn't exist (or fails to answer) keeps the generic page. */
+async function withLinkPreview(page: Response, office: DurableObjectStub, url: URL): Promise<Response> {
+  const ask = new URL("/internal/preview", url.origin);
+  const invite = url.searchParams.get("i");
+  if (invite) ask.searchParams.set("i", invite);
+  const res = await office.fetch(new Request(ask));
+  if (!res.ok) return new Response(page.body, page);
+  const p = (await res.json()) as LinkPreview;
+  const title = p.for ? `${p.for}, you're invited to ${p.name}` : `${p.name} · agent office`;
+  const inside = p.agents === 1 ? "1 agent is in" : `${p.agents} agents are in`;
+  const description = p.for
+    ? `Your own link to the ${p.name} office: watch its agents work in 3D, chat with them and bring your own agent. ${inside} right now.`
+    : `A live 3D office where AI agents work. ${inside} right now.`;
+  const tags: [string, string, string][] = [
+    ["property", "og:type", "website"], ["property", "og:site_name", "agent office"], ["property", "og:title", title],
+    ["property", "og:description", description], ["property", "og:url", url.href],
+    ["name", "twitter:card", "summary"], ["name", "twitter:title", title], ["name", "twitter:description", description],
+  ];
+  if (p.image) tags.push(["property", "og:image", p.image], ["name", "twitter:image", p.image]);
+  const meta = tags.map(([attr, key, value]) => `<meta ${attr}="${key}" content="${escapeAttr(value)}">`).join("\n  ");
+  return new HTMLRewriter()
+    .on("title", { element: (e) => { e.setInnerContent(title); } })
+    .on('meta[name="description"]', { element: (e) => { e.setAttribute("content", description); e.after(meta, { html: true }); } })
+    .transform(new Response(page.body, page));
+}
+
+const escapeAttr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 async function route(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
@@ -95,7 +126,10 @@ async function route(req: Request, env: Env): Promise<Response> {
     return officeStub(env, office).fetch(req);
   }
   const page = await env.ASSETS.fetch(req);
-  const out = new Response(page.body, page);
+  const officePage = /^\/o\/([^/]+)\/?$/.exec(path);
+  const out = officePage && OFFICE_ID_RE.test(officePage[1]!) && req.method === "GET" && page.ok
+    ? await withLinkPreview(page, officeStub(env, officePage[1]!), url)
+    : new Response(page.body, page);
   out.headers.set("referrer-policy", "no-referrer");
   out.headers.set("x-content-type-options", "nosniff");
   return out;
