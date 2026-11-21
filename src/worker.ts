@@ -40,12 +40,18 @@ function keyInPath(req: Request, raw: string): { office: string; req: Request } 
 interface LinkPreview { name: string; for: string | null; agents: number; image: string | null }
 
 /** The office page with its link preview filled in (title, description, Open Graph tags), personal when ?i= names an invite.
- *  An office that doesn't exist (or fails to answer) keeps the generic page. */
+ *  An office that doesn't exist, errors or can't be reached keeps the generic page: the preview never takes the page down. */
 async function withLinkPreview(page: Response, office: DurableObjectStub, url: URL): Promise<Response> {
   const ask = new URL("/internal/preview", url.origin);
   const invite = url.searchParams.get("i");
   if (invite) ask.searchParams.set("i", invite);
-  const res = await office.fetch(new Request(ask));
+  let res: Response;
+  try {
+    res = await office.fetch(new Request(ask));
+  } catch (e) {
+    console.error("worker: link preview failed, serving the plain page", e);
+    return new Response(page.body, page);
+  }
   if (!res.ok) return new Response(page.body, page);
   const p = (await res.json()) as LinkPreview;
   const title = p.for ? `${p.for}, you're invited to ${p.name}` : `${p.name} · agent office`;
